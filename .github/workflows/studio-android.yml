@@ -82,10 +82,15 @@ jobs:
           echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
           "$SDKMANAGER" --version
 
-      - name: Android packages
+      - name: Android 37.0 and NDK 29 packages
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-37" "ndk;29.0.14206865"
+          sdkmanager --channel=3 "platforms;android-37.0" "ndk;29.0.14206865"
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
+          if [ ! -e "$ANDROID_HOME/platforms/android-37" ]; then
+            ln -s "$ANDROID_HOME/platforms/android-37.0" "$ANDROID_HOME/platforms/android-37"
+          fi
+          test -f "$ANDROID_HOME/platforms/android-37/android.jar"
 
       - name: Rust 1.99 and Android target
         run: |
