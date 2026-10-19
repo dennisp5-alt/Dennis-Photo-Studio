@@ -1,0 +1,57 @@
+name: Publish editable Dennis Photo Studio v0.1 source
+
+on:
+  push:
+    branches: [studio-v0.1-experiment]
+    paths: [.github/workflows/import-source.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pinned LightCraft revision
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/artcraft-android/lightcraft-android.git engine
+          git -C engine fetch --no-tags --depth=1 origin c6fac28eb7636cbb06ab078395e3d7e519c2efcf
+          git -C engine checkout --detach FETCH_HEAD
+          cp tools/apply_studio_changes.py engine/apply_studio_changes.py
+          cd engine
+          python3 apply_studio_changes.py
+          test -s LICENSE-MIT
+          test -s LICENSE-APACHE
+
+      - name: Publish full editable adapted source in separate branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd engine
+          cat > DENNIS_STUDIO_UPSTREAM.md <<'EOF'
+          # Dennis Photo Studio v0.1 — Upstream attribution
+          Experimental Android photo editor built from
+          https://github.com/artcraft-android/lightcraft-android
+          at revision c6fac28eb7636cbb06ab078395e3d7e519c2efcf.
+
+          This branch is a source snapshot, not a GitHub network fork.
+          The original upstream licence files, notices, Rust image pipeline,
+          natural White Balance and presets are preserved.
+          Custom adaptations: independent application ID, own colour palette,
+          compact save alerts, streamlined toolbar and Auto Amount (0–100%).
+
+          IMPORTANT: app is under development. Upstream Android notes state
+          HEIC decoding is not yet implemented in the native Rust engine.
+          No AI plugin is integrated in this release.
+          EOF
+          rm -rf .git
+          git init -b studio-source-v0.1
+          git config user.name "Dennis Studio Builder"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Import and adapt LightCraft source for Dennis Photo Studio v0.1"
+          git remote add studio "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          git push --force studio HEAD:refs/heads/studio-source-v0.1
