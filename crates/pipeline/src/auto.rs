@@ -79,11 +79,15 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
     let mut colour_count = 0usize;
     let mut shadow_count = 0usize;
     let mut bright_count = 0usize;
+    let mut recoverable_midtone_count = 0usize;
     for rgb in &img.data {
         let y = luminance_2020(*rgb).max(1e-6);
         ev.push((y / 0.18).log2());
         if y < 0.028 { shadow_count += 1; }
         if y > 0.70 { bright_count += 1; }
+        // Wood, buildings and ground exposed by flame or streetlights:
+        // above the noise floor, but far below the bright subject.
+        if (0.035..0.28).contains(&y) { recoverable_midtone_count += 1; }
         if (0.025..0.80).contains(&y) {
             let maxc = rgb[0].max(rgb[1]).max(rgb[2]).max(1e-6);
             let minc = rgb[0].min(rgb[1]).min(rgb[2]);
@@ -98,11 +102,13 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
     let p995 = percentile(&ev, 0.995) as f64;
     let shadow_fraction = shadow_count as f64 / ev.len() as f64;
     let bright_fraction = bright_count as f64 / ev.len() as f64;
+    let recoverable_fraction = recoverable_midtone_count as f64 / ev.len() as f64;
 
-    // The light sources belong to the scene, not to "bad exposure".
-    // Skip tonal remapping instead of dimming the point of the photograph.
-    // Includes flames, lamps and tiny bright subjects in predominantly
-    // dark scenes. This is a conservative heuristic, not scene recognition.
+    // Lightroom separates Highlights/Shadows/Whites/Blacks as independent
+    // tonal controls. For a dark photo with luminous highlights, preserve
+    // emission and lift ONLY recoverable low-midtones, never global exposure.
+    // Adobe's proprietary Auto model was NOT copied or reverse engineered.
+    // This is a conservative, independently designed histogram estimator.
     let intentional_light = shadow_fraction > 0.50
         && median < -2.3
         && p995 > 1.6
@@ -110,9 +116,18 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
         && bright_fraction > 0.002
         && bright_fraction < 0.35;
     if intentional_light {
+        // V0.4 returned all zero: safe but visibly unhelpful on fire.
+        // A measurable small boost to recoverable wood/ground is appropriate
+        // ONLY if enough above-black structure exists. Prevent black skies
+        // and empty night scenes from turning gray or revealing sensor noise.
+        let recoverable = recoverable_fraction > 0.012;
+        let shadow_lift = if recoverable {
+            (9.0 + 65.0 * recoverable_fraction).clamp(9.0, 22.0).round()
+        } else { 0.0 };
         return AutoTone {
             exposure: 0.0, contrast: 0.0, highlights: 0.0,
-            shadows: 0.0, whites: 0.0, blacks: 0.0,
+            shadows: shadow_lift, whites: 0.0,
+            blacks: if recoverable { -4.0 } else { 0.0 },
             vibrance: 0.0, saturation: 0.0,
         };
     }
@@ -659,6 +674,8 @@ mod studio_v04_light_and_wb_tests {
         });
         let a=smart_auto_tone(&img,&SourceInfo::default(),&DevelopSettings::default());
         assert!(a.exposure.abs()<0.05,"fire exposure {a:?}");
+        assert!(a.shadows>=9.0,"must lift recoverable wood rather than do nothing {a:?}");
+        assert!(a.blacks>=-5.0,"deep black should remain black {a:?}");
         assert_eq!(a.highlights,0.0,"fire highlight protection {a:?}");
         assert_eq!(a.whites,0.0,"fire must stay luminous {a:?}");
         assert_eq!(a.saturation,0.0,"fire colour unchanged {a:?}");
@@ -689,5 +706,16 @@ mod studio_v04_light_and_wb_tests {
         });
         let r=auto_wb_report(&img,&info);
         assert!(r.camera_balance_retained,"coloured flower got WB shift: {r:?}");
+    }
+    #[test]
+    fn empty_night_scene_is_not_brightened() {
+        let img=Rgb32f::from_fn(192,192,|x,y|{
+            if (x>40&&x<110)&&(y>40&&y<80) { [1.1,0.8,0.4] }
+            else { [0.003,0.004,0.003] }
+        });
+        let a=smart_auto_tone(&img,&SourceInfo::default(),&DevelopSettings::default());
+        assert_eq!(a.exposure,0.0);
+        assert_eq!(a.shadows,0.0,"no recoverable subject; prevent black noise lift");
+        assert_eq!(a.highlights,0.0);
     }
 }
