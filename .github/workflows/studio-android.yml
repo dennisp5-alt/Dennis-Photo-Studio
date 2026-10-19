@@ -74,11 +74,13 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Android SDK provided by GitHub runner
+      - name: Find Android SDK Manager on GitHub runner
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
-          command -v sdkmanager
-          sdkmanager --version
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -1)"
+          test -x "$SDKMANAGER"
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          "$SDKMANAGER" --version
 
       - name: Android packages
         run: |
