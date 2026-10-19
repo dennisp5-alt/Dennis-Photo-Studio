@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: dps-smart-v02
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   quality-and-build:
