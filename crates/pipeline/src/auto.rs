@@ -92,7 +92,7 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
     let already_balanced = median.abs() < 0.45;
     let highlight_headroom = (2.25 - p995).max(0.0);
     if old.exposure > 0.0 {
-        let mut cap = if high_contrast { 0.60 } else { 1.40 };
+        let mut cap: f64 = if high_contrast { 0.60 } else { 1.40 };
         if already_balanced { cap = cap.min(0.28); }
         if p995 > 1.7 { cap = cap.min(highlight_headroom); }
         old.exposure = old.exposure.min(cap).max(0.0);
