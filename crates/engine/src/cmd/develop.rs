@@ -305,30 +305,26 @@ pub fn specs() -> Vec<CommandSpec> {
                 Ok(json!({"mix": m}))
             }
         ),
-        cmd!("develop.auto", "Auto Settings", ["Photo"], Some("Shift+A"), "{amount?: 0..1, mode?: smart|classic}", has_active, |s, p| {
-            let id = active(s, "develop.auto")?;
-            let src = s.source_now(id, SourceLevel::Thumb).map_err(|e| bad("develop.auto", e))?;
-            let info = s.source_info(id);
-            let d = s.develop_of(id).unwrap_or_default();
-            let mode = str_param(p, "mode").unwrap_or("smart");
-            let a = if mode == "classic" {
-                lightcraft_pipeline::auto::auto_tone(&src, &info, &d)
-            } else {
-                lightcraft_pipeline::auto::smart_auto_tone(&src, &info, &d)
-            };
-            // At 100%, exactly original Auto. At 0%, no adjustment.
-            // Interpolate settings; do not distort white balance or merge
-            // images with different gamma/colour spaces.
-            let amount = f64_or(p, "amount", 1.0).clamp(0.0, 1.0);
-            edit(s, "develop.auto", "Auto", |d| {
-                d.light.exposure += (a.exposure-d.light.exposure)*amount;
-                d.light.contrast += (a.contrast-d.light.contrast)*amount;
-                d.light.highlights += (a.highlights-d.light.highlights)*amount;
-                d.light.shadows += (a.shadows-d.light.shadows)*amount;
-                d.light.whites += (a.whites-d.light.whites)*amount;
-                d.light.blacks += (a.blacks-d.light.blacks)*amount;
-                d.color.vibrance += (a.vibrance-d.color.vibrance)*amount;
-                d.color.saturation += (a.saturation-d.color.saturation)*amount;
+        // One-tap Smart Auto is the only user-facing tone Auto. No Classic
+        // mode or amount knob. The old algorithm remains available inside
+        // the pipeline for regression comparisons only.
+        cmd!("develop.auto", "Smart Auto", ["Photo"], Some("Shift+A"), "{}", has_active, |s, _p| {
+            let id=active(s,"develop.auto")?;
+            let src=s.source_now(id,SourceLevel::Thumb)
+                .map_err(|e|bad("develop.auto",e))?;
+            let info=s.source_info(id);
+            let d=s.develop_of(id).unwrap_or_default();
+            let a=lightcraft_pipeline::auto::smart_auto_tone(&src,&info,&d);
+            // Absolute assignments keep repeated taps idempotent.
+            edit(s,"develop.auto","Smart Auto",|d|{
+                d.light.exposure=a.exposure;
+                d.light.contrast=a.contrast;
+                d.light.highlights=a.highlights;
+                d.light.shadows=a.shadows;
+                d.light.whites=a.whites;
+                d.light.blacks=a.blacks;
+                d.color.vibrance=a.vibrance;
+                d.color.saturation=a.saturation;
                 Ok(())
             })?;
             Ok(serde_json::to_value(a).unwrap_or_default())
@@ -388,12 +384,12 @@ pub fn specs() -> Vec<CommandSpec> {
                 let (mut t, mut tint) = match mode {
                     WbMode::AsShot => (info.as_shot_temp, info.as_shot_tint),
                     WbMode::Auto => {
-                        let src = s.source_now(id, SourceLevel::Thumb).map_err(|e| bad("develop.wb", e))?;
-                        if str_param(p, "algorithm") == Some("classic") {
-                            lightcraft_pipeline::auto::auto_wb_classic(&src, &info)
-                        } else {
-                            lightcraft_pipeline::auto::auto_wb(&src, &info)
-                        }
+                        let src = s.source_now(id, SourceLevel::Thumb)
+                            .map_err(|e| bad("develop.wb", e))?;
+                        // Scene Auto WB is separate from manual/eyedropper WB.
+                        // Classic remains usable internally for explicit
+                        // neutral-point sampling but not through the UI.
+                        lightcraft_pipeline::auto::auto_wb(&src, &info)
                     }
                     // Custom picked from the list: the white balance in effect now, under its own name
                     WbMode::Custom => lightcraft_pipeline::local::effective_wb(&info, &s.develop_of(id).unwrap_or_default()),
