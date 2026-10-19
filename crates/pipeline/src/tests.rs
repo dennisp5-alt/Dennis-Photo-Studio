@@ -429,9 +429,14 @@ fn custom_white_balance_redevelops_in_camera_space() {
         assert_ne!(b, m);
         assert!((luma(apply(b, [1.0; 3])) - 1.0).abs() < 1e-4);
     }
-    // the white-balance picker / auto white balance invert the same model: the card names its white
-    let picked = crate::auto::auto_wb(&Rgb32f::filled(4, 4, card), &info);
+    // A *user-selected* neutral calibration point uses the camera-space
+    // estimator directly. Whole-scene Auto WB must reject a tiny 4x4 sample:
+    // there is no trustworthy spatial support for an automatic decision.
+    let card_patch=Rgb32f::filled(4, 4, card);
+    let picked = crate::auto::auto_wb_classic(&card_patch, &info);
     assert_eq!(picked, (3200.0, 10.0));
+    let ambiguous = crate::auto::auto_wb(&card_patch, &info);
+    assert_eq!(ambiguous, (info.as_shot_temp, info.as_shot_tint));
     // the as-shot white needs nothing
     s.wb.mode = WbMode::AsShot;
     assert!(wb_matrix_for(&info, &s).is_none());
