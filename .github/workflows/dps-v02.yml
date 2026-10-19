@@ -66,6 +66,11 @@ jobs:
           rustup toolchain install 1.99.0 --profile minimal --target aarch64-linux-android
           rustup default 1.99.0
           cargo +1.99.0 install cargo-ndk --version 4.1.2 --locked
+      - name: Cache native Rust build and dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          cache-on-failure: true
       - name: Validate Smart Auto and White Balance math
         run: |
           cargo +1.99.0 test -p lightcraft-pipeline --locked studio_auto_safety -- --nocapture
