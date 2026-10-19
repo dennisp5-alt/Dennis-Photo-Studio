@@ -143,7 +143,7 @@ private fun AutoAmountDialog(ed: EditorState, onDismiss: () -> Unit, onApply: (F
                 Text("Choose how much of the suggested correction to apply.",
                     color=Lc.panelTextSoft,fontSize=13.sp)
                 Spacer(Modifier.height(12.dp))
-                Text("Amount: \${value.roundToInt()}%",color=Lc.text,fontSize=14.sp)
+                Text("Amount: ${value.roundToInt()}%",color=Lc.text,fontSize=14.sp)
                 Slider(value=value,onValueChange={value=it},valueRange=0f..100f)
                 Text("100% matches original LightCraft Auto. White Balance is unchanged.",
                     color=Lc.panelTextDim,fontSize=12.sp)
@@ -171,15 +171,15 @@ edit(UI/"AppViewModel.kt",[
         val safe=amount.coerceIn(0f,100f)
         ed.autoAmount=safe
         ed.autoAmountDialog=false
-        edit(after={say("Auto applied at \${safe.roundToInt()}%")}) {
+        edit(after={say("Auto applied at ${safe.roundToInt()}%")}) {
             it.execute("develop.auto",
                 JSONObject().put("amount",safe.toDouble()/100.0).toString())
         }
     }
 
     /** Crop › Geometry's switch: crop the corners an Upright or transform leaves blank (one step Cancel takes back). */'''),
-    ('"Saved \${file.fileName} (\${file.width}×\${file.height}) to Pictures/LightCraft"',
-     '"Photo saved • \${file.width}×\${file.height}"')
+    ('"Saved ${file.fileName} (${file.width}×${file.height}) to Pictures/LightCraft"',
+     '"Photo saved • ${file.width}×${file.height}"')
 ])
 
 edit(ROOT/"crates/engine/src/cmd/develop.rs",[
