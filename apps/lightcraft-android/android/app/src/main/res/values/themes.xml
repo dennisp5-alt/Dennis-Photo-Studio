@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- the photo canvas (black), so nothing flashes before the first frame -->
+    <color name="window_background">#FF000000</color>
+    <!-- LightCraft amber, the app icon's field (assets/app-icon/README.md) -->
+    <color name="ic_launcher_background">#FFF2A516</color>
+
+    <style name="Theme.LightCraft" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

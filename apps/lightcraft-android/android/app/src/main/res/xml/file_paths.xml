@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Files of LightCraft's that another app may reach through its FileProvider: a photo the phone's
+     camera app writes for it (then imported and removed), and a photo being shared -->
+<paths>
+    <cache-path name="camera" path="camera/" />
+    <cache-path name="share" path="share/" />
+</paths>

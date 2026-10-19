@@ -1,0 +1,28 @@
+An open-source, reimplementation of Adobe Lightroom in Rust while using Kotlin as the UI framework.
+
+LightCraft is a photo editor and raw developer for Android, built on the LightCraft engine. It follows the layout and the tools of Lightroom mobile, and everything stays on your phone: no account, no cloud, no internet access.
+
+Edit
+* Light: exposure, contrast, highlights, shadows, whites, blacks, and a point or parametric tone curve (also drawn right on the photo)
+* Color: white balance with an eyedropper, temperature, tint, vibrance, saturation, an 8-band colour mixer and colour grading wheels
+* Effects, Detail and Optics: texture, clarity, dehaze, vignette, grain, sharpening, noise reduction, lens corrections
+* Profiles and presets, with an amount; copy and paste settings between photos
+
+Masking
+* Brush, linear and radial gradients, colour range and luminance range (picked from a point or an area)
+* Add to and subtract from masks; each part has its own menu (hide, rename, duplicate, convert, delete)
+
+Retouch and geometry
+* Remove, heal and clone spots
+* Crop with ratios and social formats, straighten, Upright, rotate and flip, manual transforms
+
+Library
+* Albums, filters, sorting, search, select mode, grids and a slideshow
+* Import from the photo picker, files (raw formats included), the camera or Share from other apps
+
+Save and share
+* JPG, TIF, AVIF, DNG for raws, or the original; full or custom size, quality, sharpening, colour space, metadata, watermark (text or graphic) and border
+
+Works upright and sideways. LightCraft is in beta.
+
+LightCraft is not affiliated with or endorsed by Adobe. Lightroom is a trademark of Adobe Inc.

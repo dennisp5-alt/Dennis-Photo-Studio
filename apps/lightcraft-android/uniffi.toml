@@ -1,0 +1,5 @@
+# UniFFI bindings of the `lightcraft_android` library.
+
+[bindings.kotlin]
+package_name = "ai.storyteller.lightcraft.core"
+cdylib_name = "lightcraft_android"

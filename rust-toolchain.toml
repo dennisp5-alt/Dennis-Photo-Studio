@@ -1,0 +1,5 @@
+# The Rust release every build uses (CI, F-Droid's build server, a contributor's machine): the same
+# compiler is what makes the Android library byte-identical wherever it's built (reproducible builds).
+[toolchain]
+channel = "1.99.0"
+targets = ["aarch64-linux-android", "armv7-linux-androideabi", "x86_64-linux-android"]

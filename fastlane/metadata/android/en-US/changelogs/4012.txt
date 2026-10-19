@@ -1,0 +1,6 @@
+* Brush masks: feather now softens past the brush edge, with Lightroom's default feather and flow
+* Faster preset previews, especially on tablets
+* Rotating or flipping in Crop no longer flashes the old picture in the new frame
+* Crop's Rotate button is no longer hidden under the panel on wide photos
+* Swiping to the next photo is off in Presets, Profiles, Masking, Remove and Crop
+* Two fingers move and zoom the photo in Masking and Remove

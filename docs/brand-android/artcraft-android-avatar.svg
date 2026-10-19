@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="0 0 500 500">
+  <title>artcraft-android</title>
+  <defs>
+    <linearGradient id="bg" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="500" y2="500">
+      <stop offset="0" stop-color="#FFD15C"/>
+      <stop offset="0.55" stop-color="#F7A42A"/>
+      <stop offset="1" stop-color="#E5711A"/>
+    </linearGradient>
+    <radialGradient id="glow" gradientUnits="userSpaceOnUse" cx="150" cy="120" r="360">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <mask id="blades" maskUnits="userSpaceOnUse" x="0" y="0" width="500" height="500">
+      <circle cx="222.0" cy="222.0" r="150.0" fill="#fff"/>
+      <polygon points="234.47,163.31 279.06,203.46 266.59,262.15 209.53,280.69 164.94,240.54 177.41,181.85" fill="#000"/>
+      <g stroke="#000" stroke-width="11.0" stroke-linecap="butt">
+      <line x1="277.58" y1="202.12" x2="364.50" y2="280.39"/>
+      <line x1="267.00" y1="260.19" x2="242.69" y2="374.60"/>
+      <line x1="211.43" y1="280.07" x2="100.18" y2="316.22"/>
+      <line x1="166.42" y1="241.88" x2="79.50" y2="163.61"/>
+      <line x1="177.00" y1="183.81" x2="201.31" y2="69.40"/>
+      <line x1="232.57" y1="163.93" x2="343.82" y2="127.78"/>
+      </g>
+    </mask>
+  </defs>
+
+  <!-- Base mark: original rounded-square tile with a six-blade aperture -->
+  <rect x="0" y="0" width="500" height="500" rx="104" fill="url(#bg)"/>
+  <rect x="0" y="0" width="500" height="500" rx="104" fill="url(#glow)"/>
+  <circle cx="222.0" cy="222.0" r="176.0" fill="none" stroke="#FFF7E8" stroke-width="12"/>
+  <rect x="0" y="0" width="500" height="500" fill="#FFF7E8" mask="url(#blades)"/>
+
+  <!-- Badge: Material Icons "android" glyph (Apache-2.0, Google LLC) -->
+  <circle cx="382.0" cy="382.0" r="112.0" fill="url(#bg)"/>
+  <circle cx="382.0" cy="382.0" r="100.0" fill="#14211A"/>
+  <path transform="translate(313.60 315.02) scale(5.7)" fill="#3DDC84" d="M17.6,9.48l1.84,-3.18c0.16,-0.31 0.04,-0.69 -0.26,-0.85c-0.29,-0.15 -0.65,-0.06 -0.83,0.22l-1.88,3.24c-2.86,-1.21 -6.08,-1.21 -8.94,0L5.65,5.67c-0.19,-0.29 -0.58,-0.38 -0.87,-0.2C4.5,5.65 4.41,6.01 4.56,6.3L6.4,9.48C3.3,11.25 1.28,14.44 1,18h22C22.72,14.44 20.7,11.25 17.6,9.48zM7,15.25c-0.69,0 -1.25,-0.56 -1.25,-1.25c0,-0.69 0.56,-1.25 1.25,-1.25S8.25,13.31 8.25,14C8.25,14.69 7.69,15.25 7,15.25zM17,15.25c-0.69,0 -1.25,-0.56 -1.25,-1.25c0,-0.69 0.56,-1.25 1.25,-1.25s1.25,0.56 1.25,1.25C18.25,14.69 17.69,15.25 17,15.25z"/>
+</svg>

@@ -1,0 +1,4 @@
+First release on F-Droid.
+* Masking: each part has its own menu, a part toolbar, and colour and luminance range masks that select like Lightroom's
+* A 32-bit ARM build for older phones
+* Reproducible builds: the APK F-Droid builds matches the one on GitHub

@@ -1,0 +1,3 @@
+* Zooming in no longer turns the photo black or crashes the app
+* Zoomed in, the photo is sharper (up to its own pixels on phones with 8 GB of memory or more)
+* A zoomed photo stops at its edges when dragged
