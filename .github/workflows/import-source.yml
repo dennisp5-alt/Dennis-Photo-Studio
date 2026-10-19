@@ -47,7 +47,10 @@ jobs:
           HEIC decoding is not yet implemented in the native Rust engine.
           No AI plugin is integrated in this release.
           EOF
-          rm -rf .git
+          # A GitHub Actions token cannot import third-party workflow
+          # definitions. Preserve application source and licences; our CI
+          # workflows remain separately stored on the build branch.
+          rm -rf .git .github/workflows
           git init -b studio-source-v0.1
           git config user.name "Dennis Studio Builder"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
