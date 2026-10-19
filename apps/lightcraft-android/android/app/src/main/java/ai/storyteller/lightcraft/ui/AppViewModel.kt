@@ -3387,7 +3387,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         it.execute("develop.merge", JSONObject().put("settings", JSONObject().put("spots", JSONArray())).put("label", "Reset Remove").toString())
     }
 
-    fun setWhiteBalance(mode: String) = edit { it.execute("develop.wb", JSONObject().put("mode", mode).toString()) }
+    fun setWhiteBalance(mode: String) = edit(
+        after = {
+            if (mode == "auto") say("Auto WB checks neutral references; firelight may correctly remain warm")
+        }
+    ) { it.execute("develop.wb", JSONObject().put("mode", mode).toString()) }
 
     /** White balance from a neutral spot of the photo, at [x], [y] across and down it (0–1). */
     fun pickWhiteBalance(x: Float, y: Float) {
