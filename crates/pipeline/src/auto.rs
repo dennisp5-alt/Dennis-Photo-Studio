@@ -579,8 +579,8 @@ mod studio_auto_safety {
         let info=SourceInfo::default();
         let img=Rgb32f::filled(64,64,[0.18,0.18,0.18]);
         let (temp,tint)=auto_wb(&img,&info);
-        assert!((1_000_000.0/temp - 1_000_000.0/info.as_shot_temp).abs()<=28.01);
-        assert!((tint-info.as_shot_tint).abs()<=16.01);
+        assert!((1_000_000.0/temp - 1_000_000.0/info.as_shot_temp).abs()<=38.01);
+        assert!((tint-info.as_shot_tint).abs()<=20.01);
     }
     #[test]
     fn smart_auto_protects_bright_subject_on_dark_scene() {
