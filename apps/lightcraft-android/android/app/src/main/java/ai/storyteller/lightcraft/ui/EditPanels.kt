@@ -580,6 +580,15 @@ private fun ColorPanel(vm: AppViewModel, ed: EditorState) {
             }
         }
         item(key = "wb") { WhiteBalanceRow(vm, ed, sideways) }
+        if (ed.state?.wbMode == "auto") {
+            item(key = "wb-explanation") {
+                Text(
+                    "Auto WB uses neutral references. Under firelight, sunsets or coloured illumination, preserving the original warmth can be the correct result. Select a neutral grey area with the eyedropper for measured correction.",
+                    color = Lc.panelTextSoft, fontFamily = Inter, fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 17.dp, vertical = 6.dp)
+                )
+            }
+        }
     }
 }
 
