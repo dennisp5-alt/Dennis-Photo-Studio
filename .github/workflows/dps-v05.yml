@@ -1,0 +1,150 @@
+name: Dennis Photo Studio v0.5 — Adaptive Auto / Lightroom Reference
+
+on:
+  push:
+    branches: [studio-v0.5-lightroom-reference]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dps-smart-v05
+  cancel-in-progress: true
+
+jobs:
+  quality-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 115
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit expected Smart Auto and WB source
+        run: |
+          test -s LICENSE-MIT
+          test -s LICENSE-APACHE
+          test -f apps/lightcraft-android/android/app/src/main/res/drawable/dennis_studio_lens.xml
+          python3 - <<'PY'
+          from pathlib import Path
+          a=Path('crates/pipeline/src/auto.rs').read_text()
+          assert 'pub fn smart_auto_tone' in a
+          assert 'pub fn auto_wb_classic' in a
+          assert 'pub fn auto_wb_report' in a
+          assert 'pub fn auto_wb(' in a
+          assert 'fn fire_glows_without_global_highlight_compression' in a
+          assert 'fn grey_neutral_warm_cast_can_trigger_auto_wb' in a
+          assert 'fn empty_night_scene_is_not_brightened' in a
+          assert 'let recoverable_fraction' in a
+          assert 'if recoverable { -4.0 } else { 0.0 }' in a
+          assert 'fn coloured_rose_keeps_original_wb' in a
+          e=Path('crates/engine/src/cmd/develop.rs').read_text()
+          assert 'cmd!("develop.auto", "Smart Auto"' in e
+          assert 'smart_auto_tone(&src' in e
+          assert 'auto_wb_classic(&patch' in e
+          assert 'SourceLevel::Preview)' in e
+          assert 'SourceLevel::Full} else {SourceLevel::Preview}' in e
+          assert 'luminance noise not detected' in a
+          assert 'colour noise not detected' in a
+          p=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/EditorScreen.kt').read_text()
+          assert 'AutoAmountDialog' not in p
+          assert 'Classic Auto' not in p
+          vm=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/AppViewModel.kt').read_text()
+          assert 'QuickAction.AUTO -> applySmartAuto()' in vm
+          assert 'EditSection.AUTO -> applySmartAuto()' in vm
+          assert 'autoAmountDialog' not in vm
+          assert 'runAutoDetail()' in vm
+          edit=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/EditPanels.kt').read_text()
+          assert 'vm.runAutoDetail()' in edit
+          assert 'Current: Luminance NR ' in edit
+          assert 'Advanced' in edit
+          assert 'Auto WB uses neutral references' in edit
+          assert 'lightcraft.version=0.5.0-beta' in Path('apps/lightcraft-android/android/gradle.properties').read_text()
+          assert 'com.dennis.photostudio.lightref.v05' in Path('apps/lightcraft-android/android/app/build.gradle.kts').read_text()
+          print('Source preservation and feature integrity: PASS')
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Android SDK manager
+        run: |
+          MANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -1)"
+          test -x "$MANAGER"
+          echo "$(dirname "$MANAGER")" >> "$GITHUB_PATH"
+      - name: Android SDK 37.0 and NDK 29
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --channel=3 "platforms;android-37.0" "ndk;29.0.14206865"
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
+          if [ ! -e "$ANDROID_HOME/platforms/android-37" ]; then
+            ln -s "$ANDROID_HOME/platforms/android-37.0" "$ANDROID_HOME/platforms/android-37"
+          fi
+      - name: Rust toolchain and target
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal --target aarch64-linux-android
+          rustup default 1.99.0
+          cargo +1.99.0 install cargo-ndk --version 4.1.2 --locked
+      - name: Cache native Rust build and dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          cache-on-failure: true
+      - name: Validate photographic pipeline and WB / Auto tests
+        run: |
+          cargo +1.99.0 test -p lightcraft-pipeline --locked --lib
+          cargo +1.99.0 test -p lightcraft-develop --locked --lib
+      - name: Assemble ARM64 APK
+        working-directory: apps/lightcraft-android/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace assembleDebug -Plightcraft.abis=arm64-v8a
+      - name: Verify APK and app identity
+        run: |
+          APK=apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          ls -lh "$APK"
+      - name: Upload test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dennis-Photo-Studio-v0.5-Reference-ARM64
+          path: apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish pre-release APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dennis-photo-studio-v0.5-lightroom-reference
+          name: Dennis Photo Studio v0.5 — Adaptive Highlight-Aware Auto (Experimental)
+          prerelease: true
+          body: |
+            Dennis Photo Studio v0.5 Lightroom-reference engineering trial.
+
+            The uploaded Lightroom Android APKM was inspected as a reference:
+            built-in XMP resources are preset recipes, NOT Adobe's Auto
+            engine or legal reusable source. No proprietary assets copied.
+            Adobe's published tonal-control and White Balance behaviours
+            were compared with our open-source pipeline.
+
+            NEW SMART AUTO: On dark scenes with flames, lamps or small
+            luminous highlights, now applies a bounded 9–22 point shadow
+            lift only where recoverable low-midtone content exists, while
+            keeping global Exposure, Highlights and Whites neutral. Deep
+            blacks are supported with a small -4 Blacks correction.
+            Empty black scenes are left alone. Other scenes retain v0.4.
+
+            AUTO WHITE BALANCE: samples the Preview instead of a low-resolution
+            Thumb; uses measured neutral-region confidence and retains camera
+            As-Shot when light is clearly warm or ambiguous. Color UI now
+            explains why firelight may correctly remain warm rather than
+            applying false colour-neutralisation.
+
+            Working v0.3.1 Auto Detail and noise/colour NR are unchanged.
+            One-tap Smart Auto; all manual tools, profiles, curves, masks,
+            XMP functionality and exports are preserved.
+
+            Experimental, independently installable alongside v0.4/v0.3.1;
+            review actual original JPEGs on S23 Ultra.
+            Automated tests do NOT certify perceptually perfect Auto/WB.
+          files: apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
