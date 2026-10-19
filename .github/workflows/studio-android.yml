@@ -1,0 +1,131 @@
+name: Dennis Photo Studio v0.1 — ARM64 APK
+
+on:
+  push:
+    branches: [studio-v0.1-experiment]
+    paths:
+      - "tools/**"
+      - ".github/workflows/studio-android.yml"
+      - "README.md"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dennis-studio-v01
+  cancel-in-progress: false
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 115
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - name: Checkout Dennis adaptation files
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Download pinned LightCraft Android source
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/artcraft-android/lightcraft-android.git engine
+          git -C engine fetch --no-tags --depth=1 origin c6fac28eb7636cbb06ab078395e3d7e519c2efcf
+          git -C engine checkout --detach FETCH_HEAD
+          test -f engine/LICENSE-MIT
+          test -f engine/LICENSE-APACHE
+          cp tools/apply_studio_changes.py engine/apply_studio_changes.py
+          cd engine
+          python3 -m py_compile apply_studio_changes.py
+          python3 apply_studio_changes.py
+
+      - name: Audit photo engine and patch scope
+        run: |
+          cd engine
+          git diff --name-only | sort
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          changed=set(subprocess.check_output(["git","diff","--name-only"],text=True).splitlines())
+          expected={
+            "apps/lightcraft-android/android/app/src/main/res/values/strings.xml",
+            "apps/lightcraft-android/android/app/build.gradle.kts",
+            "apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/Tokens.kt",
+            "apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/Toast.kt",
+            "apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/EditorScreen.kt",
+            "apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/AppViewModel.kt",
+            "apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/engine/PhotoFiles.kt",
+            "crates/engine/src/cmd/develop.rs",
+          }
+          assert changed==expected,(sorted(changed),sorted(expected-changed))
+          rust=Path("crates/engine/src/cmd/develop.rs").read_text()
+          assert 'f64_or(p, "amount", 1.0)' in rust
+          assert "let a = lightcraft_pipeline::auto::auto_tone" in rust
+          assert 'WbMode::Auto' in rust, "Upstream White Balance path unexpectedly removed"
+          assert Path("LICENSE-MIT").exists() and Path("LICENSE-APACHE").exists()
+          print("PASS: Only expected UI/Auto/export source modified; photographic engine and licences intact")
+          PY
+
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Android SDK/NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Android packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-37" "ndk;29.0.14206865"
+
+      - name: Rust 1.99 and Android target
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal --target aarch64-linux-android
+          rustup default 1.99.0
+          rustc --version
+
+      - name: Install pinned Cargo NDK
+        run: cargo +1.99.0 install cargo-ndk --version 4.1.2 --locked
+
+      - name: Assemble native ARM64 Android APK
+        working-directory: engine/apps/lightcraft-android/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace assembleDebug -Plightcraft.abis=arm64-v8a
+
+      - name: Verify final APK is available
+        run: |
+          ls -lh engine/apps/lightcraft-android/android/app/build/outputs/apk/debug/
+          test -s engine/apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dennis-Photo-Studio-v0.1-ARM64-APK
+          path: engine/apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish test APK release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dennis-photo-studio-v0.1-experiment
+          name: Dennis Photo Studio v0.1 — Experimental ARM64
+          prerelease: true
+          body: |
+            This is a new Android application built from pinned LightCraft revision
+            c6fac28eb7636cbb06ab078395e3d7e519c2efcf, with separate application
+            ID and Dennis Photo Studio editing interface.
+
+            Smaller teal tool selection, compact charcoal save notification,
+            adjustable 0–100% non-destructive Auto Amount, upstream White Balance
+            unchanged, and export to Pictures/Dennis Photo Studio.
+
+            Experimental: test import, Auto strength, white balance, editing,
+            presets/XMP and full-resolution JPEG export on Galaxy S23 Ultra.
+            Source licence and attribution: see LightCraft's MIT/Apache-2.0.
+          files: engine/apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
