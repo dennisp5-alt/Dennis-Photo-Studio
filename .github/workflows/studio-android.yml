@@ -74,8 +74,11 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Install Android SDK/NDK
-        uses: android-actions/setup-android@v3
+      - name: Android SDK provided by GitHub runner
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          command -v sdkmanager
+          sdkmanager --version
 
       - name: Android packages
         run: |
