@@ -1,0 +1,136 @@
+name: Dennis Photo Studio v0.3.1 — Full Resolution Auto Detail
+
+on:
+  push:
+    branches: [studio-v0.3.1-noise-analysis]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dps-noise-v031
+  cancel-in-progress: true
+
+jobs:
+  quality-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 115
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit expected Smart Auto and WB source
+        run: |
+          test -s LICENSE-MIT
+          test -s LICENSE-APACHE
+          test -f apps/lightcraft-android/android/app/src/main/res/drawable/dennis_studio_lens.xml
+          python3 - <<'PY'
+          from pathlib import Path
+          a=Path('crates/pipeline/src/auto.rs').read_text()
+          assert 'pub fn smart_auto_tone' in a
+          assert 'pub fn auto_wb_classic' in a
+          assert 'pub fn auto_wb(' in a
+          assert 'if eligible == 0 || neutral < 180' in a
+          assert 'fn colourful_scenes_keep_camera_white_balance' in a
+          e=Path('crates/engine/src/cmd/develop.rs').read_text()
+          assert 'mode == "classic"' in e
+          assert 'smart_auto_tone(&src' in e
+          assert 'auto_wb_classic(&patch' in e
+          p=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/EditorScreen.kt').read_text()
+          assert 'Smart Auto' in p and 'Classic Auto' in p
+          assert 'onApply(value,mode)' in p
+          assert 'lightcraft.version=0.3.1-beta' in Path('apps/lightcraft-android/android/gradle.properties').read_text()
+          assert 'pub fn auto_detail' in a and 'pub fn auto_effects' in a
+          assert 'fn smooth_photo_gets_no_noise_reduction' in a
+          assert 'fn colourful_scenes_keep_camera_white_balance' in a
+          assert 'develop.autoDetail' in e and 'develop.autoEffects' in e
+          edit=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/EditPanels.kt').read_text()
+          assert 'vm.runAutoDetail()' in edit
+          assert 'Current: Luminance NR ' in edit
+          assert 'SourceLevel::Full} else {SourceLevel::Preview}' in e
+          assert 'luminance noise not detected' in a
+          assert 'colour noise not detected' in a
+          assert 'vm.runAutoEffects()' in edit
+          assert 'Advanced' in edit
+          assert 'com.dennis.photostudio.autodetail.v031' in Path('apps/lightcraft-android/android/app/build.gradle.kts').read_text()
+          print('Source preservation and feature integrity: PASS')
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Android SDK manager
+        run: |
+          MANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -1)"
+          test -x "$MANAGER"
+          echo "$(dirname "$MANAGER")" >> "$GITHUB_PATH"
+      - name: Android SDK 37.0 and NDK 29
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --channel=3 "platforms;android-37.0" "ndk;29.0.14206865"
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
+          if [ ! -e "$ANDROID_HOME/platforms/android-37" ]; then
+            ln -s "$ANDROID_HOME/platforms/android-37.0" "$ANDROID_HOME/platforms/android-37"
+          fi
+      - name: Rust toolchain and target
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal --target aarch64-linux-android
+          rustup default 1.99.0
+          cargo +1.99.0 install cargo-ndk --version 4.1.2 --locked
+      - name: Cache native Rust build and dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          cache-on-failure: true
+      - name: Validate photographic pipeline and WB / Auto tests
+        run: |
+          cargo +1.99.0 test -p lightcraft-pipeline --locked --lib
+          cargo +1.99.0 test -p lightcraft-develop --locked --lib
+      - name: Assemble ARM64 APK
+        working-directory: apps/lightcraft-android/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace assembleDebug -Plightcraft.abis=arm64-v8a
+      - name: Verify APK and app identity
+        run: |
+          APK=apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          ls -lh "$APK"
+      - name: Upload test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dennis-Photo-Studio-v0.3.1-Full-Resolution-Noise-ARM64
+          path: apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish pre-release APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dennis-photo-studio-v0.3.1-full-resolution-auto-detail
+          name: Dennis Photo Studio v0.3.1 — Full-resolution Auto Detail (Experimental)
+          prerelease: true
+          body: |
+            Experimental v0.3.1, independently installable alongside v0.2
+            and v0.3 without losing the existing versions' app data.
+
+            Fix: Auto Detail previously analysed a 512px thumbnail,
+            suppressing visible fine luminance/chroma noise and returning 0.
+            v0.3.1 analyses native source pixels on <=24MP photos, falls
+            back to 2560px preview for larger source files to bound memory.
+            Smoothing rejection and noise thresholds have been adjusted;
+            bright edges and clean areas still remain protected.
+
+            Detail screen now displays current numeric Luminance NR, Colour
+            NR and Sharpen values without opening Advanced. Apply Auto
+            Detail in Detail, then inspect those numbers. The main Auto
+            button remains tone/colour only, not a detail-analysis command.
+            Advanced retains original controls; Auto Effects remains separate.
+
+            This does NOT apply blanket NR or promise objective denoise
+            precision: images with little detected noise can still show 0.
+            Compare 100% crop of night/ISO-high photos with v0.3, retain
+            skin, fabric, foliage, flower stamens and camera colour.
+            Natural White Balance and Smart Auto are not modified.
+          files: apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk

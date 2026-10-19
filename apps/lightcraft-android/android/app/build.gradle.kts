@@ -142,7 +142,7 @@ android {
     ndkVersion = "29.0.14206865"
 
     defaultConfig {
-        applicationId = "com.dennis.photostudio.autolab.v03"
+        applicationId = "com.dennis.photostudio.autodetail.v031"
         minSdk = minApi
         targetSdk = 36
         versionCode = appVersionCode

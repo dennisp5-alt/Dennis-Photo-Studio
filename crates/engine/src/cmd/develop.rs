@@ -335,7 +335,13 @@ pub fn specs() -> Vec<CommandSpec> {
         }),
         cmd!("develop.autoDetail", "Auto Detail & Noise", ["Photo"], None, "{}", has_active, |s, _p| {
             let id=active(s,"develop.autoDetail")?;
-            let src=s.source_now(id,SourceLevel::Thumb)
+            // Analyse original pixels at native resolution whenever safe.
+            // The old 512px thumbnail hid fine luminance/chroma noise.
+            // Large (>24 MP) files use 2560px Preview to bound RAM use.
+            let is_standard=s.catalog.photo(id)
+                .is_some_and(|photo| u64::from(photo.width)*u64::from(photo.height)<=24_000_000);
+            let level=if is_standard {SourceLevel::Full} else {SourceLevel::Preview};
+            let src=s.source_now(id,level)
                 .map_err(|e|bad("develop.autoDetail",e))?;
             let info=s.source_info(id);
             let a=lightcraft_pipeline::auto::auto_detail(&src,&info);
@@ -351,7 +357,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 d.detail.sharpen_masking=a.sharpen_masking;
                 Ok(())
             })?;
-            Ok(json!({"mode":"proxy-auto-detail","result":a}))
+            Ok(json!({"mode":"source-adaptive-auto-detail","sourcePixels":src.width*src.height,"result":a}))
         }),
         cmd!("develop.autoEffects", "Auto Texture and Clarity", ["Photo"], None, "{}", has_active, |s, _p| {
             let id=active(s,"develop.autoEffects")?;

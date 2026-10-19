@@ -176,7 +176,7 @@ fn auto_quality_metrics(src: &Rgb32f) -> (f64, f64, f64, f64, f64) {
             if c.iter().any(|v| *v > 0.97) { saturated+=1; }
             // Exclude structures. Fine filaments/hair may still reach the
             // collection, which is why final model strengths are bounded.
-            if gradient > 0.044 || smooth_y.len() > 160_000 { continue; }
+            if gradient > 0.090 || smooth_y.len() > 160_000 { continue; }
             let mean_y=(luminance_2020(a)+luminance_2020(b)+
                 luminance_2020(u)+luminance_2020(d))*0.25;
             let lum=(yl-mean_y).abs() as f64;
@@ -209,8 +209,8 @@ fn auto_quality_metrics(src: &Rgb32f) -> (f64, f64, f64, f64, f64) {
     let q = |v: &Vec<f64>, fraction: f64| -> f64 {
         if v.is_empty(){0.0}else{v[((v.len()-1) as f64*fraction) as usize]}
     };
-    let lum=q(&smooth_y,0.32);
-    let chrom=q(&smooth_color,0.32);
+    let lum=q(&smooth_y,0.55);
+    let chrom=q(&smooth_color,0.55);
     let detail=q(&edges,0.75);
     let confidence= (smooth_y.len() as f64 / valid as f64).clamp(0.0,1.0)
         * (smooth_y.len() as f64 / 800.0).clamp(0.0,1.0);
@@ -227,12 +227,12 @@ pub fn auto_detail(src: &Rgb32f, info: &SourceInfo) -> AutoDetail {
         nr_color_detail:65.0, nr_color_smoothness:50.0,
         noise_score:l, confidence, ..Default::default()
     }; }
-    let lum=((l-0.0026)*2300.0).clamp(0.0,28.0);
-    let color=((c-0.0030)*2100.0).clamp(0.0,34.0);
-    let noisy=lum>11.0 || color>12.0;
+    let lum=((l-0.0018)*2500.0).clamp(0.0,28.0);
+    let color=((c-0.0016)*2700.0).clamp(0.0,34.0);
+    let noisy=lum>7.0 || color>8.0;
     let already_crisp=edges>0.105;
     // JPEG cameras pre-sharpen photos. Never sharpen through noise.
-    let sharpen=if noisy || already_crisp || clipped>0.015 {0.0}
+    let sharpen=if noisy || already_crisp || clipped>0.015 || confidence<0.35 {0.0}
         else if edges>0.043 {8.0} else {12.0};
     AutoDetail {
         nr_luminance: lum.round(),
@@ -551,6 +551,19 @@ mod studio_auto_detail_tests {
         assert!(d.nr_luminance<=28.0);
         assert!(d.sharpen_amount<=12.0);
     }
+
+    #[test]
+    fn noiseless_subject_not_forced_to_denoise() {
+        let image=Rgb32f::from_fn(256,256,|x,y|{
+           let v=if x<120 {0.18} else {0.38};
+           let fade=if y<128 {0.0} else {0.02};
+           [v+fade,v+fade,v+fade]
+        });
+        let d=auto_detail(&image,&SourceInfo::default());
+        assert_eq!(d.nr_luminance,0.0,"noisy-looking clean edge: {d:?}");
+        assert_eq!(d.nr_color,0.0,"chromatic noise on neutral blocks: {d:?}");
+    }
+
     #[test]
     fn noisy_regions_do_not_get_extra_sharpening() {
         let img=Rgb32f::from_fn(128,128,|x,y|{
@@ -558,7 +571,8 @@ mod studio_auto_detail_tests {
             [0.18+n,0.18-n*0.7,0.18+n*0.4]
         });
         let d=auto_detail(&img,&SourceInfo::default());
-        assert!(d.nr_luminance>=0.0 && d.nr_color>=0.0);
+        assert!(d.nr_luminance>0.0, "luminance noise not detected: {d:?}");
+        assert!(d.nr_color>0.0, "colour noise not detected: {d:?}");
         assert!(d.sharpen_masking>=80.0);
         assert!(auto_effects(&img,&SourceInfo::default()).dehaze==0.0);
     }

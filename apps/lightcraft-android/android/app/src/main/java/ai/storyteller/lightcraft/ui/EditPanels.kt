@@ -218,9 +218,12 @@ fun SectionSheet(vm: AppViewModel, ed: EditorState, section: EditSection, modifi
                     Tabs(listOf("sharpening" to "Sharpening", "noise" to "Noise", "color" to "Color noise"), ed.detailTab) { ed.detailTab = it }
                     DetailPanel(vm, ed)
                 } else {
-                    Text("One tap sets luminance noise, colour noise and edge-masked sharpening. Inspect at 100%.",
+                    Text("Current: Luminance NR " + ed.value("detail.nrLuminance").toInt()
+                            + "  •  Colour NR " + ed.value("detail.nrColor").toInt()
+                            + "  •  Sharpen " + ed.value("detail.sharpenAmount").toInt()
+                            + "\nTap Auto Detail to analyse the original photo. Zero means no adjustment recommended. Inspect at 100%.",
                         color=Lc.panelTextSoft,fontFamily=Inter,fontSize=12.sp,
-                        modifier=Modifier.padding(horizontal=17.dp,vertical=12.dp))
+                        modifier=Modifier.padding(horizontal=17.dp,vertical=8.dp))
                 }
             }
             EditSection.OPTICS -> OpticsPanel(vm, ed)
