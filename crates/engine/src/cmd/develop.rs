@@ -384,7 +384,10 @@ pub fn specs() -> Vec<CommandSpec> {
                 let (mut t, mut tint) = match mode {
                     WbMode::AsShot => (info.as_shot_temp, info.as_shot_tint),
                     WbMode::Auto => {
-                        let src = s.source_now(id, SourceLevel::Thumb)
+                        // Higher-quality WB sampling. The estimator still
+                        // rejects unsupported neutrality; warm firelight is
+                        // not supposed to be neutralised by force.
+                        let src = s.source_now(id, SourceLevel::Preview)
                             .map_err(|e| bad("develop.wb", e))?;
                         // Scene Auto WB is separate from manual/eyedropper WB.
                         // Classic remains usable internally for explicit
