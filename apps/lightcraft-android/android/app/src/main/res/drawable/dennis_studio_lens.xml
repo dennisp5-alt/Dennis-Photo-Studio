@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Inspired by our Dennis lens-and-landscape studio icon. -->
+    <path android:fillColor="#172D3A"
+        android:pathData="M54,11 A43,43 0,1 1,53.9 11 Z"/>
+    <path android:fillColor="#071620" android:strokeColor="#77D4DC"
+        android:strokeWidth="2.6"
+        android:pathData="M54,18 A36,36 0,1 1,53.9 18 Z"/>
+    <path android:fillColor="#0D2633" android:strokeColor="#254F66"
+        android:strokeWidth="5"
+        android:pathData="M54,25 A29,29 0,1 1,53.9 25 Z"/>
+    <path android:fillColor="#102C3C"
+        android:pathData="M54,31 A23,23 0,1 1,53.9 31 Z"/>
+    <path android:fillColor="#E7AE64"
+        android:pathData="M68,39 A5,5 0,1 1,67.9 39 Z"/>
+    <path android:fillColor="#2E7B91"
+        android:pathData="M31,65 L44,48 L53,58 L64,42 L78,66 L78,74 L31,74 Z"/>
+    <path android:fillColor="#B1D8DC"
+        android:pathData="M31,66 L44,50 L49,56 L43,54 L36,66 Z"/>
+    <path android:fillColor="#76BFC6"
+        android:pathData="M48,66 L63,44 L69,53 L64,50 L53,66 Z"/>
+    <path android:fillColor="#164559"
+        android:pathData="M31,68 Q42,62 54,68 T78,68 L78,75 L31,75 Z"/>
+    <path android:fillColor="#4FA9BB" android:strokeColor="#A2EBED"
+        android:strokeWidth="1.1"
+        android:pathData="M36,72 Q51,68 68,72"/>
+    <path android:fillColor="#00000000" android:strokeColor="#D2F3F2"
+        android:strokeWidth="2.2" android:strokeLineCap="round"
+        android:pathData="M29,51 C31,37 41,29 53,27"/>
+    <path android:fillColor="#00000000" android:strokeColor="#2C8494"
+        android:strokeWidth="3" android:strokeLineCap="round"
+        android:pathData="M58,81 C74,78 83,66 82,54"/>
+</vector>

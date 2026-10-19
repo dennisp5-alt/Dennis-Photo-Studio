@@ -305,12 +305,17 @@ pub fn specs() -> Vec<CommandSpec> {
                 Ok(json!({"mix": m}))
             }
         ),
-        cmd!("develop.auto", "Auto Settings", ["Photo"], Some("Shift+A"), "{amount?: 0..1}", has_active, |s, p| {
+        cmd!("develop.auto", "Auto Settings", ["Photo"], Some("Shift+A"), "{amount?: 0..1, mode?: smart|classic}", has_active, |s, p| {
             let id = active(s, "develop.auto")?;
             let src = s.source_now(id, SourceLevel::Thumb).map_err(|e| bad("develop.auto", e))?;
             let info = s.source_info(id);
             let d = s.develop_of(id).unwrap_or_default();
-            let a = lightcraft_pipeline::auto::auto_tone(&src, &info, &d);
+            let mode = str_param(p, "mode").unwrap_or("smart");
+            let a = if mode == "classic" {
+                lightcraft_pipeline::auto::auto_tone(&src, &info, &d)
+            } else {
+                lightcraft_pipeline::auto::smart_auto_tone(&src, &info, &d)
+            };
             // At 100%, exactly original Auto. At 0%, no adjustment.
             // Interpolate settings; do not distort white balance or merge
             // images with different gamma/colour spaces.
@@ -344,7 +349,11 @@ pub fn specs() -> Vec<CommandSpec> {
                     WbMode::AsShot => (info.as_shot_temp, info.as_shot_tint),
                     WbMode::Auto => {
                         let src = s.source_now(id, SourceLevel::Thumb).map_err(|e| bad("develop.wb", e))?;
-                        lightcraft_pipeline::auto::auto_wb(&src, &info)
+                        if str_param(p, "algorithm") == Some("classic") {
+                            lightcraft_pipeline::auto::auto_wb_classic(&src, &info)
+                        } else {
+                            lightcraft_pipeline::auto::auto_wb(&src, &info)
+                        }
                     }
                     // Custom picked from the list: the white balance in effect now, under its own name
                     WbMode::Custom => lightcraft_pipeline::local::effective_wb(&info, &s.develop_of(id).unwrap_or_default()),
@@ -388,7 +397,9 @@ pub fn specs() -> Vec<CommandSpec> {
                 }
             }
             let patch = lightcraft_raster::Rgb32f::filled(4, 4, acc);
-            let (t, tint) = lightcraft_pipeline::auto::auto_wb(&patch, &info);
+            // A user-selected neutral spot is a trusted calibration target:
+            // use the unrestricted estimator, not scene-level confidence gates.
+            let (t, tint) = lightcraft_pipeline::auto::auto_wb_classic(&patch, &info);
             edit(s, "develop.wbPick", "White Balance", |d| {
                 d.wb.mode = WbMode::Custom;
                 d.wb.temp = t;

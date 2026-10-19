@@ -212,7 +212,6 @@ androidComponents {
         val assetsDir = File(cargoWorkspaceDir, "assets")
         val res = tasks.register<LightcraftAssets>("lightcraftResources$name") {
             val map = mapOf(
-                "app-icon/lightcraft-1024.png" to "drawable-nodpi/ic_launcher_tile.png",
                 "fonts/Inter-Regular.ttf" to "font/inter_regular.ttf",
                 "fonts/Inter-Medium.ttf" to "font/inter_medium.ttf",
                 "fonts/Inter-SemiBold.ttf" to "font/inter_semibold.ttf",

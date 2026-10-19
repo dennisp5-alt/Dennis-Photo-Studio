@@ -119,6 +119,7 @@ class EditorState(val photoId: ULong, info: PhotoInfo, val device: DeviceOrigin?
     var action by mutableStateOf<QuickAction?>(null)
     var autoAmountDialog by mutableStateOf(false)
     var autoAmount by mutableFloatStateOf(100f)
+    var autoMode by mutableStateOf("smart")
 
     /** Edit's open section (none: just its row of sections). */
     var section by mutableStateOf<EditSection?>(null)
@@ -2874,14 +2875,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Apply fraction of suggested Auto SETTINGS (not a blend of pixels). */
-    fun applyAuto(amount: Float) {
+    fun applyAuto(amount: Float, mode: String = "smart") {
         val ed=editor ?: return
         val safe=amount.coerceIn(0f,100f)
+        val selected=if(mode=="classic") "classic" else "smart"
         ed.autoAmount=safe
+        ed.autoMode=selected
         ed.autoAmountDialog=false
-        edit(after={say("Auto applied at ${safe.roundToInt()}%")}) {
+        edit(after={say("${if(selected=="smart") "Smart" else "Classic"} Auto applied at ${safe.roundToInt()}%")}) {
             it.execute("develop.auto",
-                JSONObject().put("amount",safe.toDouble()/100.0).toString())
+                JSONObject().put("amount",safe.toDouble()/100.0)
+                    .put("mode",selected).toString())
         }
     }
 

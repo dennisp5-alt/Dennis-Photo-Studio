@@ -1,0 +1,115 @@
+name: Dennis Photo Studio v0.2 — Smart Colour ARM64
+
+on:
+  push:
+    branches: [studio-v0.2-smart-colour]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dps-smart-v02
+  cancel-in-progress: false
+
+jobs:
+  quality-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 115
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit expected Smart Auto and WB source
+        run: |
+          test -s LICENSE-MIT
+          test -s LICENSE-APACHE
+          test -f apps/lightcraft-android/android/app/src/main/res/drawable/dennis_studio_lens.xml
+          python3 - <<'PY'
+          from pathlib import Path
+          a=Path('crates/pipeline/src/auto.rs').read_text()
+          assert 'pub fn smart_auto_tone' in a
+          assert 'pub fn auto_wb_classic' in a
+          assert 'pub fn auto_wb(' in a
+          assert 'if eligible == 0 || neutral < 180' in a
+          assert 'fn colourful_scenes_keep_camera_white_balance' in a
+          e=Path('crates/engine/src/cmd/develop.rs').read_text()
+          assert 'mode == "classic"' in e
+          assert 'smart_auto_tone(&src' in e
+          assert 'auto_wb_classic(&patch' in e
+          p=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/EditorScreen.kt').read_text()
+          assert 'Smart Auto' in p and 'Classic Auto' in p
+          assert 'onApply(value,mode)' in p
+          assert 'lightcraft.version=0.2.0-beta' in Path('apps/lightcraft-android/android/gradle.properties').read_text()
+          print('Source preservation and feature integrity: PASS')
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Android SDK manager
+        run: |
+          MANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -1)"
+          test -x "$MANAGER"
+          echo "$(dirname "$MANAGER")" >> "$GITHUB_PATH"
+      - name: Android SDK 37.0 and NDK 29
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --channel=3 "platforms;android-37.0" "ndk;29.0.14206865"
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
+          if [ ! -e "$ANDROID_HOME/platforms/android-37" ]; then
+            ln -s "$ANDROID_HOME/platforms/android-37.0" "$ANDROID_HOME/platforms/android-37"
+          fi
+      - name: Rust toolchain and target
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal --target aarch64-linux-android
+          rustup default 1.99.0
+          cargo +1.99.0 install cargo-ndk --version 4.1.2 --locked
+      - name: Validate Smart Auto and White Balance math
+        run: |
+          cargo +1.99.0 test -p lightcraft-pipeline --locked studio_auto_safety -- --nocapture
+      - name: Assemble ARM64 APK
+        working-directory: apps/lightcraft-android/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace assembleDebug -Plightcraft.abis=arm64-v8a
+      - name: Verify APK and app identity
+        run: |
+          APK=apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          ls -lh "$APK"
+      - name: Upload test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dennis-Photo-Studio-v0.2-Smart-Colour-ARM64
+          path: apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish pre-release APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dennis-photo-studio-v0.2-smart-colour
+          name: Dennis Photo Studio v0.2 — Smart Auto and WB (Experimental)
+          prerelease: true
+          body: |
+            Full offline Android ARM64 test build, v0.2.
+
+            New: confidence-gated automatic White Balance and safe camera
+            As-Shot fallback for scenes with insufficient neutral references.
+            The manual neutral-point eyedropper and WB choices are retained.
+
+            Smart Auto: highlight protection, bounded shadow/exposure and
+            colour-preserving adjustments. Original Classic Auto is available
+            for A/B comparisons at 0–100% strength.
+
+            New original Dennis Photo Studio lens/landscape adaptive icon,
+            existing compact charcoal/teal interface, non-destructive edits,
+            XMP preset workflow and full LightCraft-based Rust engine.
+            Original LightCraft/AutoPhoto source and v0.1 checkpoints preserved.
+
+            Automatic masks (Subject/Sky/Background) require offline model
+            integration and are NOT claimed as part of this version.
+            Build tests do NOT prove fully accurate colour in all situations.
+            Verify on phone with reference neutral/grey-card photos.
+          files: apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk

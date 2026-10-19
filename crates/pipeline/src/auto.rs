@@ -58,6 +58,66 @@ pub fn auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> AutoTo
     }
 }
 
+/// Confidence-aware auto tone. The original implementation remains available
+/// as "Classic Auto" for exact comparison. We use source-relative scene-linear
+/// histogram statistics, not a guessed semantic scene label.
+pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> AutoTone {
+    let mut old = auto_tone(src, info, s);
+    let mut img = lightcraft_raster::resample::fit(
+        src, 512, 512, lightcraft_raster::resample::Filter::Box);
+    let base = DevelopSettings { wb: s.wb, ..DevelopSettings::default() };
+    crate::local::scene_linear_pre(&mut img, info, &base);
+    if img.data.is_empty() { return old; }
+    let mut ev = Vec::with_capacity(img.data.len());
+    let mut colour_mass = 0.0f64;
+    let mut colour_count = 0.0f64;
+    for rgb in &img.data {
+        let y = luminance_2020(*rgb).max(1e-6);
+        ev.push((y / 0.18).log2());
+        if (0.025..0.80).contains(&y) {
+            let maxc = rgb[0].max(rgb[1]).max(rgb[2]).max(1e-6);
+            let minc = rgb[0].min(rgb[1]).min(rgb[2]);
+            let sat = ((maxc - minc) / maxc).clamp(0.0, 1.0) as f64;
+            colour_mass += sat;
+            colour_count += 1.0;
+        }
+    }
+    ev.sort_by(|a,b| a.total_cmp(b));
+    let median = percentile(&ev, 0.50) as f64;
+    let p05 = percentile(&ev, 0.05) as f64;
+    let p95 = percentile(&ev, 0.95) as f64;
+    let p995 = percentile(&ev, 0.995) as f64;
+    let upper_range = p995 - median;
+    let high_contrast = upper_range > 4.0 || (p995 - p05) > 8.5;
+    let already_balanced = median.abs() < 0.45;
+    let highlight_headroom = (2.25 - p995).max(0.0);
+    if old.exposure > 0.0 {
+        let mut cap = if high_contrast { 0.60 } else { 1.40 };
+        if already_balanced { cap = cap.min(0.28); }
+        if p995 > 1.7 { cap = cap.min(highlight_headroom); }
+        old.exposure = old.exposure.min(cap).max(0.0);
+    } else {
+        old.exposure = old.exposure.max(-1.50);
+    }
+    // Camera JPEGs often already contain boosted saturation. Never add a
+    // fixed vibrance/saturation offset. Use measured midtone chroma instead.
+    let mean_sat = if colour_count > 0.0 {
+        colour_mass / colour_count
+    } else { 0.0 };
+    old.vibrance = ((0.26 - mean_sat) * 30.0).clamp(0.0, 8.0).round();
+    old.saturation = 0.0;
+    if high_contrast {
+        old.contrast = old.contrast.clamp(-12.0, 10.0);
+        old.blacks = old.blacks.clamp(-10.0, 16.0);
+        old.shadows = old.shadows.clamp(-10.0, 35.0);
+    }
+    if p995 > 1.7 {
+        old.highlights = old.highlights.min(-20.0);
+        old.whites = old.whites.min(0.0);
+    }
+    old
+}
+
 /// An automatic black & white mix (slider values, red … magenta) for `src` under `s`'s white
 /// balance and tone: each hue band's colourful pixels are pushed away from the image's mean
 /// lightness — bands brighter than average get brighter, darker ones darker — so areas that
@@ -99,7 +159,7 @@ pub fn auto_bw_mix(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> [f64
 }
 
 /// Grey-world white balance weighted towards mid-tone, low-chroma pixels. Returns (temp, tint).
-pub fn auto_wb(src: &Rgb32f, info: &SourceInfo) -> (f64, f64) {
+pub fn auto_wb_classic(src: &Rgb32f, info: &SourceInfo) -> (f64, f64) {
     let img = lightcraft_raster::resample::fit(src, 256, 256, lightcraft_raster::resample::Filter::Box);
     let (mut acc, mut wsum) = ([0.0f64; 3], 0.0f64);
     for c in &img.data {
@@ -134,6 +194,72 @@ pub fn auto_wb(src: &Rgb32f, info: &SourceInfo) -> (f64, f64) {
     (t.clamp(2000.0, 50000.0).round(), tint.clamp(-150.0, 150.0).round())
 }
 
+/// Conservative neutral-supported Auto White Balance.
+///
+/// Gray-world on dominant greens, sunsets or saturated petals is ambiguous
+/// without a calibrated neutral target. Preserve the camera as-shot balance
+/// unless many neutral candidates are distributed across the photograph.
+/// Restrict the maximum perceptual WB shift in mireds and tint to protect skin
+/// and JPEGs that were already white-balanced by their camera.
+pub fn auto_wb(src: &Rgb32f, info: &SourceInfo) -> (f64, f64) {
+    let shot = (info.as_shot_temp, info.as_shot_tint);
+    let img = lightcraft_raster::resample::fit(
+        src, 256, 256, lightcraft_raster::resample::Filter::Box);
+    if img.width == 0 || img.height == 0 || img.data.is_empty() {
+        return shot;
+    }
+    let mut neutral = 0usize;
+    let mut eligible = 0usize;
+    let mut blocks = [0usize; 16];
+    let mut avg = [0.0f64; 3];
+    let mut total = 0.0f64;
+    let w = img.width as usize;
+    let h = img.height as usize;
+    for (index, c) in img.data.iter().enumerate() {
+        let y = luminance_2020(*c);
+        if !(0.035..=0.75).contains(&y) { continue; }
+        eligible += 1;
+        let hi = c[0].max(c[1]).max(c[2]).max(1e-6);
+        let lo = c[0].min(c[1]).min(c[2]);
+        let chroma = ((hi - lo) / hi).clamp(0.0, 1.0);
+        if chroma > 0.16 { continue; }
+        let weight = ((0.16 - chroma) / 0.16).powi(2) as f64;
+        if weight < 0.015 { continue; }
+        let px = index % w;
+        let py = index / w;
+        let cell = ((py * 4 / h).min(3)) * 4 + ((px * 4 / w).min(3));
+        blocks[cell] += 1;
+        for channel in 0..3 { avg[channel] += c[channel] as f64 * weight; }
+        total += weight;
+        neutral += 1;
+    }
+    let coverage = blocks.iter().filter(|&&count| count > 12).count();
+    // Require both numerical support and broad spatial support. A brightly
+    // coloured rose against foliage should not be used as a neutral card.
+    if eligible == 0 || neutral < 180 ||
+        (neutral as f64 / eligible as f64) < 0.035 ||
+        coverage < 5 || total < 15.0 {
+        return shot;
+    }
+    let mean = avg.map(|v| (v / total) as f32);
+    let provisional = Rgb32f::filled(16, 16, mean);
+    let (temp, tint) = auto_wb_classic(&provisional, info);
+    if !temp.is_finite() || !tint.is_finite() { return shot; }
+    let confidence = ((neutral as f64 / eligible as f64) / 0.26)
+        .clamp(0.0, 1.0) * (coverage as f64 / 16.0).sqrt();
+    let allowed_shift = if info.raw { 45.0 } else { 28.0 };
+    let allowed_tint = if info.raw { 24.0 } else { 16.0 };
+    let src_mired = 1_000_000.0 / shot.0.clamp(2000.0, 50000.0);
+    let goal_mired = 1_000_000.0 / temp.clamp(2000.0, 50000.0);
+    let delta = ((goal_mired - src_mired) * confidence)
+        .clamp(-allowed_shift, allowed_shift);
+    let safe_temp = (1_000_000.0 / (src_mired + delta))
+        .clamp(2000.0, 50000.0);
+    let safe_tint = shot.1 +
+        ((tint - shot.1) * confidence).clamp(-allowed_tint, allowed_tint);
+    (safe_temp.round(), safe_tint.round())
+}
+
 /// Temperature/tint currently in effect (for UI display).
 pub fn current_wb(info: &SourceInfo, s: &DevelopSettings) -> (f64, f64) {
     effective_wb(info, s)
@@ -156,7 +282,7 @@ mod tests {
     #[test]
     fn neutral_image_keeps_as_shot_wb() {
         let img = Rgb32f::from_fn(32, 32, |x, y| [0.05 + (x + y) as f32 * 0.004; 3]);
-        let (t, tint) = auto_wb(&img, &SourceInfo::default());
+        let (t, tint) = auto_wb_classic(&img, &SourceInfo::default());
         assert!((t - 6500.0).abs() < 150.0, "{t}");
         assert!(tint.abs() < 6.0, "{tint}");
     }
@@ -165,15 +291,15 @@ mod tests {
     fn blue_cast_is_corrected_by_higher_temp() {
         // A bluish cast should be neutralised by telling the pipeline the light was bluer (higher K).
         let img = Rgb32f::from_fn(32, 32, |_, _| [0.16, 0.18, 0.24]);
-        let (t, _) = auto_wb(&img, &SourceInfo::default());
+        let (t, _) = auto_wb_classic(&img, &SourceInfo::default());
         assert!(t > 7000.0, "{t}");
         let mut s = DevelopSettings::default();
         s.wb.mode = lightcraft_develop::WbMode::Custom;
         s.wb.temp = t;
-        let (t2, tint2) = auto_wb(&img, &SourceInfo::default());
+        let (t2, tint2) = auto_wb_classic(&img, &SourceInfo::default());
         let _ = (t2, tint2);
         let mut out = img.clone();
-        let (tt, ti) = auto_wb(&img, &SourceInfo::default());
+        let (tt, ti) = auto_wb_classic(&img, &SourceInfo::default());
         s.wb.temp = tt;
         s.wb.tint = ti;
         crate::local::scene_linear_pre(&mut out, &SourceInfo::default(), &s);
@@ -209,7 +335,7 @@ mod tint_tests {
         for (rgb, sign) in [([0.18, 0.24, 0.18], 1.0), ([0.24, 0.18, 0.24], -1.0)] {
             let img = Rgb32f::filled(16, 16, rgb);
             let info = SourceInfo { raw: true, relative_wb: true, ..Default::default() };
-            let (temp, tint) = auto_wb(&img, &info);
+            let (temp, tint) = auto_wb_classic(&img, &info);
             assert!(tint * sign > 0.0, "{rgb:?}: temp {temp}, tint {tint}");
             let mut s = DevelopSettings::default();
             s.wb.mode = lightcraft_develop::WbMode::Custom;
@@ -221,5 +347,42 @@ mod tint_tests {
             let spread = p[0].max(p[1]).max(p[2]) - p[0].min(p[1]).min(p[2]);
             assert!(spread < 0.003, "{rgb:?} -> {p:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod studio_auto_safety {
+    use super::*;
+    #[test]
+    fn colourful_scenes_keep_camera_white_balance() {
+        let info=SourceInfo::default();
+        let flower=Rgb32f::from_fn(64,64,|x,y| {
+            if (x+y)%5 == 0 { [0.60,0.04,0.13] }
+            else { [0.03,0.31,0.035] }
+        });
+        assert_eq!(auto_wb(&flower,&info),
+            (info.as_shot_temp,info.as_shot_tint));
+    }
+    #[test]
+    fn neutral_image_not_overcorrected() {
+        let info=SourceInfo::default();
+        let img=Rgb32f::filled(64,64,[0.18,0.18,0.18]);
+        let (temp,tint)=auto_wb(&img,&info);
+        assert!((1_000_000.0/temp - 1_000_000.0/info.as_shot_temp).abs()<=28.01);
+        assert!((tint-info.as_shot_tint).abs()<=16.01);
+    }
+    #[test]
+    fn smart_auto_protects_bright_subject_on_dark_scene() {
+        let image=Rgb32f::from_fn(96,96,|x,y| {
+            if x>35 && x<65 && y>20 && y<50 { [1.4,0.70,0.55] }
+            else { [0.007,0.009,0.006] }
+        });
+        let info=SourceInfo::default();
+        let settings=DevelopSettings::default();
+        let classic=auto_tone(&image,&info,&settings);
+        let smart=smart_auto_tone(&image,&info,&settings);
+        assert!(smart.exposure <= classic.exposure + 1e-6);
+        assert!(smart.vibrance <= classic.vibrance);
+        assert!(smart.saturation == 0.0);
     }
 }

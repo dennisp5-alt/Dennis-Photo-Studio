@@ -193,7 +193,7 @@ fun EditorScreen(vm: AppViewModel, ed: EditorState, snackbar: SnackbarHostState)
         }
     }
     OverlayHost(exportFor) { share -> ExportSheet(vm, ed, share) { exportFor = null } }
-    if (ed.autoAmountDialog) AutoAmountDialog(ed, onDismiss = { ed.autoAmountDialog = false }) { amount -> vm.applyAuto(amount) }
+    if (ed.autoAmountDialog) AutoAmountDialog(ed, onDismiss = { ed.autoAmountDialog = false }) { amount, mode -> vm.applyAuto(amount, mode) }
     if (sharing) {
         ShareSheet(
             onDismiss = { sharing = false },
@@ -1068,26 +1068,41 @@ private fun ToolDivider(column: Boolean) {
     Box(Modifier.padding(if (column) PaddingValues(vertical = 3.dp) else PaddingValues(horizontal = 3.dp)).then(line).background(Lc.toolDivider, RoundedCornerShape(0.5.dp)))
 }
 
-/** A small non-destructive Auto Amount dialog. */
+/** Compare Smart Auto and original LightCraft Auto at the same strength. */
 @Composable
-private fun AutoAmountDialog(ed: EditorState, onDismiss: () -> Unit, onApply: (Float) -> Unit) {
+private fun AutoAmountDialog(ed: EditorState, onDismiss: () -> Unit, onApply: (Float, String) -> Unit) {
     var value by remember(ed) { mutableFloatStateOf(ed.autoAmount) }
+    var mode by remember(ed) { mutableStateOf(ed.autoMode) }
     AlertDialog(
         onDismissRequest=onDismiss,
         containerColor=Lc.dialog,
         title={ Text("Auto adjustment", color=Lc.text, fontFamily=Inter) },
         text={
             Column {
-                Text("Choose how much of the suggested correction to apply.",
+                Text("Smart protects colour and highlights. Classic reproduces the original Auto.",
                     color=Lc.panelTextSoft,fontSize=13.sp)
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+                    listOf("smart" to "Smart Auto","classic" to "Classic Auto").forEach { (id,label) ->
+                        TextButton(onClick={mode=id},
+                            modifier=Modifier.background(
+                                if(mode==id) Lc.toolChosen else Lc.dialog,
+                                RoundedCornerShape(8.dp))) {
+                            Text(label,color=if(mode==id)Lc.selected else Lc.text)
+                        }
+                    }
+                }
                 Spacer(Modifier.height(12.dp))
                 Text("Amount: ${value.roundToInt()}%",color=Lc.text,fontSize=14.sp)
                 Slider(value=value,onValueChange={value=it},valueRange=0f..100f)
-                Text("100% matches original LightCraft Auto. White Balance is unchanged.",
+                Text(if(mode=="smart") "Automatically protects bright subjects and natural colour."
+                     else "Original LightCraft Auto, with its full adjustment strengths.",
+                     color=Lc.panelTextDim,fontSize=12.sp)
+                Text("White Balance is controlled separately.",
                     color=Lc.panelTextDim,fontSize=12.sp)
             }
         },
-        confirmButton={TextButton(onClick={onApply(value)}) {Text("Apply",color=Lc.selected)}},
+        confirmButton={TextButton(onClick={onApply(value,mode)}) {Text("Apply",color=Lc.selected)}},
         dismissButton={TextButton(onClick=onDismiss){Text("Cancel",color=Lc.text)}}
     )
 }
