@@ -1,0 +1,133 @@
+name: Dennis Photo Studio v0.3 — Auto Analysis ARM64
+
+on:
+  push:
+    branches: [studio-v0.3-auto-lab]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dps-auto-lab-v03
+  cancel-in-progress: true
+
+jobs:
+  quality-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 115
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit expected Smart Auto and WB source
+        run: |
+          test -s LICENSE-MIT
+          test -s LICENSE-APACHE
+          test -f apps/lightcraft-android/android/app/src/main/res/drawable/dennis_studio_lens.xml
+          python3 - <<'PY'
+          from pathlib import Path
+          a=Path('crates/pipeline/src/auto.rs').read_text()
+          assert 'pub fn smart_auto_tone' in a
+          assert 'pub fn auto_wb_classic' in a
+          assert 'pub fn auto_wb(' in a
+          assert 'if eligible == 0 || neutral < 180' in a
+          assert 'fn colourful_scenes_keep_camera_white_balance' in a
+          e=Path('crates/engine/src/cmd/develop.rs').read_text()
+          assert 'mode == "classic"' in e
+          assert 'smart_auto_tone(&src' in e
+          assert 'auto_wb_classic(&patch' in e
+          p=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/EditorScreen.kt').read_text()
+          assert 'Smart Auto' in p and 'Classic Auto' in p
+          assert 'onApply(value,mode)' in p
+          assert 'lightcraft.version=0.3.0-beta' in Path('apps/lightcraft-android/android/gradle.properties').read_text()
+          assert 'pub fn auto_detail' in a and 'pub fn auto_effects' in a
+          assert 'fn smooth_photo_gets_no_noise_reduction' in a
+          assert 'fn colourful_scenes_keep_camera_white_balance' in a
+          assert 'develop.autoDetail' in e and 'develop.autoEffects' in e
+          edit=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/EditPanels.kt').read_text()
+          assert 'vm.runAutoDetail()' in edit
+          assert 'vm.runAutoEffects()' in edit
+          assert 'Advanced' in edit
+          assert 'com.dennis.photostudio.autolab.v03' in Path('apps/lightcraft-android/android/app/build.gradle.kts').read_text()
+          print('Source preservation and feature integrity: PASS')
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Android SDK manager
+        run: |
+          MANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -1)"
+          test -x "$MANAGER"
+          echo "$(dirname "$MANAGER")" >> "$GITHUB_PATH"
+      - name: Android SDK 37.0 and NDK 29
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --channel=3 "platforms;android-37.0" "ndk;29.0.14206865"
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
+          if [ ! -e "$ANDROID_HOME/platforms/android-37" ]; then
+            ln -s "$ANDROID_HOME/platforms/android-37.0" "$ANDROID_HOME/platforms/android-37"
+          fi
+      - name: Rust toolchain and target
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal --target aarch64-linux-android
+          rustup default 1.99.0
+          cargo +1.99.0 install cargo-ndk --version 4.1.2 --locked
+      - name: Cache native Rust build and dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          cache-on-failure: true
+      - name: Validate photographic pipeline and WB / Auto tests
+        run: |
+          cargo +1.99.0 test -p lightcraft-pipeline --locked --lib
+          cargo +1.99.0 test -p lightcraft-develop --locked --lib
+      - name: Assemble ARM64 APK
+        working-directory: apps/lightcraft-android/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace assembleDebug -Plightcraft.abis=arm64-v8a
+      - name: Verify APK and app identity
+        run: |
+          APK=apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          ls -lh "$APK"
+      - name: Upload test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dennis-Photo-Studio-v0.3-Auto-Analysis-ARM64
+          path: apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish pre-release APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dennis-photo-studio-v0.3-auto-lab
+          name: Dennis Photo Studio v0.3 — Intelligent Auto Lab (Experimental)
+          prerelease: true
+          body: |
+            Fully offline experimental Auto Lab Android build for S23 Ultra.
+            Separately installable alongside v0.1 and v0.2.
+
+            From v0.2: Smart/Classic Auto comparison, conservative neutral-
+            confidence White Balance with original camera As-Shot fallback,
+            natural presets and existing lens/landscape launcher icon.
+
+            New: Auto Detail analyzes a source proxy and chooses bounded
+            luminance-noise reduction, color-noise reduction and sharpening
+            with strong edge masking. Auto Effects selectively recommends
+            low texture/clarity enhancements; global Dehaze remains zero
+            without strong evidence. Advanced retains all manual controls.
+
+            Nothing new is installed or downloaded online at runtime.
+            This is deterministic scene analysis, NOT a new neural network
+            and NOT pixel-accurate guaranteed restoration. Source noise
+            inference on a downsampled JPEG can miss fine-grained sensor
+            noise: test 100% details against v0.2 before approving it.
+
+            Existing XMP, curve, mask, crop, export and optics untouched.
+            Automatic AI segmentation remains a separate future project.
+            Independently check colour and output against neutral references.
+          files: apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk

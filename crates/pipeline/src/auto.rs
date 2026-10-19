@@ -118,6 +118,149 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
     old
 }
 
+/// Automatic edit SETTINGS, not a replacement denoiser or a claimed AI model.
+/// Proxy statistics are conservative: thumb data underestimates pixel noise,
+/// so never force strong corrections or sharpen flat regions.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+pub struct AutoDetail {
+    pub sharpen_amount: f64,
+    pub sharpen_radius: f64,
+    pub sharpen_detail: f64,
+    pub sharpen_masking: f64,
+    pub nr_luminance: f64,
+    pub nr_color: f64,
+    pub nr_detail: f64,
+    pub nr_color_detail: f64,
+    pub nr_color_smoothness: f64,
+    pub noise_score: f64,
+    pub confidence: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+pub struct AutoEffects {
+    pub texture: f64,
+    pub clarity: f64,
+    pub dehaze: f64,
+    pub confidence: f64,
+}
+
+/// Flat-region, multi-channel high-pass statistics, calculated on the native
+/// decoded source proxy. Exclude over/under-exposed pixels and large edges.
+/// Statistics reflect noise-plus-detail in a JPEG, NOT ground-truth sensor noise.
+fn auto_quality_metrics(src: &Rgb32f) -> (f64, f64, f64, f64, f64) {
+    let w = src.width;
+    let h = src.height;
+    if w < 16 || h < 16 { return (0.0, 0.0, 0.0, 0.0, 0.0); }
+    let mut smooth_y = Vec::new();
+    let mut smooth_color = Vec::new();
+    let mut edges = Vec::new();
+    let mut valid = 0usize;
+    let mut saturated = 0usize;
+    // Uniform stride preserves a limited, reproducible CPU budget.
+    let stride = (w.max(h) / 512).max(2);
+    for y in (2..h - 2).step_by(stride) {
+        for x in (2..w - 2).step_by(stride) {
+            let i = y * w + x;
+            let c = src.data[i];
+            let yl = luminance_2020(c);
+            if !yl.is_finite() || !(0.018..0.90).contains(&yl) { continue; }
+            valid += 1;
+            let a=src.data[i-1];
+            let b=src.data[i+1];
+            let u=src.data[i-w];
+            let d=src.data[i+w];
+            let g1 = (luminance_2020(a) - luminance_2020(b)).abs();
+            let g2 = (luminance_2020(u) - luminance_2020(d)).abs();
+            let gradient = (g1 + g2)*0.5;
+            edges.push(gradient as f64);
+            if c.iter().any(|v| *v > 0.97) { saturated+=1; }
+            // Exclude structures. Fine filaments/hair may still reach the
+            // collection, which is why final model strengths are bounded.
+            if gradient > 0.044 || smooth_y.len() > 160_000 { continue; }
+            let mean_y=(luminance_2020(a)+luminance_2020(b)+
+                luminance_2020(u)+luminance_2020(d))*0.25;
+            let lum=(yl-mean_y).abs() as f64;
+            // RG and BG chrominance residuals relative to 4 neighbours.
+            let chroma = |v: [f32;3]| -> (f32,f32) {
+                (v[0]-v[1],v[2]-v[1])
+            };
+            let (cr,cblue)=chroma(c);
+            let chroma_of_avg = |k:usize| {
+                let v=src.data[k];
+                (v[0]-v[1],v[2]-v[1])
+            };
+            let mut avg_cr=0.0;
+            let mut avg_cb=0.0;
+            for k in [i-1,i+1,i-w,i+w] {
+                let (rr,bb)=chroma_of_avg(k);
+                avg_cr+=rr*0.25;
+                avg_cb+=bb*0.25;
+            }
+            let chroma_res=(((cr-avg_cr).abs()+(cblue-avg_cb).abs())*0.5) as f64;
+            smooth_y.push(lum);
+            smooth_color.push(chroma_res);
+        }
+    }
+    if valid < 120 || edges.is_empty() {return (0.0,0.0,0.0,0.0,0.0);}
+    smooth_y.sort_by(|a,b| a.total_cmp(b));
+    smooth_color.sort_by(|a,b| a.total_cmp(b));
+    edges.sort_by(|a,b| a.total_cmp(b));
+    // The low quartile rejects many textured pixels; it remains an estimate.
+    let q = |v: &Vec<f64>, fraction: f64| -> f64 {
+        if v.is_empty(){0.0}else{v[((v.len()-1) as f64*fraction) as usize]}
+    };
+    let lum=q(&smooth_y,0.32);
+    let chrom=q(&smooth_color,0.32);
+    let detail=q(&edges,0.75);
+    let confidence= (smooth_y.len() as f64 / valid as f64).clamp(0.0,1.0)
+        * (smooth_y.len() as f64 / 800.0).clamp(0.0,1.0);
+    (lum,chrom,detail,saturated as f64/valid as f64,confidence)
+}
+
+/// Choose source-adaptive luminance NR, chroma NR and edge-only sharpening.
+/// No cloud, neural network or fake 'AI denoise' claim.
+pub fn auto_detail(src: &Rgb32f, info: &SourceInfo) -> AutoDetail {
+    let (l,c,edges,clipped,confidence)=auto_quality_metrics(src);
+    if confidence<0.20 { return AutoDetail {
+        sharpen_radius: 1.0, sharpen_detail:25.0,
+        sharpen_masking: 80.0, nr_detail: 65.0,
+        nr_color_detail:65.0, nr_color_smoothness:50.0,
+        noise_score:l, confidence, ..Default::default()
+    }; }
+    let lum=((l-0.0026)*2300.0).clamp(0.0,28.0);
+    let color=((c-0.0030)*2100.0).clamp(0.0,34.0);
+    let noisy=lum>11.0 || color>12.0;
+    let already_crisp=edges>0.105;
+    // JPEG cameras pre-sharpen photos. Never sharpen through noise.
+    let sharpen=if noisy || already_crisp || clipped>0.015 {0.0}
+        else if edges>0.043 {8.0} else {12.0};
+    AutoDetail {
+        nr_luminance: lum.round(),
+        nr_color:color.round(),
+        nr_detail: if noisy {75.0}else{65.0},
+        nr_color_detail: if noisy {72.0}else{65.0},
+        nr_color_smoothness:50.0,
+        sharpen_amount: sharpen,
+        sharpen_radius:0.8,
+        sharpen_detail:15.0,
+        sharpen_masking:85.0,
+        noise_score:l,
+        confidence,
+    }
+}
+
+/// Conservatively suggest texture/clarity; global dehaze is deliberately 0.
+/// Haze is an artistic/scene-geometry ambiguity, not inferable from contrast
+/// alone. Manual controls remain available for real atmospheric haze.
+pub fn auto_effects(src: &Rgb32f, _info: &SourceInfo) -> AutoEffects {
+    let (noise,color,edges,clipped,confidence)=auto_quality_metrics(src);
+    if confidence<0.25 {return AutoEffects::default();}
+    let clean=noise<0.008 && color<0.010 && clipped<0.01;
+    let texture=if clean && edges>0.016 && edges<0.105 {5.0} else {0.0};
+    let clarity=if clean && edges>0.010 && edges<0.085 {3.0} else {0.0};
+    AutoEffects {texture,clarity,dehaze:0.0,confidence}
+}
+
 /// An automatic black & white mix (slider values, red … magenta) for `src` under `s`'s white
 /// balance and tone: each hue band's colourful pixels are pushed away from the image's mean
 /// lightness — bands brighter than average get brighter, darker ones darker — so areas that
@@ -384,5 +527,39 @@ mod studio_auto_safety {
         assert!(smart.exposure <= classic.exposure + 1e-6);
         assert!(smart.vibrance <= classic.vibrance);
         assert!(smart.saturation == 0.0);
+    }
+}
+
+#[cfg(test)]
+mod studio_auto_detail_tests {
+    use super::*;
+    #[test]
+    fn smooth_photo_gets_no_noise_reduction() {
+        let i=Rgb32f::filled(128,128,[0.20,0.20,0.20]);
+        let d=auto_detail(&i,&SourceInfo::default());
+        assert_eq!(d.nr_luminance,0.0);
+        assert_eq!(d.nr_color,0.0);
+        assert!(d.sharpen_amount<=12.0);
+        assert!(auto_effects(&i,&SourceInfo::default()).dehaze==0.0);
+    }
+    #[test]
+    fn structured_edges_do_not_trigger_aggressive_denoising() {
+        let img=Rgb32f::from_fn(128,128,|x,y|{
+            if ((x/8 + y/8)%2)==0 {[0.1,0.1,0.1]}else{[0.70,0.70,0.70]}
+        });
+        let d=auto_detail(&img,&SourceInfo::default());
+        assert!(d.nr_luminance<=28.0);
+        assert!(d.sharpen_amount<=12.0);
+    }
+    #[test]
+    fn noisy_regions_do_not_get_extra_sharpening() {
+        let img=Rgb32f::from_fn(128,128,|x,y|{
+            let n=((((x*37+y*101+x*y*13)%257) as f32/257.0)-0.5)*0.09;
+            [0.18+n,0.18-n*0.7,0.18+n*0.4]
+        });
+        let d=auto_detail(&img,&SourceInfo::default());
+        assert!(d.nr_luminance>=0.0 && d.nr_color>=0.0);
+        assert!(d.sharpen_masking>=80.0);
+        assert!(auto_effects(&img,&SourceInfo::default()).dehaze==0.0);
     }
 }

@@ -2889,6 +2889,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Conservative image-specific non-destructive pixel-noise and sharpening settings. */
+    fun runAutoDetail() = edit(after = {say("Auto Detail applied • inspect at 100%")}) {
+        it.execute("develop.autoDetail","{}")
+    }
+
+    /** Never invents haze removal: manual Dehaze remains available in Advanced. */
+    fun runAutoEffects() = edit(after = {say("Auto Effects applied • subtle texture and clarity")}) {
+        it.execute("develop.autoEffects","{}")
+    }
+
     /** Crop › Geometry's switch: crop the corners an Upright or transform leaves blank (one step Cancel takes back). */
     fun setConstrainCrop(on: Boolean) =
         cropCommand("develop.merge", JSONObject().put("settings", JSONObject().put("geometry", JSONObject().put("constrain_crop", on))).put("label", "Constrain Crop"))

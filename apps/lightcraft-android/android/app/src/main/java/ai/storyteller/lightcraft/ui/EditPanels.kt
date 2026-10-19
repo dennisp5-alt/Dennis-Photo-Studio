@@ -175,6 +175,8 @@ private fun EditorState.value(id: String) = control(id)?.value ?: 0.0
 /** An Edit section's panel. */
 @Composable
 fun SectionSheet(vm: AppViewModel, ed: EditorState, section: EditSection, modifier: Modifier) {
+    var manualDetail by remember(ed) { mutableStateOf(false) }
+    var manualEffects by remember(ed) { mutableStateOf(false) }
     Column(modifier) {
         when (section) {
             EditSection.LIGHT -> if (ed.sub == "curve") CurvePanel(vm, ed) else LightPanel(vm, ed)
@@ -184,12 +186,42 @@ fun SectionSheet(vm: AppViewModel, ed: EditorState, section: EditSection, modifi
                 else -> ColorPanel(vm, ed)
             }
             EditSection.EFFECTS -> {
-                Tabs(listOf("effects" to "Effects", "vignette" to "Vignette", "grain" to "Grain"), ed.effectsTab) { ed.effectsTab = it }
-                EffectsPanel(vm, ed)
+                Row(Modifier.fillMaxWidth().padding(start=14.dp,top=5.dp,bottom=4.dp),
+                    horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    LcButton("Auto Effects", null, description="Analyse texture and clarity") {
+                        vm.runAutoEffects()
+                    }
+                    LcButton(if(manualEffects) "Hide sliders" else "Advanced", null) {
+                        manualEffects=!manualEffects
+                    }
+                }
+                if(manualEffects) {
+                    Tabs(listOf("effects" to "Effects", "vignette" to "Vignette", "grain" to "Grain"), ed.effectsTab) { ed.effectsTab = it }
+                    EffectsPanel(vm, ed)
+                } else {
+                    Text("Analyses texture and clarity. Dehaze stays off unless you choose it in Advanced.",
+                        color=Lc.panelTextSoft,fontFamily=Inter,fontSize=12.sp,
+                        modifier=Modifier.padding(horizontal=17.dp,vertical=12.dp))
+                }
             }
             EditSection.DETAIL -> {
-                Tabs(listOf("sharpening" to "Sharpening", "noise" to "Noise", "color" to "Color noise"), ed.detailTab) { ed.detailTab = it }
-                DetailPanel(vm, ed)
+                Row(Modifier.fillMaxWidth().padding(start=14.dp,top=5.dp,bottom=4.dp),
+                    horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    LcButton("Auto Detail", null, description="Analyse photo and set noise reduction and sharpening") {
+                        vm.runAutoDetail()
+                    }
+                    LcButton(if(manualDetail) "Hide sliders" else "Advanced", null) {
+                        manualDetail=!manualDetail
+                    }
+                }
+                if(manualDetail) {
+                    Tabs(listOf("sharpening" to "Sharpening", "noise" to "Noise", "color" to "Color noise"), ed.detailTab) { ed.detailTab = it }
+                    DetailPanel(vm, ed)
+                } else {
+                    Text("One tap sets luminance noise, colour noise and edge-masked sharpening. Inspect at 100%.",
+                        color=Lc.panelTextSoft,fontFamily=Inter,fontSize=12.sp,
+                        modifier=Modifier.padding(horizontal=17.dp,vertical=12.dp))
+                }
             }
             EditSection.OPTICS -> OpticsPanel(vm, ed)
             EditSection.AUTO, EditSection.PROFILES -> {}

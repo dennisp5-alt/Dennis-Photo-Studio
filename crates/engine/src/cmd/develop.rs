@@ -333,6 +333,40 @@ pub fn specs() -> Vec<CommandSpec> {
             })?;
             Ok(serde_json::to_value(a).unwrap_or_default())
         }),
+        cmd!("develop.autoDetail", "Auto Detail & Noise", ["Photo"], None, "{}", has_active, |s, _p| {
+            let id=active(s,"develop.autoDetail")?;
+            let src=s.source_now(id,SourceLevel::Thumb)
+                .map_err(|e|bad("develop.autoDetail",e))?;
+            let info=s.source_info(id);
+            let a=lightcraft_pipeline::auto::auto_detail(&src,&info);
+            edit(s,"develop.autoDetail","Auto Detail",|d|{
+                d.detail.nr_luminance=a.nr_luminance;
+                d.detail.nr_color=a.nr_color;
+                d.detail.nr_detail=a.nr_detail;
+                d.detail.nr_color_detail=a.nr_color_detail;
+                d.detail.nr_color_smoothness=a.nr_color_smoothness;
+                d.detail.sharpen_amount=a.sharpen_amount;
+                d.detail.sharpen_radius=a.sharpen_radius;
+                d.detail.sharpen_detail=a.sharpen_detail;
+                d.detail.sharpen_masking=a.sharpen_masking;
+                Ok(())
+            })?;
+            Ok(json!({"mode":"proxy-auto-detail","result":a}))
+        }),
+        cmd!("develop.autoEffects", "Auto Texture and Clarity", ["Photo"], None, "{}", has_active, |s, _p| {
+            let id=active(s,"develop.autoEffects")?;
+            let src=s.source_now(id,SourceLevel::Thumb)
+                .map_err(|e|bad("develop.autoEffects",e))?;
+            let info=s.source_info(id);
+            let a=lightcraft_pipeline::auto::auto_effects(&src,&info);
+            edit(s,"develop.autoEffects","Auto Effects",|d|{
+                d.effects.texture=a.texture;
+                d.effects.clarity=a.clarity;
+                d.effects.dehaze=a.dehaze;
+                Ok(())
+            })?;
+            Ok(json!({"mode":"conservative-auto-effects","result":a}))
+        }),
         cmd!(
             "develop.wb",
             "White Balance",
