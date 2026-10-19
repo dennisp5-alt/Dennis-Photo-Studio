@@ -815,7 +815,7 @@ fun DrawerContent(onPick: (String) -> Unit) {
             .windowInsetsPadding(WindowInsets.statusBars),
     ) {
         Row(Modifier.padding(start = 12.2.dp, top = 23.9.dp, bottom = 23.9.dp), verticalAlignment = Alignment.CenterVertically) {
-            Image(painterResource(R.drawable.ic_launcher_tile), contentDescription = null, modifier = Modifier.size(59.8.dp).clip(RoundedCornerShape(8.dp)))
+            Image(painterResource(R.drawable.dennis_studio_lens), contentDescription = null, modifier = Modifier.size(59.8.dp).clip(RoundedCornerShape(8.dp)))
             Spacer(Modifier.width(16.dp))
             Column {
                 Text("LightCraft", color = Lc.text, fontFamily = Inter, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
