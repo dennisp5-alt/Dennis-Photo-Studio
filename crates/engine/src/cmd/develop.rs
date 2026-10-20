@@ -387,6 +387,7 @@ pub fn specs() -> Vec<CommandSpec> {
                     serde_json::from_value(p.get("mode").cloned().unwrap_or(json!("custom"))).map_err(|e| bad("develop.wb", e.to_string()))?;
                 let id = active(s, "develop.wb")?;
                 let info = s.source_info(id);
+                let mut auto_report = None;
                 let (mut t, mut tint) = match mode {
                     WbMode::AsShot => (info.as_shot_temp, info.as_shot_tint),
                     WbMode::Auto => {
@@ -398,7 +399,9 @@ pub fn specs() -> Vec<CommandSpec> {
                         // Scene Auto WB is separate from manual/eyedropper WB.
                         // Classic remains usable internally for explicit
                         // neutral-point sampling but not through the UI.
-                        lightcraft_pipeline::auto::auto_wb(&src, &info)
+                        let result = lightcraft_pipeline::auto::auto_wb_report(&src, &info);
+                        auto_report = Some(result);
+                        (result.temp, result.tint)
                     }
                     // Custom picked from the list: the white balance in effect now, under its own name
                     WbMode::Custom => lightcraft_pipeline::local::effective_wb(&info, &s.develop_of(id).unwrap_or_default()),
@@ -420,7 +423,13 @@ pub fn specs() -> Vec<CommandSpec> {
                     d.wb.tint = tint.clamp(-150.0, 150.0);
                     Ok(())
                 })?;
-                Ok(json!({"temp": t, "tint": tint}))
+                Ok(json!({
+                    "temp": t, "tint": tint,
+                    "autoReport": auto_report,
+                    "note": if auto_report.as_ref().is_some_and(|r| r.camera_balance_retained) {
+                        "No reliable neutral reference: retained camera balance"
+                    } else { "White balance applied" }
+                }))
             }
         ),
         cmd!("develop.wbPick", "White Balance Selector", [], Some("W"), "{x, y} normalized image coords of a neutral point", has_active, |s, p| {
