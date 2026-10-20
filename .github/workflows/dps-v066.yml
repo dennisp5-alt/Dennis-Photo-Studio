@@ -101,7 +101,7 @@ jobs:
           assert 'shadow_fraction>0.64 && median< -2.1 && bright_fraction<0.35' in a
           assert '0.26*(-0.60-median)' in a
           assert '0.30*(median-0.85)' in a
-          assert 'mod studio_v066_evidence_gate_regressions' in a
+          assert 'mod studio_v065_evidence_gate_regressions' in a
           assert 'cmd!("develop.autoPreview"' in e
           assert '"sourceSettings":current' in e
           assert '"previewSettings":proposal' in e
