@@ -2902,9 +2902,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     else -> null
                 }
                 val ev = tone?.optDouble("exposure", 0.0) ?: 0.0
-                val lift = tone?.optDouble("curve_darks", 0.0) ?: 0.0
-                say("Smart Auto applied • Exposure " + "%.2f".format(ev) +
-                    " EV • Darks " + lift.toInt())
+                val vib = tone?.optDouble("vibrance", 0.0) ?: 0.0
+                val sat = tone?.optDouble("saturation", 0.0) ?: 0.0
+                val curveDarks = tone?.optDouble("curve_darks", 0.0) ?: 0.0
+                val curveLights = tone?.optDouble("curve_lights", 0.0) ?: 0.0
+                say("Smart Auto • " + "%.2f".format(ev) + " EV" +
+                    " • Vibrance " + vib.toInt() +
+                    " • Saturation " + sat.toInt() +
+                    " • Curves D" + curveDarks.toInt() + "/L" + curveLights.toInt())
             }.onFailure { say(it.message) }
         }
     }
