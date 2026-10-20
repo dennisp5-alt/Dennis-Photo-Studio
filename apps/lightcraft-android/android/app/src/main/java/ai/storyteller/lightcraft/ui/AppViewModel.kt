@@ -2923,13 +2923,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val shadow=t.optDouble("shadows",0.0).toInt()
                 val vibrance=t.optDouble("vibrance",0.0).toInt()
                 val darks=t.optDouble("curve_darks",0.0).toInt()
-                val status=result.optJSONObject("model")?.optString("status") ?: "not_connected"
+                val pilot=result.optJSONObject("model")
+                val status=pilot?.optString("status") ?: "unavailable"
+                val modelExplanation=if(status=="diagnostic_only") {
+                    val classification=pilot?.optString("predictedClass","unknown")?.replace('_',' ') ?: "unknown"
+                    val score=pilot?.optDouble("confidence",0.0) ?: 0.0
+                    "Learned Option C pilot: $classification (" +
+                        String.format(java.util.Locale.US,"%.0f",score*100.0) +
+                        "% confidence). Diagnostic only — the displayed preview uses current Smart Auto."
+                } else {
+                    "Learned Option C pilot unavailable. Preview uses current Smart Auto."
+                }
                 ed.autoPreview=AutoPreviewData(
                     original=original,
                     candidate=candidate,
                     summary="Exposure $ev EV  •  Shadows $shadow  •  Vibrance $vibrance  •  Curve Darks $darks",
                     unchanged=result.optBoolean("noChangeRecommended",false),
-                    modelStatus=status,
+                    modelStatus=modelExplanation,
                 )
             } catch (ex: Exception) {
                 say("Smart Auto preview unavailable: ${ex.message}")
