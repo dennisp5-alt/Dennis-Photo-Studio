@@ -379,7 +379,10 @@ pub fn specs() -> Vec<CommandSpec> {
         }),
         cmd!("develop.autoEffects", "Auto Texture and Clarity", ["Photo"], None, "{}", has_active, |s, _p| {
             let id=active(s,"develop.autoEffects")?;
-            let src=s.source_now(id,SourceLevel::Thumb)
+            // A tiny thumbnail erases fine JPEG structure and forces fixed
+            // Auto Effects presets. Analyse Preview; the algorithm internally
+            // uses a bounded 1024px proxy at two independent detail scales.
+            let src=s.source_now(id,SourceLevel::Preview)
                 .map_err(|e|bad("develop.autoEffects",e))?;
             let info=s.source_info(id);
             let a=lightcraft_pipeline::auto::auto_effects(&src,&info);
@@ -389,7 +392,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 d.effects.dehaze=a.dehaze;
                 Ok(())
             })?;
-            Ok(json!({"mode":"conservative-auto-effects","result":a}))
+            Ok(json!({"mode":"adaptive-auto-effects","sourcePixels":src.width*src.height,"result":a}))
         }),
         cmd!(
             "develop.wb",
