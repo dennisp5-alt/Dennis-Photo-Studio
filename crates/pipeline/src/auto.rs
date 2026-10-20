@@ -471,13 +471,17 @@ pub fn auto_effects(src: &Rgb32f, _info: &SourceInfo) -> AutoEffects {
     let confidence=(valid as f64/1800.0).clamp(0.0,1.0)
         * (0.55+0.45*noise_confidence).clamp(0.0,1.0);
     let mut texture=if fine_q>0.009 || fine_density>0.14 {
-        (fine_q*160.0+fine_density*15.0-1.5).clamp(0.0,24.0)
+        (fine_q*100.0+fine_density*7.0-1.0).clamp(0.0,18.0)
     }else{0.0};
     let mut clarity=if middle_q>0.015 || middle_density>0.12 {
-        (middle_q*80.0+middle_density*15.0-2.0).clamp(0.0,18.0)
+        (middle_q*62.0+middle_density*10.0-1.8).clamp(0.0,14.0)
     }else{0.0};
 
-    texture*=noise_safety*highlight_safety;
+    // Extremely strong existing pixel-level edges are often already
+    // sharpened in a camera JPEG. Ease off Texture rather than layering
+    // another maximal microcontrast pass over those edges.
+    let already_crisp=(1.0-0.55*((fine_q-0.14)/0.18).clamp(0.0,1.0));
+    texture*=noise_safety*highlight_safety*already_crisp;
     clarity*=noise_safety*highlight_safety;
     if warm_fraction>0.18 {
         texture=texture.min(7.0);
