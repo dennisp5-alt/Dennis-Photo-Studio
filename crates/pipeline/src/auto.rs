@@ -104,6 +104,7 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
     let mut rich_colour=0usize;
     let mut skin_like_colour=0usize;
     let mut colour_mass=0.0f64;
+    let mut clipped_colour=0usize;
     let mut structured=Vec::new();
     for (i,&y) in lum.iter().enumerate() {
         if y<0.028 {dark+=1;}
@@ -119,6 +120,7 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
             let spread=((mx-mn)/mx).clamp(0.0,1.0) as f64;
             colour_eligible+=1;
             colour_mass+=spread;
+            if c.iter().any(|&v| v>=0.985) { clipped_colour+=1; }
             if spread>0.065 {coloured+=1;}
             if (0.075..0.45).contains(&spread) {soft_colour+=1;}
             if spread>0.66 {rich_colour+=1;}
@@ -172,95 +174,228 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
         };
     }
 
-    // Global exposure considers textured subjects AND overall key.
-    // Previously "p99.5 > 1.55" could forcibly set an otherwise useful
-    // positive correction to zero on *any* JPEG with white clouds.
-    let proposed=(-0.15-subject_ev)*0.16+(-0.40-median)*0.15;
-    let balanced=median.abs()<0.40 && structure_fraction<0.09;
+    // v0.6.4: structure measures *subject evidence*, never exposure
+    // correctness. Fine texture by itself is not an exposure defect.
+    // The two tails and meaningful midtones must agree before a correction.
     let high_key=median>0.75 && bright_fraction>0.22;
-    let low_key=median< -2.5 && bright_fraction<0.01;
-    let mut exposure=proposed.clamp(-0.18,0.36);
-    if high_key {exposure=exposure.max(-0.10).min(0.02);}
-    if low_key {exposure=exposure.min(0.18);}
-    if p995>2.25 {exposure=exposure.min(0.18);}
-    if balanced {exposure=exposure.clamp(-0.10,0.12);}
-    if exposure<0.0 && median<0.55 {exposure=exposure.max(-0.06);}
+    let low_key=(median < -2.5 && bright_fraction<0.015)
+        || (shadow_fraction>0.64 && median< -2.1 && bright_fraction<0.10);
+    let is_shadow_deficit=!low_key && median< -0.65
+        && (subject_ev< -0.75 || median< -1.25);
+    let is_bright_deficit=median>0.85 && subject_ev>0.45
+        && (bright_fraction>0.12 || p95>2.0);
+    let exposure=if is_shadow_deficit {
+        let need=(0.13*(-0.65-median).max(0.0)
+            +0.11*(-0.75-subject_ev).max(0.0)).clamp(0.0,0.46);
+        if need>=0.075 {need}else{0.0}
+    }else if is_bright_deficit {
+        let need=(0.18*(median-0.85).max(0.0)
+            +0.10*(subject_ev-0.45).max(0.0)).clamp(0.0,0.35);
+        if need>=0.075 {-need}else{0.0}
+    }else{0.0};
+    let exposure=if exposure>0.0 && p995>2.25 {
+        exposure.min(0.18)
+    }else{exposure};
+    let exposure=(exposure*100.0).round()/100.0;
 
-    // Soft highlight protection follows the FINAL exposure setting. It is
-    // not a request to make naturally bright objects grey.
-    let highlights=if p995+exposure>1.95 {
-        -((p995+exposure-1.95)*20.0).clamp(0.0,19.0).round()
-    }else{0.0};
-    let tonal_structure=(structure_fraction/0.24).min(1.0);
-    let local_opportunity=if recoverable_fraction>0.09 {
-        ((recoverable_fraction-0.09)/0.30).clamp(0.0,1.0)
-    }else{0.0};
-    let lift_strength=local_opportunity*(0.50+0.50*tonal_structure);
-    let natural_tone= !high_key && !low_key && !balanced;
-    let shadows=if natural_tone {
-        (6.0+16.0*lift_strength+5.0*shadow_fraction).clamp(0.0,26.0).round()
-    }else{0.0};
-    let curve_darks=if natural_tone {
-        (9.0+14.0*lift_strength).clamp(0.0,23.0).round()
-    }else{0.0};
-    let curve_shadows=if natural_tone {
-        (6.0+12.0*lift_strength).clamp(0.0,18.0).round()
-    }else{0.0};
     let dynamic_range=p95-p05;
-    let contrast=((5.5-dynamic_range)*1.2).clamp(-6.0,8.0).round();
+    let protected_warm_colour=colour_eligible>100
+        && colour_mass/colour_eligible as f64>0.20
+        && rich_colour as f64/colour_eligible as f64>0.09;
+    // Shadow recovery requires *three* signals: deeply compressed dark
+    // values, actual recoverable mid-shadow data, and a dark subject.
+    // This avoids lifting a deliberately deep sunset or night portrait
+    // merely because the photo has plenty of visible texture.
+    let shadow_need=if low_key || protected_warm_colour {
+        0.0
+    }else{
+        ((-3.0-p05)/2.0).clamp(0.0,1.0)
+        * ((recoverable_fraction-0.15)/0.29).clamp(0.0,1.0)
+        * ((-0.45-subject_ev)/1.5).clamp(0.0,1.0)
+    };
+    let shadows=if shadow_need>0.20 {
+        (shadow_need*27.0).round()
+    }else{0.0};
+    let curve_shadows=if shadow_need>0.24 {
+        (shadow_need*20.0).round()
+    }else{0.0};
+    let curve_darks=if shadow_need>0.20 {
+        (shadow_need*26.0).round()
+    }else{0.0};
 
-    // Auto Curve uses all four existing *parametric* regions. Keep a
-    // photographer's RGB point curves intact. Upper-midtones gain a little
-    // luminosity only when they are genuinely subdued; the top region is
-    // gently rolled off only where bright non-emissive content supports it.
-    // The earlier fire exit intentionally bypasses these two operations.
+    // Midtone luminance repair is separate from shadow lift. A sunset with
+    // already appropriate upper midtones should not get a default +5.
     let p75=percentile(&ev,0.75) as f64;
-    let curve_lights=if natural_tone && p75<0.95 && p95<2.1 {
-        (5.0+9.0*((0.95-p75)/2.0).clamp(0.0,1.0)).round()
-    }else{0.0};
-    let curve_highlights=if !high_key && !low_key
-        && p95>1.30 && bright_fraction>0.012 {
-        -(3.0+7.0*((p95-1.30)/1.8).clamp(0.0,1.0)).round()
+    let light_need=if low_key || protected_warm_colour {0.0}else{
+        ((-0.26-p75)/1.3).clamp(0.0,1.0)
+        * ((-0.40-median)/1.3).clamp(0.0,1.0)
+    };
+    let curve_lights=if light_need>0.23 {
+        (light_need*14.0).round()
     }else{0.0};
 
-    // Automatic colour is a *separate* decision from Auto WB. Work out
-    // whether there is recoverable low-chroma colour, or whether the camera
-    // has already rendered strongly coloured flowers/sunsets. Unlike v0.6,
-    // an ordinary photograph is not hard-coded to Saturation=0.
+    // Shadows and highlights may need correction in either direction, but
+    // genuine high-key whites and emissive subjects must retain their mood.
+    let highlight_need=if p995>2.35 && bright_fraction>0.06 {
+        ((p995-2.35)/1.8).clamp(0.0,1.0)
+    }else{0.0};
+    let highlights=if highlight_need>0.18 && !high_key {
+        -(highlight_need*17.0).round()
+    }else{0.0};
+    let curve_highlights=if highlight_need>0.28 && !high_key {
+        -(highlight_need*10.0).round()
+    }else{0.0};
+    // Contrast only where a compressed tonal range and actual internal
+    // structure support improvement. No fixed base S-curve.
+    let contrast=if dynamic_range<3.7 && structure_fraction>0.035
+        && !low_key && !high_key && p95<1.9 {
+        ((3.7-dynamic_range)*5.0).clamp(0.0,14.0).round()
+    }else if dynamic_range>7.0 && p05< -5.0
+        && p95>2.4 && bright_fraction>0.08 && !low_key {
+        -((dynamic_range-7.0)*2.0).clamp(0.0,6.0).round()
+    }else{0.0};
+    let blacks=if !low_key && shadow_need>0.45 && shadow_fraction>0.20 {
+        -2.0
+    }else{0.0};
+
+    // Colourfulness is not itself a deficiency. Require measurable low
+    // chroma in sufficiently many actual colours. Neutral greys, skin-like
+    // midtones, saturated flowers and already-balanced sunsets stay put.
     let eligible=colour_eligible.max(1) as f64;
     let colour_fraction=coloured as f64/eligible;
     let soft_fraction=soft_colour as f64/eligible;
     let rich_fraction=rich_colour as f64/eligible;
     let skin_fraction=skin_like_colour as f64/eligible;
     let mean_sat=colour_mass/eligible;
-    let chroma_need=((0.38-mean_sat)/0.38).clamp(0.0,1.0);
-    let has_colour=colour_fraction>0.16 && colour_eligible as f64>n*0.10;
-    let mut vibrance=if has_colour {
-        ((9.0+12.0*soft_fraction+7.0*chroma_need)
-            *(1.0-1.35*rich_fraction).clamp(0.0,1.0))
-            .clamp(0.0,22.0)
+    let has_colour=colour_fraction>0.22 && colour_eligible as f64>n*0.10;
+    let weak_colour=has_colour && mean_sat<0.17
+        && soft_fraction>0.14 && rich_fraction<0.08
+        && skin_fraction<0.26;
+    let chroma_need=if weak_colour {
+        ((0.17-mean_sat)/0.13).clamp(0.0,1.0)
     }else{0.0};
-    let mut saturation=if has_colour && soft_fraction>0.14
-        && rich_fraction<0.24 {
-        (2.0+3.0*soft_fraction+2.0*chroma_need).clamp(0.0,6.0)
+    let mut vibrance=if chroma_need>0.22 {
+        (chroma_need*19.0).clamp(0.0,19.0).round()
     }else{0.0};
-    if skin_fraction>0.20 {
-        vibrance=vibrance.min(12.0);
-        saturation=saturation.min(2.0);
-    }
-    if high_key {
-        vibrance*=0.70;
-        saturation*=0.70;
+    let mut saturation=if chroma_need>0.44 {
+        ((chroma_need-0.35)*8.0).clamp(0.0,5.0).round()
+    }else{0.0};
+    // Genuine channel clipping *plus* unusually strong colour is
+    // evidence for a mild negative correction; vivid colours alone are not.
+    let clipped_fraction=clipped_colour as f64/eligible;
+    if has_colour && rich_fraction>0.40 && mean_sat>0.63
+        && clipped_fraction>0.065 {
+        vibrance=-((clipped_fraction-0.065)*27.0).clamp(0.0,9.0).round();
+        saturation=-((clipped_fraction-0.065)*12.0).clamp(0.0,5.0).round();
     }
 
-    AutoTone {
-        exposure:(exposure*100.0).round()/100.0,
-        contrast:if balanced {0.0}else{contrast},
-        highlights,shadows,whites:0.0,
-        blacks:if natural_tone && shadow_fraction>0.25 {-3.0}else{0.0},
-        vibrance:vibrance.round(),saturation:saturation.round(),
-        curve_shadows,curve_darks,curve_lights,curve_highlights,
+    // Smart Auto may return zero for every control. Under- and overexposed
+    // photos still receive real exposure changes where the evidence agrees.
+    let candidate=AutoTone {
+        exposure, contrast, highlights, shadows, whites:0.0,
+        blacks, vibrance, saturation,
+        curve_shadows, curve_darks, curve_lights, curve_highlights,
+    };
+    preview_quality_guard(src,info,s,candidate)
+
+}
+
+
+fn preview_quality_guard(
+    src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings,mut a:AutoTone,
+) -> AutoTone {
+    let strength=a.exposure.abs()+a.contrast.abs()+a.highlights.abs()
+        +a.shadows.abs()+a.blacks.abs()+a.vibrance.abs()
+        +a.saturation.abs()+a.curve_shadows.abs()+a.curve_darks.abs()
+        +a.curve_lights.abs()+a.curve_highlights.abs();
+    if strength==0.0 {return a;}
+    // This is an inexpensive *safety* gate, not a learned aesthetic scorer.
+    // A 160px full-pipeline render tests the actual RGB output including
+    // tone curves and colour transforms, unlike checking slider positions.
+    let proxy=lightcraft_raster::resample::fit(
+        src,160,160,lightcraft_raster::resample::Filter::Box);
+    let req=crate::RenderRequest::fit(160,160);
+    let mut baseline=DevelopSettings {wb:s.wb,..DevelopSettings::default()};
+    baseline.curve.master=s.curve.master.clone();
+    baseline.curve.red=s.curve.red.clone();
+    baseline.curve.green=s.curve.green.clone();
+    baseline.curve.blue=s.curve.blue.clone();
+    let mut changed=baseline.clone();
+    changed.light.exposure=a.exposure;
+    changed.light.contrast=a.contrast;
+    changed.light.highlights=a.highlights;
+    changed.light.shadows=a.shadows;
+    changed.light.blacks=a.blacks;
+    changed.color.vibrance=a.vibrance;
+    changed.color.saturation=a.saturation;
+    changed.curve.shadows=a.curve_shadows;
+    changed.curve.darks=a.curve_darks;
+    changed.curve.lights=a.curve_lights;
+    changed.curve.highlights=a.curve_highlights;
+    let before=crate::render(&proxy,info,&baseline,&req).image;
+    let after=crate::render(&proxy,info,&changed,&req).image;
+    if before.data.is_empty() || before.data.len()!=after.data.len() {
+        return AutoTone::default();
     }
+    let total=(before.data.len()*3) as f64;
+    let clipped=|im:&lightcraft_raster::Rgba8,bright:bool|{
+        im.data.iter().flat_map(|p|p.iter().take(3)).filter(|&&v|
+            if bright {v>=254}else{v<=1}
+        ).count() as f64/total
+    };
+    // Clamp *new* clipped RGB values; already clipped pixels cannot be
+    // recovered by simply reducing exposure on JPEGs.
+    let new_whites=clipped(&after,true)-clipped(&before,true);
+    let new_blacks=clipped(&after,false)-clipped(&before,false);
+    if new_whites>0.012 {
+        if a.exposure>0.0 {a.exposure=0.0;}
+        a.curve_lights=0.0;
+        a.vibrance=0.0;
+        a.saturation=0.0;
+    }
+    if new_blacks>0.014 {
+        if a.exposure<0.0 {a.exposure=0.0;}
+        a.blacks=0.0;
+        if a.contrast<0.0 {a.contrast=0.0;}
+    }
+    // Protect deep intentional shadows from broad lifts, unless a
+    // separately established exposure deficit justified the lift.
+    let mut dark_count=0usize;
+    let mut dark_lift=0.0f64;
+    let mut grad0=0.0f64;
+    let mut grad1=0.0f64;
+    for (i,(b,c)) in before.data.iter().zip(&after.data).enumerate() {
+        let y=|p:&[u8;4]|(54u32*p[0] as u32
+            +183u32*p[1] as u32+19u32*p[2] as u32) as f64/256.0;
+        let y0=y(b);
+        let y1=y(c);
+        if y0>4.0 && y0<67.0 {
+            dark_count+=1;
+            dark_lift+=(y1-y0).max(0.0);
+        }
+        if i>0 {
+            let p=&before.data[i-1];
+            let q=&after.data[i-1];
+            grad0+=(y(b)-y(p)).abs();
+            grad1+=(y(c)-y(q)).abs();
+        }
+    }
+    if dark_count>200 && a.exposure<=0.0
+        && dark_lift/dark_count as f64>14.0 {
+        a.shadows=0.0;
+        a.curve_shadows=0.0;
+        a.curve_darks=0.0;
+    }
+    // A major collapse of brightness edges means lost useful contrast:
+    // reject the contrast/curve proposal, but keep warranted exposure.
+    if grad0>1000.0 && grad1<grad0*0.72 {
+        a.contrast=0.0;
+        a.curve_shadows=0.0;
+        a.curve_darks=0.0;
+        a.curve_lights=0.0;
+        a.curve_highlights=0.0;
+    }
+    a
 }
 
 /// Automatic edit SETTINGS, not a replacement denoiser or a claimed AI model.
