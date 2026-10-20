@@ -2923,25 +2923,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val shadow=t.optDouble("shadows",0.0).toInt()
                 val vibrance=t.optDouble("vibrance",0.0).toInt()
                 val darks=t.optDouble("curve_darks",0.0).toInt()
-                val pilot=result.optJSONObject("model")
-                val status=pilot?.optString("status") ?: "unavailable"
-                val modelExplanation=if(status=="diagnostic_only") {
-                    val classification=pilot?.optString("predictedClass","unknown")?.replace('_',' ') ?: "unknown"
-                    val score=pilot?.optDouble("confidence",0.0) ?: 0.0
-                    val percentage=String.format(java.util.Locale.US,"%.0f",score*100.0)
-                    val advice=when {
-                        classification=="preserve" && score>=0.75 ->
-                            "Pilot favours preserving this photo."
-                        score>=0.75 ->
-                            "Pilot identifies a possible $classification defect."
-                        else ->
-                            "Pilot is uncertain (below the 75% threshold); no model-led correction proposed."
-                    }
-                    "$advice Top class: $classification ($percentage%). " +
-                        "Diagnostic only — the image preview is rendered by current Smart Auto."
-                } else {
-                    "Learned Option C pilot unavailable. Preview uses current Smart Auto."
+                val wb=result.optJSONObject("whiteBalance")
+                val wbStatus=when(wb?.optString("decision")) {
+                    "warm_light_preserved" -> "Warm ambient light preserved; Auto WB unchanged."
+                    "corrected" -> "White balance: evidence-supported correction proposed."
+                    "already_neutral" -> "White balance: camera colour already acceptable."
+                    else -> "White balance: camera setting retained."
                 }
+                val modelExplanation="Restored Lightroom-style Smart Auto. $wbStatus " +
+                    "Review the Original and Suggested images before applying."
                 ed.autoPreview=AutoPreviewData(
                     original=original,
                     candidate=candidate,
