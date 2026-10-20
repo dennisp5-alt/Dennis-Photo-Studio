@@ -18,6 +18,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
@@ -296,6 +297,18 @@ fun CurveOverlay(vm: AppViewModel, ed: EditorState, curve: ToneCurveInfo, modifi
             }
         }
         if (line.size >= 2) {
+            // Identity diagonal: the reference against which the *actual*
+            // sampled parametric transform can be read. This is display-only;
+            // Auto does not write points to the independent Master curve.
+            if (parametric) {
+                drawLine(
+                    Color.White.copy(alpha = 0.33f),
+                    Offset(sq.left, sq.bottom),
+                    Offset(sq.right, sq.top),
+                    strokeWidth = hair,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 5.dp.toPx())),
+                )
+            }
             val path = Path()
             line.forEachIndexed { i, y ->
                 val px = sq.left + sq.width * i / (line.size - 1)
