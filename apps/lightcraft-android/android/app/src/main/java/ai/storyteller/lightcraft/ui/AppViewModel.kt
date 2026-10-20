@@ -2877,8 +2877,36 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Single touch, no dialog or strength control. Settings remain editable
      * non-destructively through Light, Colour, Undo and Presets. */
-    fun applySmartAuto() = edit(after = { say("Smart Auto applied") }) {
-        it.execute("develop.auto", "{}")
+    /** One-tap Smart Auto applies scene-adaptive tone and evidence-supported
+     * WB together, without replacing a manually selected Custom WB. */
+    fun applySmartAuto() {
+        val ed = editor ?: return
+        val e = engine ?: return
+        viewModelScope.launch {
+            runCatching {
+                e.command {
+                    val result = JSONObject(execute("develop.auto", "{}"))
+                    snapshot(ed.photoId) to result
+                }
+            }.onSuccess { (snapshot, result) ->
+                ed.update(snapshot)
+                requestView()
+                val tone = result.optJSONObject("tone")
+                val wb = result.optJSONObject("whiteBalance")
+                val decision = wb?.optString("decision") ?: "manual"
+                ed.wbAutoStatus = when (decision) {
+                    "corrected" -> "Smart Auto also adjusted white balance using spatially consistent neutral areas."
+                    "already_neutral" -> "White balance is already near neutral; no change needed."
+                    "ambiguous" -> "White balance was left unchanged: neutral-looking regions disagree."
+                    "no_neutral" -> "White balance was left unchanged: no reliable neutral surfaces found."
+                    else -> null
+                }
+                val ev = tone?.optDouble("exposure", 0.0) ?: 0.0
+                val lift = tone?.optDouble("curve_darks", 0.0) ?: 0.0
+                say("Smart Auto applied • Exposure " + "%.2f".format(ev) +
+                    " EV • Darks " + lift.toInt())
+            }.onFailure { say(it.message) }
+        }
     }
 
     /** Conservative image-specific non-destructive pixel-noise and sharpening settings. */
@@ -3409,13 +3437,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 ed.update(snapshot)
                 requestView()
                 val report = result.optJSONObject("autoReport")
-                val retained = report?.optBoolean("camera_balance_retained", true) ?: true
-                ed.wbAutoStatus = if (retained) {
-                    "Auto WB: original colour retained. No reliable neutral reference found; coloured firelight should not automatically turn blue."
-                } else {
-                    "Auto WB applied a measured temperature/tint correction using neutral-looking areas."
+                val decision = report?.optString("decision") ?: "no_neutral"
+                ed.wbAutoStatus = when (decision) {
+                    "corrected" -> {
+                        val temp = report?.optDouble("temp", 6500.0)?.toInt() ?: 6500
+                        val tint = report?.optDouble("tint", 0.0)?.toInt() ?: 0
+                        "Auto WB corrected using neutral-region agreement: " +
+                            temp + " K, tint " + tint + ". Manual controls remain available."
+                    }
+                    "already_neutral" ->
+                        "Auto WB found neutral surfaces; the camera colour is already balanced. No correction needed."
+                    "ambiguous" ->
+                        "Auto WB found some neutral-looking areas, but their colours disagree. Camera rendering preserved."
+                    else ->
+                        "Auto WB could not find a trustworthy neutral surface. Camera rendering preserved."
                 }
-                say(if (retained) "Auto WB: no reliable neutral reference" else "Auto WB correction applied")
+                say(when (decision) {
+                    "corrected" -> "Auto WB correction applied"
+                    "already_neutral" -> "Auto WB: already neutral"
+                    "ambiguous" -> "Auto WB: neutral areas disagree"
+                    else -> "Auto WB: no reliable neutral reference"
+                })
             }.onFailure { say(it.message) }
         }
     }
