@@ -348,6 +348,7 @@ pub fn specs() -> Vec<CommandSpec> {
             // Compare complete current/proposed settings; zero recommendations
             // can still reset nonzero manual Light/Colour controls.
             let no_change=proposal==current;
+            let model=lightcraft_pipeline::optionc::diagnose(&src,&info,&current);
             Ok(json!({
                 "sourceSettings":current,
                 "previewSettings":proposal,
@@ -355,7 +356,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 "whiteBalance":wb,
                 "manualWbPreserved":manual_wb,
                 "noChangeRecommended":no_change,
-                "model":{"status":"not_connected","note":"Trained pilot is not yet approved for inference; current preview is the actual existing Smart Auto proposal."}
+                "model":model
             }))
         }),
         cmd!("develop.auto", "Smart Auto", ["Photo"], Some("Shift+A"), "{}", has_active, |s, _p| {
