@@ -235,6 +235,7 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
         }else{0.0};
         compressed.max(backlit)
     };
+    let mut backlit_daylight_scene=false;
     // Backlit daylight photographs can have correctly exposed blue skies
     // and a dark but recoverable foreground. Global Exposure is unsafe
     // for the sky, so favour small editable Shadows/Curve corrections.
@@ -259,6 +260,7 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
         if top_bright>0.27 && top_warm<0.12
             && foreground_useful>0.30 && foreground_median<0.085
             && warm_emitters as f64/n<0.002 && !protected_warm_colour {
+            backlit_daylight_scene=true;
             shadow_need=shadow_need.max(0.37);
         }
     }
@@ -340,6 +342,12 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
 
     // Smart Auto may return zero for every control. Under- and overexposed
     // photos still receive real exposure changes where the evidence agrees.
+    // A bright protected sky makes positive global exposure inappropriate,
+    // even if most of the frame is a dark foreground. Repair the ground
+    // with Shadows/Curve instead; keep a small exposure margin only.
+    let exposure=if backlit_daylight_scene && exposure>0.0 {
+        exposure.min(0.12)
+    }else{exposure};
     let candidate=AutoTone {
         exposure, contrast, highlights, shadows, whites:0.0,
         blacks, vibrance, saturation,
