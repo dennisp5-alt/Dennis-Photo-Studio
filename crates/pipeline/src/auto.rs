@@ -218,7 +218,7 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
     // values, actual recoverable mid-shadow data, and a dark subject.
     // This avoids lifting a deliberately deep sunset or night portrait
     // merely because the photo has plenty of visible texture.
-    let shadow_need=if low_key || protected_warm_colour {
+    let mut shadow_need=if low_key || protected_warm_colour {
         0.0
     }else{
         let compressed=((-3.0-p05)/2.0).clamp(0.0,1.0)
@@ -235,6 +235,33 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
         }else{0.0};
         compressed.max(backlit)
     };
+    // Backlit daylight photographs can have correctly exposed blue skies
+    // and a dark but recoverable foreground. Global Exposure is unsafe
+    // for the sky, so favour small editable Shadows/Curve corrections.
+    // The warm-sky and lamp guards prevent mistaking sunsets/fire for
+    // a failed landscape exposure.
+    if img.height>=24 && img.width>=24 {
+        let third=(img.height/3).max(1);
+        let top_len=third*img.width;
+        let bottom_start=(img.height-third)*img.width;
+        let top_bright=lum[..top_len].iter()
+            .filter(|&&y|y>0.65).count() as f64/top_len as f64;
+        let top_warm=img.data[..top_len].iter()
+            .filter(|c|c[0]>c[1]*1.25 && c[1]>c[2]*1.10)
+            .count() as f64/top_len as f64;
+        let foreground=&lum[bottom_start..];
+        let foreground_useful=foreground.iter()
+            .filter(|&&y|(0.035..0.28).contains(&y)).count() as f64
+            /foreground.len() as f64;
+        let mut foreground_sorted=foreground.to_vec();
+        foreground_sorted.sort_by(|a,b|a.total_cmp(b));
+        let foreground_median=percentile(&foreground_sorted,0.5) as f64;
+        if top_bright>0.27 && top_warm<0.12
+            && foreground_useful>0.30 && foreground_median<0.085
+            && warm_emitters as f64/n<0.002 && !protected_warm_colour {
+            shadow_need=shadow_need.max(0.37);
+        }
+    }
     let shadows=if shadow_need>0.20 {
         (shadow_need*27.0).round()
     }else{0.0};
@@ -766,6 +793,34 @@ pub fn auto_wb_report(src:&Rgb32f,info:&SourceInfo)->AutoWbReport{
         src,384,384,lightcraft_raster::resample::Filter::Box);
     if img.width<24 || img.height<24 || img.data.is_empty(){return report;}
     let (w,h)=(img.width,img.height);
+    // Colour casts cannot be judged by grey-world statistics alone:
+    // neutral-looking surfaces illuminated by fire or warm lamps are
+    // deliberately warm. Inspect lighting context before cooling a JPEG.
+    let mut deep_shadow_pixels=0usize;
+    let mut warm_lit_pixels=0usize;
+    let mut warm_emitter_pixels=0usize;
+    for c in &img.data {
+        let y=luminance_2020(*c);
+        if y<0.028 {deep_shadow_pixels+=1;}
+        if (0.04..0.60).contains(&y) &&
+            c[0]>c[1]*1.12 && c[1]>c[2]*1.08 {
+            warm_lit_pixels+=1;
+        }
+        if y>0.45 && c[0]>0.60 &&
+            c[0]>c[1]*1.45 && c[1]>c[2]*1.65 {
+            warm_emitter_pixels+=1;
+        }
+    }
+    let total_pixels=img.data.len() as f64;
+    let shadow_share=deep_shadow_pixels as f64/total_pixels;
+    let warm_midtone_share=warm_lit_pixels as f64/total_pixels;
+    let warm_emitter_share=warm_emitter_pixels as f64/total_pixels;
+    // Preserve the camera look under visible warm practical lighting
+    // rather than treating amber-lit greys as neutral reference cards.
+    // Manual picker/temperature controls are unaffected by this gate.
+    let intentional_warm_light=shadow_share>0.38
+        && (warm_emitter_share>0.0015
+            || (shadow_share>0.50 && warm_midtone_share>0.11));
     let mut eligible=0usize;
     let mut neutral=0usize;
     let mut sum=[0.0f64;3];
@@ -815,6 +870,10 @@ pub fn auto_wb_report(src:&Rgb32f,info:&SourceInfo)->AutoWbReport{
     if !t.is_finite() || !tint.is_finite(){return report;}
     report.candidate_temp=t;
     report.candidate_tint=tint;
+    if intentional_warm_light {
+        report.decision="warm_light_preserved";
+        return report;
+    }
 
     // Agreement between independent spatial neutral candidates limits the
     // influence of neutral-ish but intrinsically coloured objects.
@@ -1629,5 +1688,84 @@ mod studio_v065_evidence_gate_regressions {
         let a=auto(&img);
         assert_eq!(a.exposure,0.0,"night sky must not be exposed to middle grey: {a:?}");
         assert_eq!(a.curve_darks,0.0,"black sky must not receive the +42 fire lift: {a:?}");
+    }
+}
+
+// Restoration checks use synthetic scene-linear Rec.2020 fixtures;
+// private user photographs remain outside the GitHub repository.
+#[cfg(test)]
+mod studio_v067_restoration_regressions {
+    use super::*;
+
+    #[test]
+    fn firelight_preserves_ambient_warmth_in_auto_wb() {
+        let img=Rgb32f::from_fn(192,144,|x,y|{
+            if x>68 && x<122 && y>28 && y<91 {
+                [1.18,0.73,0.14] // practical flame
+            } else if y>102 {
+                [0.16,0.116,0.082] // orange-lit stone, not grey card
+            } else {
+                [0.007,0.005,0.003]
+            }
+        });
+        let info=SourceInfo::default();
+        let wb=auto_wb_report(&img,&info);
+        assert_eq!(wb.temp,info.as_shot_temp,"warm scene cooled: {wb:?}");
+        assert_eq!(wb.tint,info.as_shot_tint,"warm scene tinted: {wb:?}");
+        assert!(wb.camera_balance_retained);
+        assert!(matches!(wb.decision,"warm_light_preserved"|"no_neutral"),
+            "Unexpected firelight decision: {wb:?}");
+    }
+
+    #[test]
+    fn orange_lamplight_in_dark_room_remains_warm() {
+        let img=Rgb32f::from_fn(192,144,|x,y|{
+            if y<78 {[0.008,0.007,0.005]}
+            else if x>25 && x<171 && y<135 {
+                [0.22,0.15,0.11] // warm lit walls
+            } else {[0.02,0.012,0.008]}
+        });
+        let info=SourceInfo::default();
+        let wb=auto_wb_report(&img,&info);
+        assert_eq!((wb.temp,wb.tint),
+            (info.as_shot_temp,info.as_shot_tint),
+            "Warm atmospheric indoor photograph should retain as-shot WB: {wb:?}");
+    }
+
+    #[test]
+    fn ordinary_neutral_cast_is_still_correctable() {
+        let img=Rgb32f::from_fn(192,144,|x,y|{
+            let v=if (x/32+y/24)%2==0 {0.19}else{0.31};
+            [v*1.08,v,v*0.93]
+        });
+        let report=auto_wb_report(&img,&SourceInfo::default());
+        assert_ne!(report.decision,"warm_light_preserved",
+            "Normal scene must not be classified as firelight");
+        assert!(report.confidence>0.14,"Lost neutral analysis: {report:?}");
+    }
+
+    #[test]
+    fn blue_sky_dark_detailled_foreground_receives_local_recovery() {
+        let img=Rgb32f::from_fn(256,192,|x,y|{
+            let texture=((x*13+y*19)%29) as f32*0.0008;
+            if y<70 {[0.60,0.78,0.97]}
+            else if y>120 {[0.044+texture,0.060+texture,0.045+texture]}
+            else {[0.022,0.032,0.020]}
+        });
+        let a=smart_auto_tone(&img,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(a.shadows>0.0 || a.curve_darks>0.0,
+            "Recoverable foreground ignored: {a:?}");
+        assert!(a.exposure<0.25,"Global exposure risks clipping sky: {a:?}");
+    }
+
+    #[test]
+    fn intentional_warm_sunset_still_has_no_forced_curve_lift() {
+        let img=Rgb32f::from_fn(256,192,|x,y|{
+            if y<70 {[0.80,0.34,0.12]}
+            else if y<122 {[0.14,0.085,0.050]}
+            else {[0.022,0.016,0.013]}
+        });
+        let a=smart_auto_tone(&img,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(a.curve_darks<12.0,"Sunset unexpectedly treated as backlit land: {a:?}");
     }
 }
