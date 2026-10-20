@@ -129,7 +129,7 @@ class EditorState(val photoId: ULong, info: PhotoInfo, val device: DeviceOrigin?
     var detailTab by mutableStateOf("sharpening")
 
     /** Light › Curve: the channel shown (`parametric`, `master`, `red`, `green`, `blue`), the curves, the points while a finger moves one. */
-    var curveChannel by mutableStateOf("master")
+    var curveChannel by mutableStateOf("parametric")
     var curve by mutableStateOf<ToneCurveInfo?>(null)
     var liveCurve by mutableStateOf<List<Pair<Double, Double>>?>(null)
     var effectsTab by mutableStateOf("effects")
@@ -2790,6 +2790,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Light › Curve: the curves over the photo, their channels and presets in the panel. */
     fun openCurve() {
         val ed = editor ?: return
+        // Show the saved four-region curve first. Smart Auto edits these
+        // parametric values rather than the separate Master point curve,
+        // which often remains a visually misleading straight diagonal.
+        ed.curveChannel = "parametric"
         ed.sub = "curve"
         refreshCurve()
     }
@@ -2890,6 +2894,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }.onSuccess { (snapshot, result) ->
                 ed.update(snapshot)
+                // If Curves is already displayed, refresh the same engine
+                // samples which the image renderer uses; never invent a shape.
+                if (ed.sub == "curve") refreshCurve()
                 requestView()
                 val tone = result.optJSONObject("tone")
                 val wb = result.optJSONObject("whiteBalance")
