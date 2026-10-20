@@ -308,14 +308,22 @@ pub fn specs() -> Vec<CommandSpec> {
         // One-tap Smart Auto is the only user-facing tone Auto. No Classic
         // mode or amount knob. The old algorithm remains available inside
         // the pipeline for regression comparisons only.
+        // v0.6: one-tap scene analysis (tone + trusted colour balance).
+        // Preview pixels are needed for robust WB; both analyses downsample
+        // their own proxy internally. Keep native Auto Detail independent.
         cmd!("develop.auto", "Smart Auto", ["Photo"], Some("Shift+A"), "{}", has_active, |s, _p| {
             let id=active(s,"develop.auto")?;
-            let src=s.source_now(id,SourceLevel::Thumb)
+            let src=s.source_now(id,SourceLevel::Preview)
                 .map_err(|e|bad("develop.auto",e))?;
             let info=s.source_info(id);
             let d=s.develop_of(id).unwrap_or_default();
             let a=lightcraft_pipeline::auto::smart_auto_tone(&src,&info,&d);
-            // Absolute assignments keep repeated taps idempotent.
+            // A manually chosen Custom or picked white balance is intentional;
+            // Smart Auto must not silently override it.
+            let manual_wb=d.wb.mode==WbMode::Custom;
+            let wb=if manual_wb {None} else {
+                Some(lightcraft_pipeline::auto::auto_wb_report(&src,&info))
+            };
             edit(s,"develop.auto","Smart Auto",|d|{
                 d.light.exposure=a.exposure;
                 d.light.contrast=a.contrast;
@@ -325,15 +333,19 @@ pub fn specs() -> Vec<CommandSpec> {
                 d.light.blacks=a.blacks;
                 d.color.vibrance=a.vibrance;
                 d.color.saturation=a.saturation;
-                // The independent parametric regions brighten fire-lit
-                // wood/ground, unlike global Exposure that clips flames.
-                // Only these two regions are changed; point/colour curves
-                // and other manually edited curve regions are preserved.
+                // Parametric curves make recoverable shadow/midtone detail
+                // visible while leaving flame cores and white clouds bright.
                 d.curve.shadows=a.curve_shadows;
                 d.curve.darks=a.curve_darks;
+                if let Some(report)=wb.filter(|r|
+                    !r.camera_balance_retained && r.confidence>=0.14) {
+                    d.wb.mode=WbMode::Auto;
+                    d.wb.temp=report.temp;
+                    d.wb.tint=report.tint;
+                }
                 Ok(())
             })?;
-            Ok(serde_json::to_value(a).unwrap_or_default())
+            Ok(json!({"tone":a,"whiteBalance":wb,"manualWbPreserved":manual_wb}))
         }),
         cmd!("develop.autoDetail", "Auto Detail & Noise", ["Photo"], None, "{}", has_active, |s, _p| {
             let id=active(s,"develop.autoDetail")?;
