@@ -394,16 +394,104 @@ pub fn auto_detail(src: &Rgb32f, info: &SourceInfo) -> AutoDetail {
     }
 }
 
-/// Conservatively suggest texture/clarity; global dehaze is deliberately 0.
-/// Haze is an artistic/scene-geometry ambiguity, not inferable from contrast
-/// alone. Manual controls remain available for real atmospheric haze.
+/// Per-photograph Texture and Clarity recommendations. Unlike the old
+/// fixed (+5, +3, or zero) thresholds, this estimates two *different* detail
+/// scales on the source preview: fine local changes for Texture and broader
+/// edge transitions for Clarity. The calculation is deterministic and runs
+/// entirely offline. Do not infer photographic haze from contrast alone.
 pub fn auto_effects(src: &Rgb32f, _info: &SourceInfo) -> AutoEffects {
-    let (noise,color,edges,clipped,confidence)=auto_quality_metrics(src);
-    if confidence<0.25 {return AutoEffects::default();}
-    let clean=noise<0.008 && color<0.010 && clipped<0.01;
-    let texture=if clean && edges>0.016 && edges<0.105 {5.0} else {0.0};
-    let clarity=if clean && edges>0.010 && edges<0.085 {3.0} else {0.0};
-    AutoEffects {texture,clarity,dehaze:0.0,confidence}
+    let (noise, colour_noise, _edges, clipped, noise_confidence) = auto_quality_metrics(src);
+    // A 1024px analysis proxy keeps both measurements at a repeatable spatial
+    // scale while retaining far more usable structure than the old thumbnail.
+    let img = lightcraft_raster::resample::fit(
+        src, 1024, 1024, lightcraft_raster::resample::Filter::Box);
+    if img.width < 32 || img.height < 32 { return AutoEffects::default(); }
+    let w = img.width;
+    let h = img.height;
+    let lum: Vec<f32> = img.data.iter().map(|p| luminance_2020(*p)).collect();
+    let mut fine = Vec::new();
+    let mut middle = Vec::new();
+    let mut fine_edges = 0usize;
+    let mut middle_edges = 0usize;
+    let mut smooth_warm = 0usize;
+    let mut valid = 0usize;
+
+    // Measure at two scales on genuinely visible pixels. The 1px and 7px
+    // opposing-neighbour contrasts are normalized by local luminance, so
+    // dark foliage and light architecture can be compared. Stride 3 keeps
+    // the analysis inexpensive even on a 16 MP phone photograph.
+    for y in (8..h - 8).step_by(3) {
+        for x in (8..w - 8).step_by(3) {
+            let i = y*w+x;
+            let v = lum[i];
+            if !v.is_finite() || !(0.035..0.85).contains(&v) { continue; }
+            let norm = v+0.08;
+            let f = ((lum[i-1]-lum[i+1]).abs()
+                    +(lum[i-w]-lum[i+w]).abs())*0.5/norm;
+            let m = ((lum[i-7]-lum[i+7]).abs()
+                    +(lum[i-7*w]-lum[i+7*w]).abs())*0.5/norm;
+            if !f.is_finite() || !m.is_finite() {continue;}
+            valid+=1;
+            fine.push(f);
+            middle.push(m);
+            if f>0.035 {fine_edges+=1;}
+            if m>0.075 {middle_edges+=1;}
+            // A large area of relatively smooth, warm, moderate-chroma
+            // pixels may be skin. Limit microcontrast there rather than
+            // claiming to recognise a person or to know where skin is.
+            let c=img.data[i];
+            if f<0.055 && m<0.16
+                && c[0]>c[1]*1.08 && c[1]>c[2]*1.02
+                && c[0]<c[2]*2.1 {
+                let max=c[0].max(c[1]).max(c[2]);
+                let min=c[0].min(c[1]).min(c[2]);
+                let sat=(max-min)/max.max(1e-6);
+                if (0.12..0.55).contains(&sat) {smooth_warm+=1;}
+            }
+        }
+    }
+    if valid<120 {return AutoEffects::default();}
+    fine.sort_by(f32::total_cmp);
+    middle.sort_by(f32::total_cmp);
+    let q=|v:&Vec<f32>,p:f64| -> f64 {
+        v[(((v.len()-1) as f64*p) as usize)] as f64
+    };
+    let fine_q=q(&fine,0.80);
+    let middle_q=q(&middle,0.75);
+    let fine_density=fine_edges as f64/valid as f64;
+    let middle_density=middle_edges as f64/valid as f64;
+    let warm_fraction=smooth_warm as f64/valid as f64;
+
+    // No broad haloes on crisp JPEG edges and no microcontrast boost to
+    // sensor noise. Noise estimates use the existing high-resolution noise
+    // analysis; their thresholds are gently tapered, not binary gates.
+    let noise_safety=(1.0-(noise-0.006).max(0.0)/0.012).clamp(0.0,1.0)
+        *(1.0-(colour_noise-0.008).max(0.0)/0.012).clamp(0.0,1.0);
+    let highlight_safety=if clipped>0.025 {0.72}else{1.0};
+    let confidence=(valid as f64/1800.0).clamp(0.0,1.0)
+        * (0.55+0.45*noise_confidence).clamp(0.0,1.0);
+    let mut texture=if fine_q>0.009 || fine_density>0.14 {
+        (fine_q*160.0+fine_density*15.0-1.5).clamp(0.0,24.0)
+    }else{0.0};
+    let mut clarity=if middle_q>0.015 || middle_density>0.12 {
+        (middle_q*80.0+middle_density*15.0-2.0).clamp(0.0,18.0)
+    }else{0.0};
+
+    texture*=noise_safety*highlight_safety;
+    clarity*=noise_safety*highlight_safety;
+    if warm_fraction>0.18 {
+        texture=texture.min(7.0);
+        clarity=clarity.min(6.0);
+    }
+    // Round only at the final slider boundary. A clear sky or smooth face
+    // may legitimately produce zero, but unlike v0.6.1, detailed scenes
+    // can receive an image-specific setting instead of a fixed +5/+3.
+    AutoEffects {
+        texture:texture.round(),
+        clarity:clarity.round(),
+        dehaze:0.0,
+        confidence,
+    }
 }
 
 /// An automatic black & white mix (slider values, red … magenta) for `src` under `s`'s white
@@ -1061,5 +1149,104 @@ mod studio_v061_auto_colour_and_curve_tests {
                 assert!(changed>base.len()/25,"{name} produced too few changed pixels at {edge}px: {changed}/{}",base.len());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod studio_v062_adaptive_auto_effects_tests {
+    use super::*;
+
+    fn portrait_like() -> Rgb32f {
+        Rgb32f::from_fn(600,420, |x,y| {
+            if y<70 { [0.065,0.038,0.030] }
+            else if y>350 { [0.045,0.18,0.12] }
+            else {
+                let v=(x as f32/600.0*0.006)+(y as f32/420.0*0.004);
+                [0.25+v,0.19+v,0.15+v]
+            }
+        })
+    }
+    fn leaves() -> Rgb32f {
+        Rgb32f::from_fn(600,420, |x,y| {
+            if y<100 { [0.22,0.29,0.38] }
+            else {
+                let a=((x/4+y/6)%3) as f32;
+                let b=((x/16+y/13)%4) as f32;
+                [0.05+a*0.013+b*0.004,0.13+a*0.032+b*0.008,
+                 0.048+a*0.016+b*0.005]
+            }
+        })
+    }
+    fn building() -> Rgb32f {
+        Rgb32f::from_fn(600,420,|x,y| {
+            if x%35<4 || y%28<3 {[0.105,0.115,0.12]}
+            else {[0.30,0.31,0.32]}
+        })
+    }
+
+    #[test]
+    fn settings_respond_individually_to_subject_structure() {
+        let info=SourceInfo::default();
+        let smooth=auto_effects(&portrait_like(),&info);
+        let foliage=auto_effects(&leaves(),&info);
+        let architecture=auto_effects(&building(),&info);
+        assert!(foliage.texture>smooth.texture,
+            "fine leaves should get more Texture than a smooth portrait: {smooth:?} {foliage:?}");
+        assert!(architecture.clarity>smooth.clarity,
+            "defined architecture should get more Clarity: {smooth:?} {architecture:?}");
+        assert!((foliage.texture,foliage.clarity)!=(architecture.texture,architecture.clarity),
+            "the engine must not emit the same effect preset on every scene");
+        for result in [smooth,foliage,architecture] {
+            assert!((0.0..=24.0).contains(&result.texture));
+            assert!((0.0..=18.0).contains(&result.clarity));
+            assert_eq!(result.dehaze,0.0);
+        }
+    }
+
+    #[test]
+    fn smooth_neutral_photo_is_not_force_sharpened() {
+        let src=Rgb32f::filled(512,384,[0.20,0.20,0.20]);
+        let a=auto_effects(&src,&SourceInfo::default());
+        assert_eq!((a.texture,a.clarity,a.dehaze),(0.0,0.0,0.0));
+    }
+
+    #[test]
+    fn strong_pixel_noise_is_not_mistaken_for_texture() {
+        let src=Rgb32f::from_fn(512,384,|x,y|{
+            let n=((((x*37+y*101+x*y*13)%257) as f32/257.0)-0.5)*0.11;
+            [0.18+n,0.18-n*0.7,0.18+n*0.4]
+        });
+        let a=auto_effects(&src,&SourceInfo::default());
+        assert!(a.texture<=3.0 && a.clarity<=3.0,
+            "must avoid increasing high-ISO noise: {a:?}");
+    }
+
+    #[test]
+    fn photograph_preview_and_export_use_real_effect_pixels() {
+        use crate::{RenderRequest,render};
+        let src=leaves();
+        let info=SourceInfo::default();
+        let a=auto_effects(&src,&info);
+        assert!(a.texture>0.0 || a.clarity>0.0,"detail must be detected: {a:?}");
+        let mut settings=DevelopSettings::default();
+        settings.effects.texture=a.texture;
+        settings.effects.clarity=a.clarity;
+        for edge in [160,600] {
+            let req=RenderRequest::fit(edge,edge);
+            let before=render(&src,&info,&DevelopSettings::default(),&req).image;
+            let after=render(&src,&info,&settings,&req).image;
+            let count=before.data.iter().zip(&after.data)
+                .filter(|(b,a)| b[0..3]!=a[0..3]).count();
+            assert!(count>before.len()/80,"Auto Effects did not change output at {edge}px: {count}/{}",before.len());
+        }
+    }
+
+    #[test]
+    fn repeated_analysis_is_deterministic_and_does_not_edit_detail() {
+        let src=leaves();
+        let a=auto_effects(&src,&SourceInfo::default());
+        let b=auto_effects(&src,&SourceInfo::default());
+        assert_eq!(a,b);
+        assert_eq!(DevelopSettings::default().detail,DevelopSettings::default().detail);
     }
 }
