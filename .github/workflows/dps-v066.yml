@@ -105,7 +105,16 @@ jobs:
           assert 'cmd!("develop.autoPreview"' in e
           assert '"sourceSettings":current' in e
           assert '"previewSettings":proposal' in e
-          assert '"model":{"status":"not_connected"' in e
+          assert 'lightcraft_pipeline::optionc::diagnose(&src,&info,&current)' in e
+          assert '"model":model' in e
+          assert 'optionc_pilot_v1.json' in Path('crates/pipeline/src/optionc.rs').read_text()
+          assert 'pub mod optionc;' in Path('crates/pipeline/src/lib.rs').read_text()
+          assert 'fn native_proxy_model_is_deterministic_and_non_destructive' in Path('crates/pipeline/src/optionc.rs').read_text()
+          import json
+          model=json.loads(Path('crates/pipeline/models/optionc_pilot_v1.json').read_text())
+          assert len(model['trees']) == 64
+          assert len(model['features']) == 22
+          assert 'Learned Option C pilot:' in vm
           assert 'AutoCandidatePreviewDialog' in p
           assert 'No adjustment recommended.' in p
           assert 'fun inspectAutoPreview()' in vm
