@@ -134,6 +134,10 @@ class EditorState(val photoId: ULong, info: PhotoInfo, val device: DeviceOrigin?
     var liveCurve by mutableStateOf<List<Pair<Double, Double>>?>(null)
     var effectsTab by mutableStateOf("effects")
 
+    /** Human-readable result of the latest Auto WB attempt, not a guessed
+     *  colour judgement. Reset on re-entering the editor. */
+    var wbAutoStatus by mutableStateOf<String?>(null)
+
     /** The white balance selector is armed: the next tap on the photo picks a neutral spot. */
     var pickingWb by mutableStateOf(false)
 
@@ -3387,11 +3391,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         it.execute("develop.merge", JSONObject().put("settings", JSONObject().put("spots", JSONArray())).put("label", "Reset Remove").toString())
     }
 
-    fun setWhiteBalance(mode: String) = edit(
-        after = {
-            if (mode == "auto") say("Auto WB checks neutral references; firelight may correctly remain warm")
+    fun setWhiteBalance(mode: String) {
+        val ed = editor ?: return
+        if (mode != "auto") {
+            ed.wbAutoStatus = null
+            edit { it.execute("develop.wb", JSONObject().put("mode", mode).toString()) }
+            return
         }
-    ) { it.execute("develop.wb", JSONObject().put("mode", mode).toString()) }
+        val e = engine ?: return
+        viewModelScope.launch {
+            runCatching {
+                e.command {
+                    val result = JSONObject(execute("develop.wb", """{"mode":"auto"}"""))
+                    snapshot(ed.photoId) to result
+                }
+            }.onSuccess { (snapshot, result) ->
+                ed.update(snapshot)
+                requestView()
+                val report = result.optJSONObject("autoReport")
+                val retained = report?.optBoolean("camera_balance_retained", true) ?: true
+                ed.wbAutoStatus = if (retained) {
+                    "Auto WB: original colour retained. No reliable neutral reference found; coloured firelight should not automatically turn blue."
+                } else {
+                    "Auto WB applied a measured temperature/tint correction using neutral-looking areas."
+                }
+                say(if (retained) "Auto WB: no reliable neutral reference" else "Auto WB correction applied")
+            }.onFailure { say(it.message) }
+        }
+    }
 
     /** White balance from a neutral spot of the photo, at [x], [y] across and down it (0–1). */
     fun pickWhiteBalance(x: Float, y: Float) {
