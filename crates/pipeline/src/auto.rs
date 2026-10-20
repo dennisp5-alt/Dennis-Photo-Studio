@@ -182,7 +182,7 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
         || (shadow_fraction>0.64 && median< -2.1 && bright_fraction<0.10)
         // A well-lit subject in a purposely dark setting should not be
         // normalized to grey merely because the background owns the median.
-        || (median< -1.6 && p95> -1.1 && p95-median>1.3
+        || (median< -1.6 && p95> -1.1 && p95<0.55 && p95-median>1.3
             && bright_fraction<0.10);
     let is_shadow_deficit=!low_key && median< -0.65
         && (subject_ev< -0.75 || median< -1.25);
@@ -218,12 +218,12 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
             * ((-0.45-subject_ev)/1.5).clamp(0.0,1.0);
         // Bright sky with an underlit, recoverable foreground can need
         // *local* recovery even where global exposure would blow clouds.
-        let backlit=if bright_fraction>0.12 && median< -0.75
+        let backlit=if bright_fraction>0.12 && median< -0.62
             && p95>1.35 && recoverable_fraction>0.20 {
             ((bright_fraction-0.12)/0.35).clamp(0.0,1.0)
             * ((-0.30-median)/1.2).clamp(0.0,1.0)
             * ((recoverable_fraction-0.20)/0.30).clamp(0.0,1.0)
-            * 0.80
+            * 1.00
         }else{0.0};
         compressed.max(backlit)
     };
