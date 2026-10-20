@@ -345,15 +345,16 @@ pub fn specs() -> Vec<CommandSpec> {
                 proposal.wb.temp=report.temp;
                 proposal.wb.tint=report.tint;
             }
-            let no_tone_change=tone==lightcraft_pipeline::auto::AutoTone::default();
-            let no_wb_change=manual_wb || wb.as_ref().is_none_or(|r|r.camera_balance_retained);
+            // Compare complete current/proposed settings; zero recommendations
+            // can still reset nonzero manual Light/Colour controls.
+            let no_change=proposal==current;
             Ok(json!({
                 "sourceSettings":current,
                 "previewSettings":proposal,
                 "tone":tone,
                 "whiteBalance":wb,
                 "manualWbPreserved":manual_wb,
-                "noChangeRecommended":no_tone_change && no_wb_change,
+                "noChangeRecommended":no_change,
                 "model":{"status":"not_connected","note":"Trained pilot is not yet approved for inference; current preview is the actual existing Smart Auto proposal."}
             }))
         }),
