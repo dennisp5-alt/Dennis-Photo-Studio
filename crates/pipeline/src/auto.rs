@@ -19,6 +19,11 @@ pub struct AutoTone {
     pub blacks: f64,
     pub vibrance: f64,
     pub saturation: f64,
+    /// Parametric-curve lift for dark textured subject matter.
+    /// Unlike the global Shadows control, it acts on the visible lower
+    /// midtones of developed JPEGs while retaining bright emitters.
+    pub curve_shadows: f64,
+    pub curve_darks: f64,
 }
 
 fn percentile(sorted: &[f32], q: f32) -> f32 {
@@ -55,6 +60,8 @@ pub fn auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> AutoTo
         blacks: blacks.round() as f64,
         vibrance: 12.0,
         saturation: 3.0,
+        curve_shadows: 0.0,
+        curve_darks: 0.0,
     }
 }
 
@@ -117,18 +124,23 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
         && bright_fraction < 0.35;
     if intentional_light {
         // V0.4 returned all zero: safe but visibly unhelpful on fire.
-        // A measurable small boost to recoverable wood/ground is appropriate
-        // ONLY if enough above-black structure exists. Prevent black skies
-        // and empty night scenes from turning gray or revealing sensor noise.
+        // A measurable lower-midtone boost to recoverable wood/ground is
+        // appropriate ONLY if enough above-black structure exists. Shadows
+        // alone mostly affects a dark sky due to its log-domain weighting;
+        // additional parametric dark-region adjustment targets the ember-lit
+        // wood without touching self-luminous flames at encoded levels >0.75.
+        // Keep the black point anchored through a slight negative Blacks.
         let recoverable = recoverable_fraction > 0.012;
         let shadow_lift = if recoverable {
-            (9.0 + 65.0 * recoverable_fraction).clamp(9.0, 22.0).round()
+            (26.0 + 145.0 * recoverable_fraction).clamp(26.0, 48.0).round()
         } else { 0.0 };
         return AutoTone {
             exposure: 0.0, contrast: 0.0, highlights: 0.0,
             shadows: shadow_lift, whites: 0.0,
             blacks: if recoverable { -4.0 } else { 0.0 },
             vibrance: 0.0, saturation: 0.0,
+            curve_shadows: if recoverable { 30.0 } else { 0.0 },
+            curve_darks: if recoverable { 42.0 } else { 0.0 },
         };
     }
 
@@ -167,6 +179,8 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
     let mean_sat=if colour_count>0 {colour_mass/colour_count as f64}else{0.0};
     old.vibrance=((0.23-mean_sat)*25.0).clamp(0.0,6.0).round();
     old.saturation=0.0;
+    old.curve_shadows=0.0;
+    old.curve_darks=0.0;
     old
 }
 
@@ -674,7 +688,9 @@ mod studio_v04_light_and_wb_tests {
         });
         let a=smart_auto_tone(&img,&SourceInfo::default(),&DevelopSettings::default());
         assert!(a.exposure.abs()<0.05,"fire exposure {a:?}");
-        assert!(a.shadows>=9.0,"must lift recoverable wood rather than do nothing {a:?}");
+        assert!(a.shadows>=26.0,"must lift recoverable wood visibly {a:?}");
+        assert!(a.curve_shadows>=30.0,"needed lower-shadow tonal recovery {a:?}");
+        assert!(a.curve_darks>=42.0,"needed visible dark-midtones lift {a:?}");
         assert!(a.blacks>=-5.0,"deep black should remain black {a:?}");
         assert_eq!(a.highlights,0.0,"fire highlight protection {a:?}");
         assert_eq!(a.whites,0.0,"fire must stay luminous {a:?}");
@@ -717,5 +733,57 @@ mod studio_v04_light_and_wb_tests {
         assert_eq!(a.exposure,0.0);
         assert_eq!(a.shadows,0.0,"no recoverable subject; prevent black noise lift");
         assert_eq!(a.highlights,0.0);
+    }
+}
+
+#[cfg(test)]
+mod studio_v051_visible_auto_tests {
+    use super::*;
+    use lightcraft_develop::ToneCurve;
+
+    #[test]
+    fn auto_dark_curve_lifts_wood_but_preserves_flames() {
+        let img=Rgb32f::from_fn(192,192,|x,y|{
+            if x>40 && x<120 && y>30 && y<73 {[1.20,0.78,0.20]}
+            else if x>26 && x<149 && y>72 && y<133 {[0.16,0.058,0.021]}
+            else {[0.003,0.003,0.004]}
+        });
+        let auto=smart_auto_tone(&img,&SourceInfo::default(),&DevelopSettings::default());
+        let curve=ToneCurve {
+            shadows:auto.curve_shadows,
+            darks:auto.curve_darks,
+            ..ToneCurve::default()
+        };
+        let lut=crate::finish::parametric_curve(&curve,1024);
+        assert!(lut.eval(0.20)>0.20+0.025,
+            "visible bark/ground midtones should brighten: {}",lut.eval(0.20));
+        assert!(lut.eval(0.38)>0.38+0.06,
+            "visible midtones should brighten: {}",lut.eval(0.38));
+        assert!((lut.eval(0.91)-0.91).abs()<0.004,
+            "flame highlights must remain anchored: {}",lut.eval(0.91));
+        assert!((lut.eval(0.002)-0.002).abs()<0.003,
+            "unlit black remains black: {}",lut.eval(0.002));
+        assert!(auto.exposure.abs()<0.05 && auto.highlights==0.0 && auto.whites==0.0);
+    }
+
+    #[test]
+    fn no_wood_no_added_dark_curve() {
+        let img=Rgb32f::from_fn(192,192,|x,y|{
+            if x>60 && x<102 && y>40 && y<76 {[1.3,0.8,0.20]}
+            else {[0.002,0.002,0.002]}
+        });
+        let a=smart_auto_tone(&img,&SourceInfo::default(),&DevelopSettings::default());
+        assert_eq!(a.curve_shadows,0.0);
+        assert_eq!(a.curve_darks,0.0);
+    }
+
+    #[test]
+    fn normal_photo_has_no_automatic_fire_curve() {
+        let img=Rgb32f::from_fn(128,128,|x,y|{
+            let v=0.12+(x+y) as f32/256.0*0.4;[v,v,v]
+        });
+        let a=smart_auto_tone(&img,&SourceInfo::default(),&DevelopSettings::default());
+        assert_eq!(a.curve_shadows,0.0);
+        assert_eq!(a.curve_darks,0.0);
     }
 }
