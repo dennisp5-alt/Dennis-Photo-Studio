@@ -516,6 +516,21 @@ private fun CurvePanel(vm: AppViewModel, ed: EditorState) {
                 }) { vm.setCurveChannel(ch) }
             }
         }
+        if (ed.curveChannel == "parametric" && curve != null) {
+            fun curveValue(id: String): String {
+                val value = (ed.control(id)?.value ?: 0.0).toInt()
+                return if (value > 0) "+$value" else value.toString()
+            }
+            Text(
+                "Shadows ${curveValue("curve.shadows")}  ·  Darks ${curveValue("curve.darks")}" +
+                    "  ·  Lights ${curveValue("curve.lights")}  ·  Highlights ${curveValue("curve.highlights")}",
+                color = Lc.panelTextSoft,
+                fontFamily = Inter,
+                fontSize = 11.sp,
+                maxLines = 1,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp),
+            )
+        }
         if (sideways && curve != null) {
             // the parametric curve's split band takes 57 dp under its square
             Box(Modifier.padding(top = 20.dp).fillMaxWidth().aspectRatio(if (ed.curveChannel == "parametric") 0.84f else 1f)) {
