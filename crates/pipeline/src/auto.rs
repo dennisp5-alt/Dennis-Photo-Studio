@@ -221,7 +221,7 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
         let backlit=if bright_fraction>0.12 && median< -0.75
             && p95>1.35 && recoverable_fraction>0.20 {
             ((bright_fraction-0.12)/0.35).clamp(0.0,1.0)
-            * ((-0.75-median)/1.0).clamp(0.0,1.0)
+            * ((-0.30-median)/1.2).clamp(0.0,1.0)
             * ((recoverable_fraction-0.20)/0.30).clamp(0.0,1.0)
             * 0.80
         }else{0.0};
@@ -1198,7 +1198,9 @@ mod studio_v06_adaptive_tests {
         });
         let info=SourceInfo::default();
         let r=auto_wb_report(&image,&info);
-        assert_eq!(r.decision,"corrected","neutral WB: {r:?}");
+        // This candidate differs only by ~75 K and one tint unit:
+        // evidence exists, but it does not justify changing the JPEG.
+        assert_eq!(r.decision,"already_neutral","tiny WB drift should be ignored: {r:?}");
         assert!(r.confidence>0.14,"low confidence: {r:?}");
         assert!((1e6/r.temp-1e6/info.as_shot_temp).abs()<=45.1);
     }
@@ -1237,8 +1239,10 @@ mod studio_v061_auto_colour_and_curve_tests {
     fn muted_landscape() -> Rgb32f {
         Rgb32f::from_fn(160, 112, |x, y| {
             let grad = (x % 40) as f32 * 0.00015;
-            if y < 46 {
-                [0.053 + grad, 0.057 + grad, 0.059 + grad]
+            if y < 18 {
+                // A small actually mid-bright patch gives the Lights
+                // parametric curve real pixels to influence.
+                [0.37 + grad, 0.40 + grad, 0.41 + grad]
             } else if (x / 20) % 2 == 0 {
                 [0.038 + grad, 0.042 + grad, 0.039 + grad]
             } else {
