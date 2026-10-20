@@ -65,123 +65,137 @@ pub fn auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> AutoTo
     }
 }
 
-/// Scene-adaptive tone that protects self-luminous highlights (fire, lamps,
-/// sunsets and reflections). A histogram cannot recognise every scene, so
-/// corrections are deliberately limited and neutral photographs stay near
-/// their source rendering.
+/// Image-adaptive automatic development for photographs already rendered
+/// by a camera. Analyse regional *structure* as well as scene-wide brightness:
+/// the median of a dark sky is not the exposure of its fire, while a bright
+/// cloud should not freeze corrections to foreground landscape details.
 ///
-/// Important fix: Classic Auto computed highlights using an *unrestricted*
-/// exposure value. Reusing that highlight value after reducing exposure
-/// darkened flames despite the Smart exposure cap. Recalculate highlight and
-/// white settings from the final Smart exposure, never from Classic's proposal.
+/// The model estimates parameters that the real render pipeline understands.
+/// It uses NO Adobe assets/models or claimed semantic/object recognition.
 pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> AutoTone {
-    let mut old = auto_tone(src, info, s);
-    let mut img = lightcraft_raster::resample::fit(
-        src, 512, 512, lightcraft_raster::resample::Filter::Box);
-    let base = DevelopSettings { wb: s.wb, ..DevelopSettings::default() };
-    crate::local::scene_linear_pre(&mut img, info, &base);
-    if img.data.is_empty() { return old; }
-    let mut ev = Vec::with_capacity(img.data.len());
-    let mut colour_mass = 0.0f64;
-    let mut colour_count = 0usize;
-    let mut shadow_count = 0usize;
-    let mut bright_count = 0usize;
-    let mut recoverable_midtone_count = 0usize;
-    for rgb in &img.data {
-        let y = luminance_2020(*rgb).max(1e-6);
-        ev.push((y / 0.18).log2());
-        if y < 0.028 { shadow_count += 1; }
-        if y > 0.70 { bright_count += 1; }
-        // Wood, buildings and ground exposed by flame or streetlights:
-        // above the noise floor, but far below the bright subject.
-        if (0.035..0.28).contains(&y) { recoverable_midtone_count += 1; }
+    let mut img=lightcraft_raster::resample::fit(
+        src,512,512,lightcraft_raster::resample::Filter::Box);
+    let base=DevelopSettings { wb:s.wb, ..DevelopSettings::default() };
+    crate::local::scene_linear_pre(&mut img,info,&base);
+    if img.data.is_empty() || img.width==0 {return AutoTone::default();}
+
+    let lum:Vec<f32>=img.data.iter()
+        .map(|c|luminance_2020(*c).max(0.0)).collect();
+    let mut ev:Vec<f32>=lum.iter()
+        .map(|&y|(y.max(1e-6)/0.18).log2()).collect();
+    ev.sort_by(|a,b|a.total_cmp(b));
+    let (median,p05,p95,p995)=(
+        percentile(&ev,0.50) as f64,
+        percentile(&ev,0.05) as f64,
+        percentile(&ev,0.95) as f64,
+        percentile(&ev,0.995) as f64
+    );
+    let mut dark=0usize;
+    let mut bright=0usize;
+    let mut recoverable=0usize;
+    let mut coloured=0usize;
+    let mut colour_mass=0.0f64;
+    let mut structured=Vec::new();
+    for (i,&y) in lum.iter().enumerate() {
+        if y<0.028 {dark+=1;}
+        if y>0.70 {bright+=1;}
+        if (0.035..0.28).contains(&y) {recoverable+=1;}
+        let c=img.data[i];
         if (0.025..0.80).contains(&y) {
-            let maxc = rgb[0].max(rgb[1]).max(rgb[2]).max(1e-6);
-            let minc = rgb[0].min(rgb[1]).min(rgb[2]);
-            colour_mass += ((maxc-minc)/maxc).clamp(0.0,1.0) as f64;
-            colour_count += 1;
+            let mx=c[0].max(c[1]).max(c[2]).max(1e-6);
+            let mn=c[0].min(c[1]).min(c[2]);
+            colour_mass+=((mx-mn)/mx).clamp(0.0,1.0) as f64;
+            coloured+=1;
+        }
+        // Edges and textured midtones act as a proxy for actual subject
+        // detail; flat backgrounds are deliberately downweighted.
+        if i>=img.width && i%img.width>0 && (0.028..0.8).contains(&y) {
+            let left=lum[i-1];
+            let top=lum[i-img.width];
+            let contrast=((y-left).abs()+(y-top).abs())
+                /(0.03+y+left+top);
+            if contrast>0.07 {structured.push((y.max(1e-6)/0.18).log2());}
         }
     }
-    ev.sort_by(|a,b| a.total_cmp(b));
-    let median = percentile(&ev, 0.50) as f64;
-    let p05 = percentile(&ev, 0.05) as f64;
-    let p95 = percentile(&ev, 0.95) as f64;
-    let p995 = percentile(&ev, 0.995) as f64;
-    let shadow_fraction = shadow_count as f64 / ev.len() as f64;
-    let bright_fraction = bright_count as f64 / ev.len() as f64;
-    let recoverable_fraction = recoverable_midtone_count as f64 / ev.len() as f64;
+    let n=lum.len() as f64;
+    let shadow_fraction=dark as f64/n;
+    let bright_fraction=bright as f64/n;
+    let recoverable_fraction=recoverable as f64/n;
+    let structure_fraction=structured.len() as f64/n;
+    structured.sort_by(|a,b|a.total_cmp(b));
+    let subject_ev=if structured.len()>100 {
+        percentile(&structured,0.5) as f64
+    } else {median};
 
-    // Lightroom separates Highlights/Shadows/Whites/Blacks as independent
-    // tonal controls. For a dark photo with luminous highlights, preserve
-    // emission and lift ONLY recoverable low-midtones, never global exposure.
-    // Adobe's proprietary Auto model was NOT copied or reverse engineered.
-    // This is a conservative, independently designed histogram estimator.
-    let intentional_light = shadow_fraction > 0.50
-        && median < -2.3
-        && p995 > 1.6
-        && p995 - median > 4.5
-        && bright_fraction > 0.002
-        && bright_fraction < 0.35;
+    // Emissive highlights on dark: lower threshold than v0.5.1. Real
+    // photographed flames are often below 0.2% of all pixels despite
+    // dominating the eye. Do not use global exposure/highlight compression.
+    let intentional_light=shadow_fraction>0.50 && median< -2.25
+        && p995>1.2 && p995-median>4.0
+        && (bright_fraction>0.0005 || p995>1.9)
+        && bright_fraction<0.35;
     if intentional_light {
-        // V0.4 returned all zero: safe but visibly unhelpful on fire.
-        // A measurable lower-midtone boost to recoverable wood/ground is
-        // appropriate ONLY if enough above-black structure exists. Shadows
-        // alone mostly affects a dark sky due to its log-domain weighting;
-        // additional parametric dark-region adjustment targets the ember-lit
-        // wood without touching self-luminous flames at encoded levels >0.75.
-        // Keep the black point anchored through a slight negative Blacks.
-        let recoverable = recoverable_fraction > 0.012;
-        let shadow_lift = if recoverable {
-            (26.0 + 145.0 * recoverable_fraction).clamp(26.0, 48.0).round()
-        } else { 0.0 };
+        let visible_wood=recoverable_fraction>0.012;
         return AutoTone {
-            exposure: 0.0, contrast: 0.0, highlights: 0.0,
-            shadows: shadow_lift, whites: 0.0,
-            blacks: if recoverable { -4.0 } else { 0.0 },
-            vibrance: 0.0, saturation: 0.0,
-            curve_shadows: if recoverable { 30.0 } else { 0.0 },
-            curve_darks: if recoverable { 42.0 } else { 0.0 },
+            exposure:0.0,contrast:0.0,highlights:0.0,
+            shadows:if visible_wood {
+                (26.0+145.0*recoverable_fraction).clamp(26.0,48.0).round()
+            }else{0.0},
+            whites:0.0,blacks:if visible_wood {-4.0}else{0.0},
+            vibrance:0.0,saturation:0.0,
+            curve_shadows:if visible_wood {30.0}else{0.0},
+            curve_darks:if visible_wood {42.0}else{0.0},
         };
     }
 
-    let spread = p995-p05;
-    let high_contrast = spread > 7.7 || p995-median > 4.1;
-    let balanced = median.abs() < 0.45;
-    if old.exposure > 0.0 {
-        let mut cap: f64 = if high_contrast { 0.55 } else { 1.35 };
-        if balanced { cap=cap.min(0.20); }
-        // Leave headroom for bright surfaces without trying to compress
-        // them through an aggressive global highlight curve.
-        if p995 > 1.55 {
-            cap=cap.min((2.00-p995).max(0.0));
-        }
-        old.exposure=old.exposure.min(cap).max(0.0);
-    } else {
-        old.exposure=old.exposure.max(if high_contrast {-0.50}else{-1.25});
-        if balanced {old.exposure=old.exposure.max(-0.20);}
+    // Global exposure considers textured subjects AND overall key.
+    // Previously "p99.5 > 1.55" could forcibly set an otherwise useful
+    // positive correction to zero on *any* JPEG with white clouds.
+    let proposed=(-0.15-subject_ev)*0.16+(-0.40-median)*0.15;
+    let balanced=median.abs()<0.40 && structure_fraction<0.09;
+    let high_key=median>0.75 && bright_fraction>0.22;
+    let low_key=median< -2.5 && bright_fraction<0.01;
+    let mut exposure=proposed.clamp(-0.18,0.36);
+    if high_key {exposure=exposure.max(-0.10).min(0.02);}
+    if low_key {exposure=exposure.min(0.18);}
+    if p995>2.25 {exposure=exposure.min(0.18);}
+    if balanced {exposure=exposure.clamp(-0.10,0.12);}
+    if exposure<0.0 && median<0.55 {exposure=exposure.max(-0.06);}
+
+    // Soft highlight protection follows the FINAL exposure setting. It is
+    // not a request to make naturally bright objects grey.
+    let highlights=if p995+exposure>1.95 {
+        -((p995+exposure-1.95)*20.0).clamp(0.0,19.0).round()
+    }else{0.0};
+    let tonal_structure=(structure_fraction/0.24).min(1.0);
+    let local_opportunity=if recoverable_fraction>0.09 {
+        ((recoverable_fraction-0.09)/0.30).clamp(0.0,1.0)
+    }else{0.0};
+    let lift_strength=local_opportunity*(0.50+0.50*tonal_structure);
+    let natural_tone= !high_key && !low_key && !balanced;
+    let shadows=if natural_tone {
+        (6.0+16.0*lift_strength+5.0*shadow_fraction).clamp(0.0,26.0).round()
+    }else{0.0};
+    let curve_darks=if natural_tone {
+        (9.0+14.0*lift_strength).clamp(0.0,23.0).round()
+    }else{0.0};
+    let curve_shadows=if natural_tone {
+        (6.0+12.0*lift_strength).clamp(0.0,18.0).round()
+    }else{0.0};
+    let dynamic_range=p95-p05;
+    let contrast=((5.5-dynamic_range)*1.2).clamp(-6.0,8.0).round();
+    let mean_sat=if coloured>0 {colour_mass/coloured as f64}else{0.0};
+    let vibrance=((0.26-mean_sat)*36.0).clamp(0.0,8.0).round();
+
+    AutoTone {
+        exposure:(exposure*100.0).round()/100.0,
+        contrast:if balanced {0.0}else{contrast},
+        highlights,shadows,whites:0.0,
+        blacks:if natural_tone && shadow_fraction>0.25 {-3.0}else{0.0},
+        vibrance:if high_key {0.0}else{vibrance},
+        saturation:0.0,
+        curve_shadows,curve_darks,
     }
-
-    // Recompute using corrected exposure. The prior v0.2-v0.3.1 logic
-    // accidentally retained Classic's ~-90 highlight correction here.
-    let corrected_top = p995+old.exposure;
-    old.highlights=if corrected_top>2.15 {
-        -((corrected_top-2.15)*12.0).clamp(0.0,26.0).round()
-    } else {0.0};
-    old.whites=if corrected_top>2.75 {
-        -((corrected_top-2.75)*8.0).clamp(0.0,14.0).round()
-    } else {0.0};
-
-    old.contrast=old.contrast.clamp(if high_contrast {-8.0}else{-14.0},14.0);
-    old.shadows=old.shadows.clamp(0.0,if high_contrast {20.0}else{38.0});
-    old.blacks=old.blacks.clamp(-10.0,12.0);
-
-    // JPEGs have often received camera vibrance already. Avoid fixed boosts.
-    let mean_sat=if colour_count>0 {colour_mass/colour_count as f64}else{0.0};
-    old.vibrance=((0.23-mean_sat)*25.0).clamp(0.0,6.0).round();
-    old.saturation=0.0;
-    old.curve_shadows=0.0;
-    old.curve_darks=0.0;
-    old
 }
 
 /// Automatic edit SETTINGS, not a replacement denoiser or a claimed AI model.
@@ -403,94 +417,142 @@ pub fn auto_wb_classic(src: &Rgb32f, info: &SourceInfo) -> (f64, f64) {
     (t.clamp(2000.0, 50000.0).round(), tint.clamp(-150.0, 150.0).round())
 }
 
-/// Confidence report for an automatic WB decision. Safe to expose in the UI
-/// as diagnostics; no calibrated "percent correct" claim is implied.
+/// Diagnostic details for scene white-balance, not a claim of ground-truth
+/// illuminant recovery. The user can always override it with the picker.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct AutoWbReport {
-    pub temp: f64,
-    pub tint: f64,
-    pub confidence: f64,
-    pub neutral_fraction: f64,
-    pub spatial_coverage: usize,
-    pub camera_balance_retained: bool,
+    pub temp:f64,
+    pub tint:f64,
+    pub confidence:f64,
+    pub neutral_fraction:f64,
+    pub spatial_coverage:usize,
+    pub camera_balance_retained:bool,
+    /// "corrected", "already_neutral", "ambiguous" or "no_neutral".
+    pub decision:&'static str,
+    pub candidate_temp:f64,
+    pub candidate_tint:f64,
 }
-fn as_shot_report(info: &SourceInfo) -> AutoWbReport {
+fn as_shot_report(info:&SourceInfo)->AutoWbReport{
     AutoWbReport {
-        temp: info.as_shot_temp, tint: info.as_shot_tint,
-        confidence: 0.0, neutral_fraction: 0.0,
-        spatial_coverage: 0, camera_balance_retained: true,
+        temp:info.as_shot_temp,tint:info.as_shot_tint,
+        confidence:0.0,neutral_fraction:0.0,spatial_coverage:0,
+        camera_balance_retained:true,decision:"no_neutral",
+        candidate_temp:info.as_shot_temp,candidate_tint:info.as_shot_tint,
     }
 }
 
-/// Identify likely neutral *surfaces*, not merely average scene colour.
-///
-/// Real-world colour constancy is underdetermined. We accept neutral-looking
-/// regions with mild illuminant tint, require support from multiple areas,
-/// and bound the change even when the confidence is high. A saturated floral
-/// or warm fire scene must retain camera colour rather than becoming grey.
-pub fn auto_wb_report(src: &Rgb32f, info: &SourceInfo) -> AutoWbReport {
+/// Weighted neutral-candidate consensus in 4x4 spatial cells.
+/// One large blue wall or pink flower should not dictate the entire image's
+/// illuminant. Supporting neutral clusters, even when only ~2% of pixels,
+/// can suggest a modest correction if they agree spatially. This does not
+/// treat grey-world colour averaging as semantic scene understanding.
+pub fn auto_wb_report(src:&Rgb32f,info:&SourceInfo)->AutoWbReport{
     let mut report=as_shot_report(info);
     let img=lightcraft_raster::resample::fit(
-        src, 384, 384, lightcraft_raster::resample::Filter::Box);
-    if img.width<24 || img.height<24 || img.data.is_empty() {return report;}
-    let mut neutral=0usize;
+        src,384,384,lightcraft_raster::resample::Filter::Box);
+    if img.width<24 || img.height<24 || img.data.is_empty(){return report;}
+    let (w,h)=(img.width,img.height);
     let mut eligible=0usize;
-    let mut blocks=[0usize;16];
-    let mut avg=[0.0f64;3];
-    let mut total=0.0f64;
-    let w=img.width;
-    let h=img.height;
-    for (index,c) in img.data.iter().enumerate() {
+    let mut neutral=0usize;
+    let mut sum=[0.0f64;3];
+    let mut weight_sum=0.0f64;
+    let mut cell_rgb=[[0.0f64;3];16];
+    let mut cell_weights=[0.0f64;16];
+    let mut cell_counts=[0usize;16];
+    let mut strong_colour=0usize;
+    for (index,c) in img.data.iter().enumerate(){
         let y=luminance_2020(*c);
-        if !(0.05..=0.78).contains(&y) {continue;}
+        if !(0.05..=0.78).contains(&y){continue;}
         eligible+=1;
         let hi=c[0].max(c[1]).max(c[2]).max(1e-6);
         let lo=c[0].min(c[1]).min(c[2]);
         let chroma=((hi-lo)/hi).clamp(0.0,1.0);
-        // A mild cast can make a neutral wall a little warmer/cooler, but
-        // do not accept strongly coloured petals, grass or skin as neutrals.
-        if chroma>0.24 {continue;}
+        if chroma>0.48{strong_colour+=1;}
+        // Keep stricter chroma criteria to avoid mistaking coloured petals
+        // and blue sky for a neutral surface; improve *confidence* rather
+        // than relaxing chroma until everything is "neutral".
+        if chroma>0.24{continue;}
         let weight=((0.24-chroma)/0.24).powi(2) as f64;
-        if weight<0.015 {continue;}
-        let px=index%w;
-        let py=index/w;
-        let cell=((py*4/h).min(3))*4+((px*4/w).min(3));
-        blocks[cell]+=1;
-        for channel in 0..3 {avg[channel]+=c[channel] as f64*weight;}
-        total+=weight;
+        if weight<0.015{continue;}
+        let x=index%w;
+        let y=index/w;
+        let cell=((y*4/h).min(3))*4+((x*4/w).min(3));
+        for channel in 0..3 {
+            sum[channel]+=c[channel] as f64*weight;
+            cell_rgb[cell][channel]+=c[channel] as f64*weight;
+        }
+        cell_weights[cell]+=weight;
+        cell_counts[cell]+=1;
+        weight_sum+=weight;
         neutral+=1;
     }
-    report.neutral_fraction=if eligible>0 {
+    report.neutral_fraction=if eligible>0{
         neutral as f64/eligible as f64
-    } else {0.0};
-    report.spatial_coverage=blocks.iter().filter(|&&n|n>15).count();
-    if eligible<200 || neutral<120 || report.neutral_fraction<0.025
-        || report.spatial_coverage<4 || total<15.0 { return report; }
-
-    let mean=avg.map(|v|(v/total) as f32);
+    }else{0.0};
+    report.spatial_coverage=cell_counts.iter()
+        .filter(|&&n|n>15).count();
+    if eligible<200 || neutral<100 || report.spatial_coverage<3
+        || weight_sum<13.0 || report.neutral_fraction<0.012 {
+        return report;
+    }
+    let mean=sum.map(|v|(v/weight_sum) as f32);
     let patch=Rgb32f::filled(16,16,mean);
     let (t,tint)=auto_wb_classic(&patch,info);
-    if !t.is_finite() || !tint.is_finite() {return report;}
+    if !t.is_finite() || !tint.is_finite(){return report;}
+    report.candidate_temp=t;
+    report.candidate_tint=tint;
 
-    let coverage=(report.spatial_coverage as f64/12.0).min(1.0);
-    let fraction=(report.neutral_fraction/0.22).min(1.0);
-    report.confidence=(coverage.sqrt()*fraction).clamp(0.0,1.0);
-    if report.confidence<0.12 {return report;}
+    // Agreement between independent spatial neutral candidates limits the
+    // influence of neutral-ish but intrinsically coloured objects.
+    let mut variance=0.0f64;
+    let mut votes=0usize;
+    let baseline_r=(mean[0].max(1e-6)/mean[1].max(1e-6)).ln() as f64;
+    let baseline_b=(mean[2].max(1e-6)/mean[1].max(1e-6)).ln() as f64;
+    for cell in 0..16 {
+        if cell_counts[cell]<16 || cell_weights[cell]<2.0 {continue;}
+        let c=cell_rgb[cell].map(|v|v/cell_weights[cell]);
+        let lr=(c[0].max(1e-6)/c[1].max(1e-6)).ln();
+        let lb=(c[2].max(1e-6)/c[1].max(1e-6)).ln();
+        variance+=(lr-baseline_r).powi(2)+(lb-baseline_b).powi(2);
+        votes+=1;
+    }
+    let consistency=if votes>0 {
+        (1.0+18.0*variance/votes as f64).recip()
+    } else {0.0};
+    let density=(report.neutral_fraction/0.14).sqrt().min(1.0);
+    let coverage=(report.spatial_coverage as f64/10.0).sqrt().min(1.0);
+    let saturation=if eligible>0{
+        strong_colour as f64/eligible as f64
+    }else{0.0};
+    let colour_protection=if saturation>0.55 && report.neutral_fraction<0.035 {
+        0.70
+    }else{1.0};
+    report.confidence=(density*coverage*consistency*colour_protection)
+        .clamp(0.0,1.0);
+    if report.confidence<0.14 {
+        report.decision="ambiguous";
+        return report;
+    }
 
-    let src_mired=1_000_000.0/info.as_shot_temp.clamp(2000.0,50000.0);
-    let goal_mired=1_000_000.0/t.clamp(2000.0,50000.0);
-    let limit_mired=if info.raw {60.0}else{38.0};
-    let limit_tint=if info.raw {27.0}else{20.0};
-    let delta=((goal_mired-src_mired)*report.confidence)
+    // JPEG colour balance is *relative* to the camera-rendered look, not an
+    // absolute measured illuminant. Stay within bounded reciprocal-K changes.
+    let source_mired=1_000_000.0/info.as_shot_temp.clamp(2000.0,50000.0);
+    let desired_mired=1_000_000.0/t.clamp(2000.0,50000.0);
+    let limit_mired=if info.raw {65.0}else{45.0};
+    let limit_tint=if info.raw {27.0}else{22.0};
+    let diff=((desired_mired-source_mired)*report.confidence)
         .clamp(-limit_mired,limit_mired);
-    report.temp=(1_000_000.0/(src_mired+delta))
+    report.temp=(1_000_000.0/(source_mired+diff))
         .clamp(2000.0,50000.0).round();
     report.tint=(info.as_shot_tint+
         ((tint-info.as_shot_tint)*report.confidence)
         .clamp(-limit_tint,limit_tint)).round();
     report.camera_balance_retained=
-        (report.temp-info.as_shot_temp).abs()<1.0
-        && (report.tint-info.as_shot_tint).abs()<1.0;
+        (report.temp-info.as_shot_temp).abs()<1.0 &&
+        (report.tint-info.as_shot_tint).abs()<1.0;
+    report.decision=if report.camera_balance_retained{
+        "already_neutral"
+    }else{"corrected"};
     report
 }
 
@@ -785,5 +847,61 @@ mod studio_v051_visible_auto_tests {
         let a=smart_auto_tone(&img,&SourceInfo::default(),&DevelopSettings::default());
         assert_eq!(a.curve_shadows,0.0);
         assert_eq!(a.curve_darks,0.0);
+    }
+}
+
+#[cfg(test)]
+mod studio_v06_adaptive_tests {
+    use super::*;
+
+    #[test]
+    fn jpeg_white_highlights_do_not_veto_all_positive_exposure() {
+        // Strong highlights, dark structured foliage, white cloud: previous
+        // p99.5 exposure cap returned exactly zero.
+        let image=Rgb32f::from_fn(192,144,|x,y|{
+            if y<54 {[0.82,0.87,0.97]}
+            else if x>40 && x<148 {[0.11+(x%9) as f32*0.005,0.21,0.08]}
+            else {[0.025,0.055,0.028]}
+        });
+        let a=smart_auto_tone(&image,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(a.exposure>0.0,"white sky vetoed regional exposure: {a:?}");
+        assert!(a.exposure<0.25,"risk of blowing white sky: {a:?}");
+        assert!(a.curve_darks>0.0,"missing regional dark-ground recovery: {a:?}");
+    }
+
+    #[test]
+    fn tinted_neutral_clusters_receive_a_reported_correction() {
+        let image=Rgb32f::from_fn(192,144,|x,y|{
+            if x%11<7 && y%9<7 {[0.245,0.225,0.205]}
+            else {[0.3,0.3,0.3]}
+        });
+        let info=SourceInfo::default();
+        let r=auto_wb_report(&image,&info);
+        assert_eq!(r.decision,"corrected","neutral WB: {r:?}");
+        assert!(r.confidence>0.14,"low confidence: {r:?}");
+        assert!((1e6/r.temp-1e6/info.as_shot_temp).abs()<=45.1);
+    }
+
+    #[test]
+    fn highly_saturated_flower_does_not_get_forced_white_balance() {
+        let image=Rgb32f::from_fn(128,128,|x,y|{
+            if (x+y)%7==0 {[0.82,0.035,0.19]}
+            else{[0.02,0.35,0.04]}
+        });
+        let r=auto_wb_report(&image,&SourceInfo::default());
+        assert!(r.camera_balance_retained,"petals incorrectly neutralised: {r:?}");
+    }
+
+    #[test]
+    fn luminescent_subject_keeps_emission() {
+        let image=Rgb32f::from_fn(256,256,|x,y|{
+            if x>60 && x<95 && y>60 && y<120 {[1.35,0.76,0.12]}
+            else if x>52 && x<145 && y>125 && y<175 {[0.1,0.04,0.014]}
+            else {[0.003,0.003,0.003]}
+        });
+        let a=smart_auto_tone(&image,&SourceInfo::default(),&DevelopSettings::default());
+        assert_eq!(a.exposure,0.0,"fire exposure should not be raised");
+        assert_eq!(a.highlights,0.0,"flames should not be dimmed");
+        assert!(a.curve_darks>0.0,"recoverable charcoal");
     }
 }
