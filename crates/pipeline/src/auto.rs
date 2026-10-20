@@ -1703,7 +1703,7 @@ mod studio_v067_restoration_regressions {
             if x>68 && x<122 && y>28 && y<91 {
                 [1.18,0.73,0.14] // practical flame
             } else if y>102 {
-                [0.16,0.116,0.082] // orange-lit stone, not grey card
+                [0.203,0.178,0.163] // warm-lit neutral stone, not a calibration card
             } else {
                 [0.007,0.005,0.003]
             }
@@ -1713,7 +1713,7 @@ mod studio_v067_restoration_regressions {
         assert_eq!(wb.temp,info.as_shot_temp,"warm scene cooled: {wb:?}");
         assert_eq!(wb.tint,info.as_shot_tint,"warm scene tinted: {wb:?}");
         assert!(wb.camera_balance_retained);
-        assert!(matches!(wb.decision,"warm_light_preserved"|"no_neutral"),
+        assert_eq!(wb.decision,"warm_light_preserved",
             "Unexpected firelight decision: {wb:?}");
     }
 
@@ -1722,7 +1722,7 @@ mod studio_v067_restoration_regressions {
         let img=Rgb32f::from_fn(192,144,|x,y|{
             if y<78 {[0.008,0.007,0.005]}
             else if x>25 && x<171 && y<135 {
-                [0.22,0.15,0.11] // warm lit walls
+                [0.203,0.178,0.163] // amber-lit walls with neutral-looking pixels
             } else {[0.02,0.012,0.008]}
         });
         let info=SourceInfo::default();
