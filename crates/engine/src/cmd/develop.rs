@@ -348,7 +348,7 @@ pub fn specs() -> Vec<CommandSpec> {
             // Compare complete current/proposed settings; zero recommendations
             // can still reset nonzero manual Light/Colour controls.
             let no_change=proposal==*current;
-            let model=lightcraft_pipeline::optionc::diagnose(&src,&info,&current);
+            let model=json!({"status":"disabled","reason":"Restored Auto uses original editable engine controls, not the Option C pilot."});
             Ok(json!({
                 "sourceSettings":current,
                 "previewSettings":proposal,
