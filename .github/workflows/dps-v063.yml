@@ -1,0 +1,175 @@
+name: Dennis Photo Studio v0.6.3 — Histogram, Visible Auto Curves and NR Tests
+
+on:
+  push:
+    branches: [studio-v0.6.3-histogram-auto-curves-nr]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dps-auto-curves-histogram-nr-v063
+  cancel-in-progress: true
+
+jobs:
+  quality-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 115
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit preserved photographic processing and v0.6.3 UI
+        run: |
+          test -s LICENSE-MIT
+          test -s LICENSE-APACHE
+          test -f apps/lightcraft-android/android/app/src/main/res/drawable/dennis_studio_lens.xml
+          python3 - <<'PY'
+          from pathlib import Path
+          a=Path('crates/pipeline/src/auto.rs').read_text()
+          e=Path('crates/engine/src/cmd/develop.rs').read_text()
+          vm=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/AppViewModel.kt').read_text()
+          p=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/EditorScreen.kt').read_text()
+          edit=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/EditPanels.kt').read_text()
+          for needle in ('pub fn smart_auto_tone', 'pub fn auto_wb_report', 'pub fn auto_detail',
+                         'mod studio_v06_adaptive_tests', 'fn luminescent_subject_keeps_emission',
+                         'fn jpeg_white_highlights_do_not_veto_all_positive_exposure',
+                         'fn tinted_neutral_clusters_receive_a_reported_correction',
+                         'fn highly_saturated_flower_does_not_get_forced_white_balance',
+                         'pub decision:&' ):
+              assert needle in a, needle
+          for needle in ('cmd!("develop.auto", "Smart Auto"', 'SourceLevel::Preview)',
+                         'd.curve.shadows=a.curve_shadows','d.curve.darks=a.curve_darks',
+                         'lightcraft_pipeline::auto::auto_wb_report(&src,&info)',
+                         'manual_wb', '"autoReport": auto_report',
+                         'SourceLevel::Full} else {SourceLevel::Preview}'):
+              assert needle in e, needle
+          for needle in ('mod studio_v061_auto_colour_and_curve_tests',
+                         'fn auto_colour_is_visible_on_subdued_landscape',
+                         'fn already_rich_flowers_are_not_overcooked',
+                         'fn auto_colour_and_curves_each_change_rendered_pixels',
+                         'pub curve_lights: f64', 'pub curve_highlights: f64'):
+              assert needle in a, needle
+          assert 'd.curve.lights=a.curve_lights' in e
+          assert 'd.curve.highlights=a.curve_highlights' in e
+          assert 'val vib = tone?.optDouble("vibrance"' in vm
+          assert 'val sat = tone?.optDouble("saturation"' in vm
+          for needle in ('mod studio_v062_adaptive_auto_effects_tests',
+                         'fn settings_respond_individually_to_subject_structure',
+                         'fn strong_pixel_noise_is_not_mistaken_for_texture',
+                         'fn photograph_preview_and_export_use_real_effect_pixels',
+                         'fine_density', 'middle_density'):
+              assert needle in a, needle
+          assert 'SourceLevel::Preview)' in e[e.index('cmd!("develop.autoEffects"'):]
+          assert 'adaptive-auto-effects' in e
+          assert 'val texture = a?.optDouble("texture"' in vm
+          assert 'val clarity = a?.optDouble("clarity"' in vm
+          curve=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/CurveTool.kt').read_text()
+          hist=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/HistogramView.kt').read_text()
+          local=Path('crates/pipeline/src/local.rs').read_text()
+          tests=Path('crates/pipeline/src/tests.rs').read_text()
+          assert 'ed.curveChannel = "parametric"' in vm
+          assert 'PathEffect.dashPathEffect' in curve
+          assert 'curve.parametric' in curve
+          assert 'Shadows ${curveValue("curve.shadows")}' in edit
+          for needle in ('RGB 0  ', 'RGB 255  ', 'histogram.red', 'histogram.green', 'histogram.blue'):
+              assert needle in hist, needle
+          for needle in ('fn colour_nr_reduces_chromatic_noise_without_changing_luminance',
+                         'fn colour_nr_preserves_distinct_real_colour_regions',
+                         'fn manual_luminance_and_colour_controls_are_independent'):
+              assert needle in local, needle
+          assert 'fn histogram_is_derived_from_the_current_rendered_pixels' in tests
+          assert 'luminance noise not detected' in a
+          assert 'colour noise not detected' in a
+          assert 'QuickAction.AUTO -> applySmartAuto()' in vm
+          assert 'EditSection.AUTO -> applySmartAuto()' in vm
+          assert 'Auto WB corrected using neutral-region agreement' in vm
+          assert 'runAutoDetail()' in vm and 'AutoAmountDialog' not in p
+          assert 'Classic Auto' not in p and 'AutoAmountDialog' not in vm
+          assert 'vm.runAutoDetail()' in edit and 'Current: Luminance NR ' in edit
+          assert 'ed.wbAutoStatus' in edit and 'Advanced' in edit
+          assert 'lightcraft.version=0.6.3-beta' in Path('apps/lightcraft-android/android/gradle.properties').read_text()
+          assert 'com.dennis.photostudio.adaptive.v063' in Path('apps/lightcraft-android/android/app/build.gradle.kts').read_text()
+          print('Source preservation and feature integrity: PASS')
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Android SDK manager
+        run: |
+          MANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -1)"
+          test -x "$MANAGER"
+          echo "$(dirname "$MANAGER")" >> "$GITHUB_PATH"
+      - name: Android SDK 37.0 and NDK 29
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --channel=3 "platforms;android-37.0" "ndk;29.0.14206865"
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
+          if [ ! -e "$ANDROID_HOME/platforms/android-37" ]; then
+            ln -s "$ANDROID_HOME/platforms/android-37.0" "$ANDROID_HOME/platforms/android-37"
+          fi
+      - name: Rust toolchain and target
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal --target aarch64-linux-android
+          rustup default 1.99.0
+          cargo +1.99.0 install cargo-ndk --version 4.1.2 --locked
+      - name: Cache native Rust build and dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          cache-on-failure: true
+      - name: Validate photographic pipeline histogram and independent colour and luminance NR
+        run: |
+          cargo +1.99.0 test -p lightcraft-pipeline --locked --lib
+          cargo +1.99.0 test -p lightcraft-develop --locked --lib
+      - name: Assemble ARM64 APK
+        working-directory: apps/lightcraft-android/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace assembleDebug -Plightcraft.abis=arm64-v8a
+      - name: Verify APK and app identity
+        run: |
+          APK=apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          ls -lh "$APK"
+      - name: Upload test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dennis-Photo-Studio-v0.6.3-Histogram-Auto-Curves-NR-ARM64
+          path: apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish pre-release APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dennis-photo-studio-v0.6.3-histogram-auto-curves-nr
+          name: Dennis Photo Studio v0.6.3 — Histogram + Visible Auto Curves (Experimental)
+          prerelease: true
+          body: |
+            Dennis Photo Studio v0.6.3 (experimental, offline Android ARM64).
+            Unique install ID: com.dennis.photostudio.adaptive.v063.debug.
+
+            Histogram remains calculated from edited display-encoded pixels,
+            not camera RAW. The overlay now shows the most-clipped RGB
+            channel's 0 and 255 endpoint percentages from the same rendered
+            preview bins, with high-visibility clipping markers.
+
+            Light > Curve now opens the actual parametric four-region curve
+            Smart Auto edits, with a faint identity diagonal and numeric
+            Shadows, Darks, Lights and Highlights settings. Manual Master
+            and RGB point curves are unmodified and remain selectable.
+
+            New Rust regression tests cover actual rendered histogram bins,
+            luminance/colour noise-reduction independence, chroma-noise
+            reduction and preservation of distinct real colour regions.
+            Existing CPU/GPU NR engines and automatic tuning remain
+            unchanged; unproven changes to portrait skin or night-scene
+            exposure have not been introduced from social media screenshots.
+
+            Retains v0.6.2 adaptive Auto Effects, v0.6.1 adaptive Auto Colour
+            and Curves, v0.6 automatic WB, and v0.3.1 Auto Detail.
+            No private user photographs included. Test on actual exports.
+          files: apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
