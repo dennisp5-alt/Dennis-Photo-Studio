@@ -2928,9 +2928,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val modelExplanation=if(status=="diagnostic_only") {
                     val classification=pilot?.optString("predictedClass","unknown")?.replace('_',' ') ?: "unknown"
                     val score=pilot?.optDouble("confidence",0.0) ?: 0.0
-                    "Learned Option C pilot: $classification (" +
-                        String.format(java.util.Locale.US,"%.0f",score*100.0) +
-                        "% confidence). Diagnostic only — the displayed preview uses current Smart Auto."
+                    val percentage=String.format(java.util.Locale.US,"%.0f",score*100.0)
+                    val advice=when {
+                        classification=="preserve" && score>=0.75 ->
+                            "Pilot favours preserving this photo."
+                        score>=0.75 ->
+                            "Pilot identifies a possible $classification defect."
+                        else ->
+                            "Pilot is uncertain (below the 75% threshold); no model-led correction proposed."
+                    }
+                    "$advice Top class: $classification ($percentage%). " +
+                        "Diagnostic only — the image preview is rendered by current Smart Auto."
                 } else {
                     "Learned Option C pilot unavailable. Preview uses current Smart Auto."
                 }
