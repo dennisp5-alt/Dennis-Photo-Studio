@@ -107,6 +107,18 @@ private val BASIC_GROUPS = listOf("treatment", "profile", "whiteBalance", "light
 /** The long edge of a choice's preview in the Reset and Apply from previous menus (px). */
 private const val CHOICE_EDGE = 180
 
+/** One non-destructive Smart Auto suggestion, rendered at matched resolution.
+ * This is the existing engine recommendation; the learned Option C pilot is
+ * deliberately not represented as connected until its inference is validated.
+ */
+data class AutoPreviewData(
+    val original: ImageBitmap,
+    val candidate: ImageBitmap,
+    val summary: String,
+    val unchanged: Boolean,
+    val modelStatus: String,
+)
+
 class EditorState(val photoId: ULong, info: PhotoInfo, val device: DeviceOrigin? = null) {
     var info by mutableStateOf(info)
     var controls by mutableStateOf<List<DevelopControl>>(emptyList())
@@ -250,6 +262,8 @@ class EditorState(val photoId: ULong, info: PhotoInfo, val device: DeviceOrigin?
     var detail by mutableStateOf<ViewDetail?>(null)
     var histogram by mutableStateOf<ImageHistogram?>(null)
     var showingBefore by mutableStateOf(false)
+    var autoPreview by mutableStateOf<AutoPreviewData?>(null)
+    var autoPreviewLoading by mutableStateOf(false)
 
     /** View options' sheet is open over the editor. */
     var viewOptions by mutableStateOf(false)
@@ -2865,7 +2879,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun runAction(a: QuickAction) {
         val ed = editor ?: return
         when (a) {
-            QuickAction.AUTO -> applySmartAuto()
+            QuickAction.AUTO -> inspectAutoPreview()
             // Upright's automatic correction, cropped to leave no blank corners: one step
             QuickAction.FIX_ANGLE -> edit(after = { say("Angle fixed") }) { s ->
                 s.beginAdjustment("Fix Angle")
@@ -2883,6 +2897,56 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * non-destructively through Light, Colour, Undo and Presets. */
     /** One-tap Smart Auto applies scene-adaptive tone and evidence-supported
      * WB together, without replacing a manually selected Custom WB. */
+    /** Analyse first; actual photos and settings remain unmodified until Apply. */
+    fun inspectAutoPreview() {
+        val ed=editor ?: return
+        val e=engine ?: return
+        if (ed.autoPreviewLoading) return
+        ed.autoPreviewLoading=true
+        viewModelScope.launch {
+            try {
+                val result=withContext(e.looks) {
+                    JSONObject(e.command { execute("develop.autoPreview","{}") })
+                }
+                if (editor !== ed) return@launch
+                val oldSettings=result.getJSONObject("sourceSettings").toString()
+                val newSettings=result.getJSONObject("previewSettings").toString()
+                val original=settingsPreview(oldSettings,640)
+                val candidate=settingsPreview(newSettings,640)
+                if (editor !== ed) return@launch
+                if (original==null || candidate==null) {
+                    say("Smart Auto preview could not be rendered; the photo was not changed.")
+                    return@launch
+                }
+                val t=result.getJSONObject("tone")
+                val fmt=java.util.Locale.US
+                val ev=String.format(fmt,"%+.2f",t.optDouble("exposure",0.0))
+                val shadow=t.optDouble("shadows",0.0).toInt()
+                val vibrance=t.optDouble("vibrance",0.0).toInt()
+                val darks=t.optDouble("curve_darks",0.0).toInt()
+                val status=result.optJSONObject("model")?.optString("status") ?: "not_connected"
+                ed.autoPreview=AutoPreviewData(
+                    original=original,
+                    candidate=candidate,
+                    summary="Exposure $ev EV  •  Shadows $shadow  •  Vibrance $vibrance  •  Curve Darks $darks",
+                    unchanged=result.optBoolean("noChangeRecommended",false),
+                    modelStatus=status,
+                )
+            } catch (ex: Exception) {
+                say("Smart Auto preview unavailable: ${ex.message}")
+            } finally {
+                ed.autoPreviewLoading=false
+            }
+        }
+    }
+
+    fun applyAutoPreview() {
+        val ed=editor ?: return
+        if (ed.autoPreview==null) return
+        ed.autoPreview=null
+        applySmartAuto()
+    }
+
     fun applySmartAuto() {
         val ed = editor ?: return
         val e = engine ?: return
@@ -3184,7 +3248,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         ed.pickingWb = false
         ed.targeting = null
         when (section) {
-            EditSection.AUTO -> applySmartAuto()
+            EditSection.AUTO -> inspectAutoPreview()
             EditSection.PROFILES -> {
                 ed.profileFrom = ed.state?.profile ?: "lc.color"
                 ed.section = section
