@@ -24,6 +24,9 @@ pub struct AutoTone {
     /// midtones of developed JPEGs while retaining bright emitters.
     pub curve_shadows: f64,
     pub curve_darks: f64,
+    /// Automatic encoded-domain upper-midtones and highlight protection.
+    pub curve_lights: f64,
+    pub curve_highlights: f64,
 }
 
 fn percentile(sorted: &[f32], q: f32) -> f32 {
@@ -62,6 +65,8 @@ pub fn auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> AutoTo
         saturation: 3.0,
         curve_shadows: 0.0,
         curve_darks: 0.0,
+        curve_lights: 0.0,
+        curve_highlights: 0.0,
     }
 }
 
@@ -93,7 +98,11 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
     let mut dark=0usize;
     let mut bright=0usize;
     let mut recoverable=0usize;
+    let mut colour_eligible=0usize;
     let mut coloured=0usize;
+    let mut soft_colour=0usize;
+    let mut rich_colour=0usize;
+    let mut skin_like_colour=0usize;
     let mut colour_mass=0.0f64;
     let mut structured=Vec::new();
     for (i,&y) in lum.iter().enumerate() {
@@ -102,10 +111,24 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
         if (0.035..0.28).contains(&y) {recoverable+=1;}
         let c=img.data[i];
         if (0.025..0.80).contains(&y) {
+            // Work on visible, unclipped colours, not dark-noise chroma or
+            // small bright lamps. Relative channel spread is only a proxy
+            // for existing colourfulness, not an object/skin classifier.
             let mx=c[0].max(c[1]).max(c[2]).max(1e-6);
             let mn=c[0].min(c[1]).min(c[2]);
-            colour_mass+=((mx-mn)/mx).clamp(0.0,1.0) as f64;
-            coloured+=1;
+            let spread=((mx-mn)/mx).clamp(0.0,1.0) as f64;
+            colour_eligible+=1;
+            colour_mass+=spread;
+            if spread>0.065 {coloured+=1;}
+            if (0.075..0.45).contains(&spread) {soft_colour+=1;}
+            if spread>0.66 {rich_colour+=1;}
+            // Extra protection for warm, moderate-chroma regions that may
+            // contain faces. A heuristic cap, NOT facial recognition.
+            if (0.12..0.55).contains(&spread)
+                && c[0]>c[1]*1.08 && c[1]>c[2]*1.02
+                && c[0]<c[2]*2.10 {
+                skin_like_colour+=1;
+            }
         }
         // Edges and textured midtones act as a proxy for actual subject
         // detail; flat backgrounds are deliberately downweighted.
@@ -145,6 +168,7 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
             vibrance:0.0,saturation:0.0,
             curve_shadows:if visible_wood {30.0}else{0.0},
             curve_darks:if visible_wood {42.0}else{0.0},
+            curve_lights:0.0,curve_highlights:0.0,
         };
     }
 
@@ -184,17 +208,58 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
     }else{0.0};
     let dynamic_range=p95-p05;
     let contrast=((5.5-dynamic_range)*1.2).clamp(-6.0,8.0).round();
-    let mean_sat=if coloured>0 {colour_mass/coloured as f64}else{0.0};
-    let vibrance=((0.26-mean_sat)*36.0).clamp(0.0,8.0).round();
+
+    // Auto Curve uses all four existing *parametric* regions. Keep a
+    // photographer's RGB point curves intact. Upper-midtones gain a little
+    // luminosity only when they are genuinely subdued; the top region is
+    // gently rolled off only where bright non-emissive content supports it.
+    // The earlier fire exit intentionally bypasses these two operations.
+    let p75=percentile(&ev,0.75) as f64;
+    let curve_lights=if natural_tone && p75<0.95 && p95<2.1 {
+        (5.0+9.0*((0.95-p75)/2.0).clamp(0.0,1.0)).round()
+    }else{0.0};
+    let curve_highlights=if !high_key && !low_key
+        && p95>1.30 && bright_fraction>0.012 {
+        -(3.0+7.0*((p95-1.30)/1.8).clamp(0.0,1.0)).round()
+    }else{0.0};
+
+    // Automatic colour is a *separate* decision from Auto WB. Work out
+    // whether there is recoverable low-chroma colour, or whether the camera
+    // has already rendered strongly coloured flowers/sunsets. Unlike v0.6,
+    // an ordinary photograph is not hard-coded to Saturation=0.
+    let eligible=colour_eligible.max(1) as f64;
+    let colour_fraction=coloured as f64/eligible;
+    let soft_fraction=soft_colour as f64/eligible;
+    let rich_fraction=rich_colour as f64/eligible;
+    let skin_fraction=skin_like_colour as f64/eligible;
+    let mean_sat=colour_mass/eligible;
+    let chroma_need=((0.38-mean_sat)/0.38).clamp(0.0,1.0);
+    let has_colour=colour_fraction>0.16 && colour_eligible as f64>n*0.10;
+    let mut vibrance=if has_colour {
+        ((9.0+12.0*soft_fraction+7.0*chroma_need)
+            *(1.0-1.35*rich_fraction).clamp(0.0,1.0))
+            .clamp(0.0,22.0)
+    }else{0.0};
+    let mut saturation=if has_colour && soft_fraction>0.14
+        && rich_fraction<0.24 {
+        (2.0+3.0*soft_fraction+2.0*chroma_need).clamp(0.0,6.0)
+    }else{0.0};
+    if skin_fraction>0.20 {
+        vibrance=vibrance.min(12.0);
+        saturation=saturation.min(2.0);
+    }
+    if high_key {
+        vibrance*=0.70;
+        saturation*=0.70;
+    }
 
     AutoTone {
         exposure:(exposure*100.0).round()/100.0,
         contrast:if balanced {0.0}else{contrast},
         highlights,shadows,whites:0.0,
         blacks:if natural_tone && shadow_fraction>0.25 {-3.0}else{0.0},
-        vibrance:if high_key {0.0}else{vibrance},
-        saturation:0.0,
-        curve_shadows,curve_darks,
+        vibrance:vibrance.round(),saturation:saturation.round(),
+        curve_shadows,curve_darks,curve_lights,curve_highlights,
     }
 }
 
@@ -906,5 +971,95 @@ mod studio_v06_adaptive_tests {
         assert_eq!(a.exposure,0.0,"fire exposure should not be raised");
         assert_eq!(a.highlights,0.0,"flames should not be dimmed");
         assert!(a.curve_darks>0.0,"recoverable charcoal");
+    }
+}
+
+#[cfg(test)]
+mod studio_v061_auto_colour_and_curve_tests {
+    use super::*;
+    use lightcraft_develop::ToneCurve;
+
+    fn muted_landscape() -> Rgb32f {
+        Rgb32f::from_fn(160, 112, |x, y| {
+            let grad = (x % 40) as f32 * 0.00045;
+            if y < 46 {
+                [0.20 + grad, 0.24 + grad, 0.28 + grad]
+            } else if (x / 20) % 2 == 0 {
+                [0.11 + grad, 0.15 + grad, 0.12 + grad]
+            } else {
+                [0.16 + grad, 0.18 + grad, 0.13 + grad]
+            }
+        })
+    }
+
+    #[test]
+    fn auto_colour_is_visible_on_subdued_landscape() {
+        let a = smart_auto_tone(&muted_landscape(), &SourceInfo::default(), &DevelopSettings::default());
+        assert!(a.vibrance >= 12.0 && a.vibrance <= 22.0, "need useful, limited auto vibrance: {a:?}");
+        assert!(a.saturation >= 2.0 && a.saturation <= 6.0, "saturation must not be hard-coded off: {a:?}");
+        assert!(a.curve_lights > 0.0, "missing auto lights curve: {a:?}");
+    }
+
+    #[test]
+    fn already_rich_flowers_are_not_overcooked() {
+        let image = Rgb32f::from_fn(160, 112, |x, y| {
+            if ((x / 16) + (y / 16)) % 3 == 0 { [0.75, 0.035, 0.20] }
+            else { [0.04, 0.34, 0.045] }
+        });
+        let a = smart_auto_tone(&image, &SourceInfo::default(), &DevelopSettings::default());
+        assert_eq!(a.saturation, 0.0, "no global colour boost on vivid petals: {a:?}");
+        assert!(a.vibrance <= 3.0, "petals already have sufficient chroma: {a:?}");
+    }
+
+    #[test]
+    fn true_grey_remains_without_auto_colour() {
+        let image=Rgb32f::from_fn(160, 112, |x, y| {
+            let v=0.06 + x as f32 * 0.001 + y as f32 * 0.0004;
+            [v,v,v]
+        });
+        let a=smart_auto_tone(&image,&SourceInfo::default(),&DevelopSettings::default());
+        assert_eq!((a.vibrance,a.saturation),(0.0,0.0));
+    }
+
+    #[test]
+    fn all_parametric_auto_curve_regions_are_wired() {
+        let a=smart_auto_tone(&muted_landscape(),&SourceInfo::default(),&DevelopSettings::default());
+        let curve=ToneCurve {
+            shadows:a.curve_shadows,
+            darks:a.curve_darks,
+            lights:a.curve_lights,
+            highlights:a.curve_highlights,
+            ..ToneCurve::default()
+        };
+        let lut=crate::finish::parametric_curve(&curve,1024);
+        assert!(lut.eval(0.63)>0.63+0.002,"underused upper midtones: {}",lut.eval(0.63));
+        assert!((lut.eval(0.995)-0.995).abs()<0.005,"must anchor bright white: {}",lut.eval(0.995));
+        assert!((lut.eval(0.002)-0.002).abs()<0.003,"must anchor true black: {}",lut.eval(0.002));
+    }
+
+    #[test]
+    fn auto_colour_and_curves_each_change_rendered_pixels() {
+        use crate::{RenderRequest, render};
+        let src=muted_landscape();
+        let info=SourceInfo::default();
+        let a=smart_auto_tone(&src,&info,&DevelopSettings::default());
+        for edge in [80,160] {
+            let req=RenderRequest::fit(edge,edge);
+            let base=render(&src,&info,&DevelopSettings::default(),&req).image;
+            for (name,value) in [("vibrance",a.vibrance),("saturation",a.saturation),
+                                 ("curve_lights",a.curve_lights)] {
+                assert!(value>0.0,"expected positive {name}: {a:?}");
+                let mut s=DevelopSettings::default();
+                match name {
+                    "vibrance"=>s.color.vibrance=value,
+                    "saturation"=>s.color.saturation=value,
+                    _=>s.curve.lights=value,
+                }
+                let edited=render(&src,&info,&s,&req).image;
+                let changed=base.data.iter().zip(edited.data.iter())
+                    .filter(|(p,q)|p[0..3]!=q[0..3]).count();
+                assert!(changed>base.len()/25,"{name} produced too few changed pixels at {edge}px: {changed}/{}",base.len());
+            }
+        }
     }
 }
