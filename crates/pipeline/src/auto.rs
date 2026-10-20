@@ -834,11 +834,20 @@ pub fn auto_wb_report(src:&Rgb32f,info:&SourceInfo)->AutoWbReport{
     let limit_tint=if info.raw {27.0}else{22.0};
     let diff=((desired_mired-source_mired)*report.confidence)
         .clamp(-limit_mired,limit_mired);
-    report.temp=(1_000_000.0/(source_mired+diff))
-        .clamp(2000.0,50000.0).round();
-    report.tint=(info.as_shot_tint+
-        ((tint-info.as_shot_tint)*report.confidence)
-        .clamp(-limit_tint,limit_tint)).round();
+    // Tiny computed changes are below useful JPEG WB correction
+    // confidence: preserve the actual as-shot setting, especially with
+    // warm or naturally colourful light. Correct each axis independently.
+    report.temp=if diff.abs()<4.0 {
+        info.as_shot_temp
+    }else{
+        (1_000_000.0/(source_mired+diff))
+            .clamp(2000.0,50000.0).round()
+    };
+    let tint_change=((tint-info.as_shot_tint)*report.confidence)
+        .clamp(-limit_tint,limit_tint);
+    report.tint=if tint_change.abs()<5.0 {
+        info.as_shot_tint
+    }else{(info.as_shot_tint+tint_change).round()};
     report.camera_balance_retained=
         (report.temp-info.as_shot_temp).abs()<1.0 &&
         (report.tint-info.as_shot_tint).abs()<1.0;
