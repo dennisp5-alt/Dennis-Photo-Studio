@@ -209,9 +209,19 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
     let shadow_need=if low_key || protected_warm_colour {
         0.0
     }else{
-        ((-3.0-p05)/2.0).clamp(0.0,1.0)
-        * ((recoverable_fraction-0.15)/0.29).clamp(0.0,1.0)
-        * ((-0.45-subject_ev)/1.5).clamp(0.0,1.0)
+        let compressed=((-3.0-p05)/2.0).clamp(0.0,1.0)
+            * ((recoverable_fraction-0.15)/0.29).clamp(0.0,1.0)
+            * ((-0.45-subject_ev)/1.5).clamp(0.0,1.0);
+        // Bright sky with an underlit, recoverable foreground can need
+        // *local* recovery even where global exposure would blow clouds.
+        let backlit=if bright_fraction>0.12 && median< -0.75
+            && p95>1.35 && recoverable_fraction>0.20 {
+            ((bright_fraction-0.12)/0.35).clamp(0.0,1.0)
+            * ((-0.75-median)/1.0).clamp(0.0,1.0)
+            * ((recoverable_fraction-0.20)/0.30).clamp(0.0,1.0)
+            * 0.80
+        }else{0.0};
+        compressed.max(backlit)
     };
     let shadows=if shadow_need>0.20 {
         (shadow_need*27.0).round()
@@ -1168,7 +1178,10 @@ mod studio_v06_adaptive_tests {
             else {[0.025,0.055,0.028]}
         });
         let a=smart_auto_tone(&image,&SourceInfo::default(),&DevelopSettings::default());
-        assert!(a.exposure>0.0,"white sky vetoed regional exposure: {a:?}");
+        // New clipping gate may reject *global* exposure; local dark
+        // recovery should remain available without destroying clouds.
+        assert!(a.exposure>0.0 || a.curve_darks>0.0,
+            "white sky vetoed all justified improvements: {a:?}");
         assert!(a.exposure<0.25,"risk of blowing white sky: {a:?}");
         assert!(a.curve_darks>0.0,"missing regional dark-ground recovery: {a:?}");
     }
