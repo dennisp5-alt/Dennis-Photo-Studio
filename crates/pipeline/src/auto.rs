@@ -1206,15 +1206,17 @@ mod studio_v061_auto_colour_and_curve_tests {
     use super::*;
     use lightcraft_develop::ToneCurve;
 
+    // Deliberately weak *colour and tone*, not simply a normally
+    // saturated detailed landscape. It should be eligible for enhancement.
     fn muted_landscape() -> Rgb32f {
         Rgb32f::from_fn(160, 112, |x, y| {
-            let grad = (x % 40) as f32 * 0.00045;
+            let grad = (x % 40) as f32 * 0.00015;
             if y < 46 {
-                [0.20 + grad, 0.24 + grad, 0.28 + grad]
+                [0.053 + grad, 0.057 + grad, 0.059 + grad]
             } else if (x / 20) % 2 == 0 {
-                [0.060 + grad, 0.095 + grad, 0.070 + grad]
+                [0.038 + grad, 0.042 + grad, 0.039 + grad]
             } else {
-                [0.090 + grad, 0.105 + grad, 0.072 + grad]
+                [0.023 + grad, 0.025 + grad, 0.022 + grad]
             }
         })
     }
@@ -1222,8 +1224,8 @@ mod studio_v061_auto_colour_and_curve_tests {
     #[test]
     fn auto_colour_is_visible_on_subdued_landscape() {
         let a = smart_auto_tone(&muted_landscape(), &SourceInfo::default(), &DevelopSettings::default());
-        assert!(a.vibrance >= 12.0 && a.vibrance <= 22.0, "need useful, limited auto vibrance: {a:?}");
-        assert!(a.saturation >= 2.0 && a.saturation <= 6.0, "saturation must not be hard-coded off: {a:?}");
+        assert!(a.vibrance >= 6.0 && a.vibrance <= 19.0, "weak colour should receive evidence-driven vibrance: {a:?}");
+        assert!(a.saturation >= 0.0 && a.saturation <= 5.0, "saturation must be gentle and independently optional: {a:?}");
         assert!(a.curve_lights > 0.0, "missing auto lights curve: {a:?}");
     }
 
@@ -1273,7 +1275,7 @@ mod studio_v061_auto_colour_and_curve_tests {
         for edge in [80,160] {
             let req=RenderRequest::fit(edge,edge);
             let base=render(&src,&info,&DevelopSettings::default(),&req).image;
-            for (name,value) in [("vibrance",a.vibrance),("saturation",a.saturation),
+            for (name,value) in [("vibrance",a.vibrance),
                                  ("curve_lights",a.curve_lights)] {
                 assert!(value>0.0,"expected positive {name}: {a:?}");
                 let mut s=DevelopSettings::default();
@@ -1387,5 +1389,153 @@ mod studio_v062_adaptive_auto_effects_tests {
         let b=auto_effects(&src,&SourceInfo::default());
         assert_eq!(a,b);
         assert_eq!(DevelopSettings::default().detail,DevelopSettings::default().detail);
+    }
+}
+
+#[cfg(test)]
+mod studio_v064_defect_driven_smart_auto_tests {
+    use super::*;
+
+    fn settings() -> DevelopSettings {DevelopSettings::default()}
+    fn auto(img:&Rgb32f)->AutoTone {
+        smart_auto_tone(img,&SourceInfo::default(),&settings())
+    }
+    fn finished_sunset()->Rgb32f {
+        Rgb32f::from_fn(256,192,|x,y|{
+            // Elaborate sunset with purposeful dark horizon, rich orange
+            // clouds, bright sky and considerable texture, not a flat test.
+            let fine=((x*31+y*13)%19) as f32/19.0*0.025;
+            if y<85 {
+                if x%43<24 {[0.68+fine,0.29+fine*0.35,0.10+fine*0.15]}
+                else {[0.41+fine,0.20+fine*0.5,0.18+fine*0.4]}
+            } else if y<145 {
+                [0.19+fine,0.095+fine*0.35,0.073+fine*0.25]
+            } else {
+                if (x/9+y/8)%2==0 {[0.040+fine*0.2,0.033,0.030]}
+                else {[0.090,0.052+fine*0.2,0.032]}
+            }
+        })
+    }
+    fn textured_finished_landscape()->Rgb32f {
+        Rgb32f::from_fn(256,192,|x,y|{
+            let detail=((x*29+y*43)%23) as f32/23.0*0.024;
+            if y<64 {[0.43+detail,0.55+detail,0.66+detail]}
+            else if y<145 {[0.15+detail,0.29+detail,0.15+detail]}
+            else {[0.055+detail,0.070+detail,0.052+detail]}
+        })
+    }
+    #[test]
+    fn textured_balanced_landscape_is_not_assumed_defective() {
+        let a=auto(&textured_finished_landscape());
+        assert!(a.exposure.abs()<=0.06,"texture is not exposure error {a:?}");
+        assert_eq!(a.curve_darks,0.0,"no unconditional lower-tone enhancement {a:?}");
+        assert_eq!(a.vibrance,0.0,"already colourful landscapes need no vibrance {a:?}");
+    }
+    #[test]
+    fn finished_sunset_does_not_receive_v061_positive_baselines() {
+        let a=auto(&finished_sunset());
+        assert!(a.exposure.abs()<=0.06,"balanced sunset moved: {a:?}");
+        assert_eq!(a.vibrance,0.0,"v0.6.3 +9 colour bias recurred: {a:?}");
+        assert_eq!(a.saturation,0.0);
+        assert_eq!(a.curve_darks,0.0,"v0.6.3 +23 dark curve bias recurred: {a:?}");
+        assert_eq!(a.curve_lights,0.0,"v0.6.3 +6 light curve bias recurred: {a:?}");
+    }
+    #[test]
+    fn underexposure_still_gets_positive_exposure() {
+        let img=Rgb32f::from_fn(192,128,|x,y|{
+            let v=0.044+((x*17+y*11)%29) as f32*0.0002;
+            [v,v*0.94,v*0.88]
+        });
+        let a=auto(&img);
+        assert!(a.exposure>0.13,"genuinely underexposed frame ignored: {a:?}");
+    }
+    #[test]
+    fn overexposure_gets_negative_exposure_without_forced_undersaturation() {
+        let img=Rgb32f::from_fn(192,128,|x,y|{
+            let v=0.87+((x*13+y*17)%17) as f32*0.0008;
+            [v,v*0.98,v*0.96]
+        });
+        let a=auto(&img);
+        assert!(a.exposure < -0.08,"genuinely overexposed frame ignored: {a:?}");
+    }
+    #[test]
+    fn low_contrast_but_structured_frame_still_gets_contrast() {
+        let img=Rgb32f::from_fn(192,128,|x,y|{
+            let v=0.125+((x/5+y/8)%5) as f32*0.008;
+            [v,v*1.02,v*0.98]
+        });
+        let a=auto(&img);
+        assert!(a.contrast>0.0,"flat image with real structure ignored: {a:?}");
+    }
+    #[test]
+    fn weak_colour_is_not_confused_with_neutral_grey() {
+        let muted=Rgb32f::from_fn(192,128,|x,y|{
+            if (x/20+y/20)%2==0 {[0.18,0.17,0.16]}
+            else {[0.13,0.14,0.15]}
+        });
+        let a=auto(&muted);
+        assert!(a.vibrance>0.0,"washed-out existing colours not improved: {a:?}");
+        let grey=Rgb32f::filled(192,128,[0.18,0.18,0.18]);
+        assert_eq!(auto(&grey).vibrance,0.0);
+    }
+    #[test]
+    fn high_chroma_not_auto_desaturated_without_clip_evidence() {
+        let img=Rgb32f::from_fn(192,128,|x,y|{
+            if (x/22+y/19)%2==0 {[0.80,0.04,0.11]}
+            else {[0.07,0.39,0.08]}
+        });
+        let a=auto(&img);
+        assert_eq!((a.vibrance,a.saturation),(0.0,0.0));
+    }
+    #[test]
+    fn objectively_clipped_colour_can_receive_mild_negative_colour() {
+        let img=Rgb32f::from_fn(192,128,|x,y|{
+            if (x/24+y/24)%2==0 {[1.06,0.025,0.07]}
+            else {[0.028,0.99,0.026]}
+        });
+        let a=auto(&img);
+        assert!(a.vibrance<=0.0 && a.saturation<=0.0,"negative corrections unsupported {a:?}");
+    }
+    #[test]
+    fn intentional_low_key_preserves_mood() {
+        let img=Rgb32f::from_fn(192,128,|x,y|{
+            if x>77 && x<117 && y>32 && y<74 {[0.15,0.092,0.066]}
+            else {[0.004,0.003,0.003]}
+        });
+        let a=auto(&img);
+        assert_eq!(a.exposure,0.0,"low-key mood changed: {a:?}");
+        assert_eq!((a.shadows,a.curve_darks,a.curve_lights),(0.0,0.0,0.0));
+    }
+    #[test]
+    fn variable_complexions_keep_midtone_and_hair_relation() {
+        for skin in [[0.13,0.078,0.054],[0.31,0.21,0.16]] {
+            let img=Rgb32f::from_fn(192,128,|x,y|{
+                if x>38 && x<146 && y>16 && y<110 {
+                    if x<50||x>134 {[0.024,0.021,0.020]} else {skin}
+                }else {[0.034,0.034,0.037]}
+            });
+            let a=auto(&img);
+            assert!(a.exposure.abs()<0.10,"natural skin luminance shifted: {skin:?} {a:?}");
+            assert_eq!(a.curve_darks,0.0,"dark hair lifted unnecessarily: {a:?}");
+        }
+    }
+    #[test]
+    fn pixel_guard_will_reject_new_highlight_clipping() {
+        let img=Rgb32f::from_fn(192,128,|x,y|{
+            if x<96 {[0.92,0.92,0.92]}
+            else {[0.30,0.30,0.30]}
+        });
+        let before=AutoTone {exposure:0.9,curve_lights:20.0,..Default::default()};
+        let after=preview_quality_guard(&img,&SourceInfo::default(),&settings(),before);
+        assert_eq!(after.exposure,0.0,"safety gate failed to prevent new RGB clipping");
+    }
+    #[test]
+    fn smart_auto_does_not_mutate_manual_point_curves() {
+        use lightcraft_geom::Point;
+        let mut s=settings();
+        s.curve.master=vec![Point::new(0.0,0.0),Point::new(0.5,0.58),Point::new(1.0,1.0)];
+        let unchanged=s.curve.master.clone();
+        let _=smart_auto_tone(&finished_sunset(),&SourceInfo::default(),&s);
+        assert_eq!(s.curve.master,unchanged);
     }
 }
