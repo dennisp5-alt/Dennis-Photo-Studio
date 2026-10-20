@@ -114,7 +114,8 @@ jobs:
           model=json.loads(Path('crates/pipeline/models/optionc_pilot_v1.json').read_text())
           assert len(model['trees']) == 64
           assert len(model['features']) == 22
-          assert 'Learned Option C pilot:' in vm
+          assert 'Learned Option C pilot unavailable.' in vm
+          assert 'Diagnostic only — the image preview is rendered by current Smart Auto.' in vm
           assert 'AutoCandidatePreviewDialog' in p
           assert 'No adjustment recommended.' in p
           assert 'fun inspectAutoPreview()' in vm
