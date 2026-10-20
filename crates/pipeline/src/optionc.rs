@@ -255,6 +255,41 @@ mod tests {
         assert!((s.iter().sum::<f64>()-1.0).abs()<1e-6);
     }
     #[test]
+    fn encoded_srgb_feature_and_model_match_training_reference() {
+        // Exact 8-bit RGB fixture independently evaluated in training Python.
+        // Protects against feature-order, gamma, percentile or tree drift.
+        let image=Rgba8::from_fn(160,120,|x,y| {
+            [
+                (35+(x*11+y*3)%180) as u8,
+                (28+(x*5+y*13)%170) as u8,
+                (24+(x*7+y*9)%160) as u8,
+                255,
+            ]
+        });
+        let actual=extract_features(&image).unwrap_or([0.0;22]);
+        let expected=[
+            -1.892856836,-0.684781551,0.065178208,0.746961117,
+            1.272942305,1.518278241,0.016525880,0.009583334,
+            0.0,0.689843774,0.925849557,0.764310598,
+            0.754401565,0.088922657,0.998480380,0.0,
+            0.057172891,0.065807253,0.070669651,0.0,0.0,0.122396961,
+        ];
+        for (index,(got,want)) in actual.iter().zip(expected).enumerate() {
+            assert!((got-want).abs()<0.003,"feature {index}: {got} vs {want}");
+        }
+        let forest=serde_json::from_str::<Forest>(MODEL_JSON)
+            .ok().and_then(Forest::validated);
+        let Some(forest)=forest else {
+            assert!(false,"model not loadable");return;
+        };
+        let predicted=forest.infer(&actual).unwrap_or([0.0;5]);
+        let expected=[0.074650364,0.271212893,0.002569336,0.118207835,0.533359571];
+        for (index,(got,want)) in predicted.iter().zip(expected).enumerate() {
+            assert!((got-want).abs()<0.03,"class {index}: {got} vs {want}");
+        }
+    }
+
+    #[test]
     fn native_proxy_model_is_deterministic_and_non_destructive() {
         let src=Rgb32f::filled(160,120,[0.18,0.17,0.16]);
         let original=src.clone();
