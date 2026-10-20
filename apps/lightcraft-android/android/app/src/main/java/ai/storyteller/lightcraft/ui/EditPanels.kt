@@ -583,7 +583,7 @@ private fun ColorPanel(vm: AppViewModel, ed: EditorState) {
         if (ed.state?.wbMode == "auto") {
             item(key = "wb-explanation") {
                 Text(
-                    "Auto WB uses neutral references. Under firelight, sunsets or coloured illumination, preserving the original warmth can be the correct result. Select a neutral grey area with the eyedropper for measured correction.",
+                    ed.wbAutoStatus ?: "Auto WB measures neutral-looking regions. Select a neutral grey patch with the eyedropper if the scene has no reliable neutral reference.",
                     color = Lc.panelTextSoft, fontFamily = Inter, fontSize = 12.sp,
                     modifier = Modifier.padding(horizontal = 17.dp, vertical = 6.dp)
                 )
@@ -613,7 +613,7 @@ private fun WhiteBalanceRow(vm: AppViewModel, ed: EditorState, short: Boolean) {
             if (open) {
                 WbList(modes, mode, onDismiss = { open = false }) { id ->
                     open = false
-                    if (id != mode) vm.setWhiteBalance(id)
+                    if (id != mode || id == "auto") vm.setWhiteBalance(id)
                 }
             }
         }
