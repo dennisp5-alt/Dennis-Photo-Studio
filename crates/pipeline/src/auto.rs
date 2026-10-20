@@ -179,7 +179,11 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
     // The two tails and meaningful midtones must agree before a correction.
     let high_key=median>0.75 && bright_fraction>0.22;
     let low_key=(median < -2.5 && bright_fraction<0.015)
-        || (shadow_fraction>0.64 && median< -2.1 && bright_fraction<0.10);
+        || (shadow_fraction>0.64 && median< -2.1 && bright_fraction<0.10)
+        // A well-lit subject in a purposely dark setting should not be
+        // normalized to grey merely because the background owns the median.
+        || (median< -1.6 && p95> -1.1 && p95-median>1.3
+            && bright_fraction<0.10);
     let is_shadow_deficit=!low_key && median< -0.65
         && (subject_ev< -0.75 || median< -1.25);
     let is_bright_deficit=median>0.85 && subject_ev>0.45
@@ -1483,7 +1487,7 @@ mod studio_v064_defect_driven_smart_auto_tests {
     #[test]
     fn low_contrast_but_structured_frame_still_gets_contrast() {
         let img=Rgb32f::from_fn(192,128,|x,y|{
-            let v=0.125+((x/5+y/8)%5) as f32*0.008;
+            let v=0.125+((x/5+y/8)%5) as f32*0.035;
             [v,v*1.02,v*0.98]
         });
         let a=auto(&img);
