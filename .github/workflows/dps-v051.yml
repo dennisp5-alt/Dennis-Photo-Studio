@@ -62,11 +62,12 @@ jobs:
           assert 'EditSection.AUTO -> applySmartAuto()' in vm
           assert 'autoAmountDialog' not in vm
           assert 'runAutoDetail()' in vm
+          assert 'Auto WB: original colour retained.' in vm
           edit=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/EditPanels.kt').read_text()
           assert 'vm.runAutoDetail()' in edit
           assert 'Current: Luminance NR ' in edit
           assert 'Advanced' in edit
-          assert 'Auto WB uses neutral references' in edit
+          assert 'ed.wbAutoStatus' in edit
           assert 'lightcraft.version=0.5.1-beta' in Path('apps/lightcraft-android/android/gradle.properties').read_text()
           assert 'com.dennis.photostudio.visibleauto.v051' in Path('apps/lightcraft-android/android/app/build.gradle.kts').read_text()
           print('Source preservation and feature integrity: PASS')
@@ -139,9 +140,9 @@ jobs:
             Pure black sky and bright flame tips remain anchored.
             Automated tests inspect ACTUAL curve output values.
 
-            White Balance no longer silently reports "Auto applied":
-            the engine response includes neutral evidence, confidence,
-            and whether the camera's balance was retained.
+            Auto WB now reports to the Color panel whether it changed
+            camera colour or found insufficient neutral information;
+            the engine response includes evidence and confidence.
             A fire scene does not necessarily have a neutral target,
             and pretending otherwise would falsely cool the flames.
             Use WB eyedropper on known neutral material if present.
