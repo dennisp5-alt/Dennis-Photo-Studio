@@ -326,7 +326,7 @@ pub fn specs() -> Vec<CommandSpec> {
             let wb=if manual_wb {None} else {
                 Some(lightcraft_pipeline::auto::auto_wb_report(&src,&info))
             };
-            let mut proposal=current.clone();
+            let mut proposal=(*current).clone();
             proposal.light.exposure=tone.exposure;
             proposal.light.contrast=tone.contrast;
             proposal.light.highlights=tone.highlights;
@@ -347,7 +347,7 @@ pub fn specs() -> Vec<CommandSpec> {
             }
             // Compare complete current/proposed settings; zero recommendations
             // can still reset nonzero manual Light/Colour controls.
-            let no_change=proposal==current;
+            let no_change=proposal==*current;
             let model=lightcraft_pipeline::optionc::diagnose(&src,&info,&current);
             Ok(json!({
                 "sourceSettings":current,
