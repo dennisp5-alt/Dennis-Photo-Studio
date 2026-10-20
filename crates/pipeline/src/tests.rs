@@ -21,6 +21,30 @@ fn default_render_is_sane() {
 }
 
 #[test]
+fn histogram_is_derived_from_the_current_rendered_pixels() {
+    use lightcraft_raster::Histogram;
+    let source=scene();
+    let info=SourceInfo::default();
+    let req=RenderRequest::fit(220,220);
+    let base=render(&source,&info,&DevelopSettings::default(),&req);
+    assert_eq!(base.histogram,Histogram::of_srgb8(&base.image));
+    let mut settings=DevelopSettings::default();
+    settings.light.exposure=0.75;
+    let exposure=render(&source,&info,&settings,&req);
+    assert_eq!(exposure.histogram,Histogram::of_srgb8(&exposure.image));
+    assert_ne!(exposure.histogram,base.histogram,
+        "exposure slider must update histogram, not keep stale bins");
+    settings.curve.shadows=18.0;
+    settings.curve.darks=22.0;
+    settings.curve.lights=10.0;
+    settings.curve.highlights=-8.0;
+    let curves=render(&source,&info,&settings,&req);
+    assert_eq!(curves.histogram,Histogram::of_srgb8(&curves.image));
+    assert_ne!(curves.histogram,exposure.histogram,
+        "Smart Auto parametric curves must be reflected in the rendered histogram");
+}
+
+#[test]
 fn grey_ramp_stays_neutral() {
     let src = Rgb32f::from_fn(64, 8, |x, _| [0.002 * 1.12f32.powi(x as i32); 3]);
     let r = render(&src, &SourceInfo::default(), &DevelopSettings::default(), &RenderRequest::fit(64, 8));
