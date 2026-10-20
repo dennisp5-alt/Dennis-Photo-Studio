@@ -2919,9 +2919,32 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         it.execute("develop.autoDetail","{}")
     }
 
-    /** Never invents haze removal: manual Dehaze remains available in Advanced. */
-    fun runAutoEffects() = edit(after = {say("Auto Effects applied • subtle texture and clarity")}) {
-        it.execute("develop.autoEffects","{}")
+    /** Run source-adaptive Effects separately from Smart Auto and Auto Detail.
+     * Report actual values, including an intentional zero, so users can tell
+     * which photograph needed what rather than seeing a generic success toast. */
+    fun runAutoEffects() {
+        val ed = editor ?: return
+        val e = engine ?: return
+        viewModelScope.launch {
+            runCatching {
+                e.command {
+                    val result = JSONObject(execute("develop.autoEffects", "{}"))
+                    snapshot(ed.photoId) to result
+                }
+            }.onSuccess { (snapshot, result) ->
+                ed.update(snapshot)
+                requestView()
+                val a = result.optJSONObject("result")
+                val texture = a?.optDouble("texture", 0.0) ?: 0.0
+                val clarity = a?.optDouble("clarity", 0.0) ?: 0.0
+                if (texture == 0.0 && clarity == 0.0) {
+                    say("Auto Effects • no additional texture or clarity recommended")
+                } else {
+                    say("Auto Effects • Texture " + texture.toInt() +
+                        " • Clarity " + clarity.toInt())
+                }
+            }.onFailure { say(it.message) }
+        }
     }
 
     /** Crop › Geometry's switch: crop the corners an Upright or transform leaves blank (one step Cancel takes back). */
