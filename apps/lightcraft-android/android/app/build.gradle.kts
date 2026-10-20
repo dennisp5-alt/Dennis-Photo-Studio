@@ -142,7 +142,7 @@ android {
     ndkVersion = "29.0.14206865"
 
     defaultConfig {
-        applicationId = "com.dennis.photostudio.adaptive.v06"
+        applicationId = "com.dennis.photostudio.adaptive.v061"
         minSdk = minApi
         targetSdk = 36
         versionCode = appVersionCode
