@@ -434,6 +434,84 @@ mod nr_tests {
     use super::*;
 
     #[test]
+    fn colour_nr_reduces_chromatic_noise_without_changing_luminance() {
+        let original=Rgb32f::from_fn(128,96,|x,y|{
+            let n=(((x*7919+y*104729)%97) as f32/97.0-0.5)*0.052;
+            [0.16+n,0.22-n*0.5,0.18+n*0.25]
+        });
+        let mut edited=original.clone();
+        let mut s=DevelopSettings::default();
+        s.detail.nr_color=80.0;
+        s.detail.nr_color_detail=40.0;
+        denoise(&mut edited,&s,128,128);
+        let chroma_var=|img:&Rgb32f| {
+            let values:Vec<f64>=img.data.iter().map(|p|(p[0]-p[1]) as f64).collect();
+            let mean=values.iter().sum::<f64>()/values.len() as f64;
+            values.iter().map(|v|(v-mean).powi(2)).sum::<f64>()/values.len() as f64
+        };
+        let before=chroma_var(&original);
+        let after=chroma_var(&edited);
+        assert!(after<before*0.65,"colour NR residual variance: {before} -> {after}");
+        let max_luma_err=original.data.iter().zip(&edited.data)
+            .map(|(a,b)|(luminance_2020(*a)-luminance_2020(*b)).abs())
+            .fold(0.0f32,f32::max);
+        assert!(max_luma_err<0.0005,"colour NR unexpectedly changed luminance: {max_luma_err}");
+    }
+
+    #[test]
+    fn colour_nr_preserves_distinct_real_colour_regions() {
+        let src=Rgb32f::from_fn(128,96,|x,y|{
+            let n=(((x*1237+y*3911)%101) as f32/101.0-0.5)*0.035;
+            if x<64 { [0.27+n,0.13-n*0.3,0.08+n*0.2] }
+            else { [0.07+n*0.2,0.16+n,0.27-n*0.3] }
+        });
+        let mut smooth=src.clone();
+        let mut s=DevelopSettings::default();
+        s.detail.nr_color=75.0;
+        denoise(&mut smooth,&s,128,128);
+        let region=|im:&Rgb32f,x0:usize,x1:usize|{
+            let mut sum=[0.0f32;3];
+            let mut count=0f32;
+            for y in 16..80 {
+                for x in x0..x1 {
+                    let p=im.data[y*128+x];
+                    for k in 0..3 {sum[k]+=p[k];}
+                    count+=1.0;
+                }
+            }
+            sum.map(|v|v/count)
+        };
+        let gap=|im:&Rgb32f| {
+            let a=region(im,12,44);
+            let b=region(im,84,116);
+            (a[0]/a[1]-b[0]/b[1]).abs()
+        };
+        assert!(gap(&smooth)>gap(&src)*0.82,
+            "colour NR must keep distinct subject and background chroma");
+    }
+
+    #[test]
+    fn manual_luminance_and_colour_controls_are_independent() {
+        let input=Rgb32f::from_fn(96,96,|x,y|{
+            let n=(((x*7907+y*5039)%97) as f32/97.0-0.5)*0.08;
+            [0.20+n,0.18-n*0.6,0.19+n*0.2]
+        });
+        let mut luminance=input.clone();
+        let mut colour=input.clone();
+        let mut s=DevelopSettings::default();
+        s.detail.nr_luminance=70.0;
+        assert!(nr_params(&s,96,96).0.is_some() && nr_params(&s,96,96).1.is_none());
+        denoise(&mut luminance,&s,96,96);
+        s.detail.nr_luminance=0.0;
+        s.detail.nr_color=70.0;
+        assert!(nr_params(&s,96,96).0.is_none() && nr_params(&s,96,96).1.is_some());
+        denoise(&mut colour,&s,96,96);
+        assert_ne!(luminance.data,input.data);
+        assert_ne!(colour.data,input.data);
+        assert_ne!(luminance.data,colour.data);
+    }
+
+    #[test]
     fn luminance_nr_reduces_noise_keeps_mean() {
         let mut img = Rgb32f::from_fn(64, 64, |x, y| {
             let n = (((x * 7919 + y * 104729) % 97) as f32 / 97.0 - 0.5) * 0.06;
