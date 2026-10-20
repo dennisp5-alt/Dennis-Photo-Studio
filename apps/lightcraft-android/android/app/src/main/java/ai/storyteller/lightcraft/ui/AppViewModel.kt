@@ -2903,11 +2903,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val e=engine ?: return
         if (ed.autoPreviewLoading) return
         ed.autoPreviewLoading=true
+        say("Preparing Smart Auto comparison…")
         viewModelScope.launch {
             try {
-                val result=withContext(e.looks) {
-                    JSONObject(e.command { execute("develop.autoPreview","{}") })
-                }
+                val result=JSONObject(e.command { execute("develop.autoPreview","{}") })
                 if (editor !== ed) return@launch
                 val oldSettings=result.getJSONObject("sourceSettings").toString()
                 val newSettings=result.getJSONObject("previewSettings").toString()
