@@ -105,12 +105,17 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
     let mut skin_like_colour=0usize;
     let mut colour_mass=0.0f64;
     let mut clipped_colour=0usize;
+    let mut warm_emitters=0usize;
     let mut structured=Vec::new();
     for (i,&y) in lum.iter().enumerate() {
         if y<0.028 {dark+=1;}
         if y>0.70 {bright+=1;}
         if (0.035..0.28).contains(&y) {recoverable+=1;}
         let c=img.data[i];
+        // A genuine bright, warm emitter is distinct from white petals,
+        // moonlight, lit faces or fireworks on an otherwise dark frame.
+        if y>0.45 && c[0]>0.60 && c[0]>c[1]*1.45
+            && c[1]>c[2]*1.65 { warm_emitters+=1; }
         if (0.025..0.80).contains(&y) {
             // Work on visible, unclipped colours, not dark-noise chroma or
             // small bright lamps. Relative channel spread is only a proxy
@@ -159,7 +164,10 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
         && p995>1.2 && p995-median>4.0
         && (bright_fraction>0.0005 || p995>1.9)
         && bright_fraction<0.35;
-    if intentional_light {
+    // Do not apply the large fire/charcoal lift to ordinary bright subjects
+    // merely because their background is dark. Preserve the earlier fire
+    // behaviour only with supporting warm-emitter pixels.
+    if intentional_light && warm_emitters as f64 / n > 0.002 {
         let visible_wood=recoverable_fraction>0.012;
         return AutoTone {
             exposure:0.0,contrast:0.0,highlights:0.0,
@@ -179,7 +187,7 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
     // The two tails and meaningful midtones must agree before a correction.
     let high_key=median>0.75 && bright_fraction>0.22;
     let low_key=(median < -2.5 && bright_fraction<0.015)
-        || (shadow_fraction>0.64 && median< -2.1 && bright_fraction<0.10)
+        || (shadow_fraction>0.64 && median< -2.1 && bright_fraction<0.35)
         // A well-lit subject in a purposely dark setting should not be
         // normalized to grey merely because the background owns the median.
         || (median< -1.6 && p95> -1.1 && p95<0.55 && p95-median>1.3
@@ -189,13 +197,13 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
     let is_bright_deficit=median>0.85 && subject_ev>0.45
         && (bright_fraction>0.12 || p95>2.0);
     let exposure=if is_shadow_deficit {
-        let need=(0.13*(-0.65-median).max(0.0)
-            +0.11*(-0.75-subject_ev).max(0.0)).clamp(0.0,0.46);
-        if need>=0.075 {need}else{0.0}
+        let need=(0.26*(-0.60-median).max(0.0)
+            +0.30*(-0.80-subject_ev).max(0.0)).clamp(0.0,0.46);
+        if need>=0.065 {need}else{0.0}
     }else if is_bright_deficit {
-        let need=(0.18*(median-0.85).max(0.0)
-            +0.10*(subject_ev-0.45).max(0.0)).clamp(0.0,0.35);
-        if need>=0.075 {-need}else{0.0}
+        let need=(0.30*(median-0.85).max(0.0)
+            +0.25*(subject_ev-0.45).max(0.0)).clamp(0.0,0.35);
+        if need>=0.065 {-need}else{0.0}
     }else{0.0};
     let exposure=if exposure>0.0 && p995>2.25 {
         exposure.min(0.18)
@@ -1567,5 +1575,59 @@ mod studio_v064_defect_driven_smart_auto_tests {
         let unchanged=s.curve.master.clone();
         let _=smart_auto_tone(&finished_sunset(),&SourceInfo::default(),&s);
         assert_eq!(s.curve.master,unchanged);
+    }
+}
+
+
+#[cfg(test)]
+mod studio_v065_evidence_gate_regressions {
+    use super::*;
+
+    fn auto(img: &Rgb32f) -> AutoTone {
+        smart_auto_tone(img, &SourceInfo::default(), &DevelopSettings::default())
+    }
+
+    #[test]
+    fn white_flower_on_dark_background_does_not_trigger_fire_recovery() {
+        // A brightly illuminated neutral petal surrounded by black foliage
+        // is not evidence of fire or recoverable charcoal.
+        let img=Rgb32f::from_fn(192,128,|x,y| {
+            if (x>40 && x<155) && (y>26 && y<87) {
+                [0.82,0.82,0.74]
+            } else {
+                [0.005,0.006,0.004]
+            }
+        });
+        let a=auto(&img);
+        assert_eq!(a.exposure,0.0,"bright flower against dark should keep its mood: {a:?}");
+        assert_eq!(a.shadows,0.0,"not charcoal requiring +48: {a:?}");
+        assert_eq!(a.curve_darks,0.0,"not fire requiring +42: {a:?}");
+    }
+
+    #[test]
+    fn modest_global_underexposure_receives_a_useful_correction() {
+        // A visibly dark but ordinary detailed midtone scene was previously
+        // falling just below the 0.075 EV candidate threshold.
+        let img=Rgb32f::from_fn(192,128,|x,y| {
+            let v=0.091 + ((x*13+y*17)%19) as f32*0.0004;
+            [v,v*0.98,v*0.96]
+        });
+        let a=auto(&img);
+        assert!(a.exposure>=0.10,"measurable exposure defect should not be silently ignored: {a:?}");
+        assert_eq!(a.curve_darks,0.0,"do not substitute automatic dark curves for exposure: {a:?}");
+    }
+
+    #[test]
+    fn moon_in_black_sky_is_not_a_firelight_scene() {
+        let img=Rgb32f::from_fn(192,128,|x,y| {
+            if x>70 && x<126 && y>28 && y<83 {
+                [0.82,0.82,0.78]
+            } else {
+                [0.003,0.003,0.003]
+            }
+        });
+        let a=auto(&img);
+        assert_eq!(a.exposure,0.0,"night sky must not be exposed to middle grey: {a:?}");
+        assert_eq!(a.curve_darks,0.0,"black sky must not receive the +42 fire lift: {a:?}");
     }
 }
