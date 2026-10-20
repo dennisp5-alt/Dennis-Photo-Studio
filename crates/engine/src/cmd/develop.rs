@@ -325,6 +325,12 @@ pub fn specs() -> Vec<CommandSpec> {
                 d.light.blacks=a.blacks;
                 d.color.vibrance=a.vibrance;
                 d.color.saturation=a.saturation;
+                // The independent parametric regions brighten fire-lit
+                // wood/ground, unlike global Exposure that clips flames.
+                // Only these two regions are changed; point/colour curves
+                // and other manually edited curve regions are preserved.
+                d.curve.shadows=a.curve_shadows;
+                d.curve.darks=a.curve_darks;
                 Ok(())
             })?;
             Ok(serde_json::to_value(a).unwrap_or_default())
