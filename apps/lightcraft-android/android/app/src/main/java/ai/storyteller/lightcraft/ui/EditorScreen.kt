@@ -266,7 +266,15 @@ fun EditorScreen(vm: AppViewModel, ed: EditorState, snackbar: SnackbarHostState)
         }
     }
     OverlayHost(namingPreset.takeIf { it }) { CreatePresetPage(vm) { namingPreset = false } }
+    ed.autoPreview?.let { proposal ->
+        AutoCandidatePreviewDialog(
+            proposal=proposal,
+            onDismiss={ ed.autoPreview=null },
+            onApply={ vm.applyAutoPreview() }
+        )
+    }
 }
+
 
 private val horizontalInsets: WindowInsets
     @Composable get() = WindowInsets.navigationBars.union(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal)
@@ -1839,4 +1847,67 @@ private fun ChoiceMenu(title: String, choices: List<Pair<String, String>>, previ
             }
         }
     }
+}
+
+/**
+ * Read-only before/after preview. Only the explicit Apply button invokes
+ * develop.auto. The unvalidated Option C pilot is never described as active.
+ */
+@Composable
+private fun AutoCandidatePreviewDialog(
+    proposal: AutoPreviewData,
+    onDismiss: () -> Unit,
+    onApply: () -> Unit,
+) {
+    var edited by remember(proposal) { mutableStateOf(true) }
+    AlertDialog(
+        onDismissRequest=onDismiss,
+        title={ Text("Preview Smart Auto", color=Lc.menuText, fontFamily=Inter) },
+        text={
+            Column {
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick={edited=false}) {
+                        Text(if(!edited) "● Original" else "Original")
+                    }
+                    TextButton(onClick={edited=true}) {
+                        Text(if(edited) "● Suggested" else "Suggested")
+                    }
+                }
+                Box(
+                    Modifier.fillMaxWidth().height(264.dp).background(Color.Black),
+                    contentAlignment=Alignment.Center,
+                ) {
+                    Image(
+                        bitmap=if(edited) proposal.candidate else proposal.original,
+                        contentDescription=if(edited) "Suggested Smart Auto rendering" else "Original rendering",
+                        modifier=Modifier.fillMaxSize(),
+                        contentScale=ContentScale.Fit,
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    if(proposal.unchanged) "No adjustment recommended."
+                    else proposal.summary,
+                    color=Lc.menuText,
+                    fontFamily=Inter,
+                    fontSize=13.sp,
+                )
+                Spacer(Modifier.height(7.dp))
+                Text(
+                    "Option C learned-model pilot: not yet connected. This preview is the existing Smart Auto result. No changes have been saved.",
+                    color=Lc.panelTextSoft,
+                    fontFamily=Inter,
+                    fontSize=12.sp,
+                )
+            }
+        },
+        confirmButton={
+            TextButton(onClick=onApply,enabled=!proposal.unchanged) {
+                Text("Apply Smart Auto")
+            }
+        },
+        dismissButton={
+            TextButton(onClick=onDismiss) { Text("Cancel") }
+        },
+    )
 }
