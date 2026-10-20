@@ -311,6 +311,52 @@ pub fn specs() -> Vec<CommandSpec> {
         // v0.6.1: one-tap tonal, colour and four-region curve analysis, plus trusted WB.
         // Preview pixels are needed for robust WB; both analyses downsample
         // their own proxy internally. Keep native Auto Detail independent.
+        // Read-only preview of the same Smart Auto proposal as develop.auto.
+        // Rendering these serialized settings must not create an undo step.
+        // A future trained Option C model must remain explicitly unavailable
+        // until validated inference is actually connected.
+        cmd!("develop.autoPreview", "Smart Auto Preview", ["Photo"], None, "{}", has_active, |s, _p| {
+            let id=active(s,"develop.autoPreview")?;
+            let src=s.source_now(id,SourceLevel::Preview)
+                .map_err(|e|bad("develop.autoPreview",e))?;
+            let info=s.source_info(id);
+            let current=s.develop_of(id).unwrap_or_default();
+            let tone=lightcraft_pipeline::auto::smart_auto_tone(&src,&info,&current);
+            let manual_wb=current.wb.mode==WbMode::Custom;
+            let wb=if manual_wb {None} else {
+                Some(lightcraft_pipeline::auto::auto_wb_report(&src,&info))
+            };
+            let mut proposal=current.clone();
+            proposal.light.exposure=tone.exposure;
+            proposal.light.contrast=tone.contrast;
+            proposal.light.highlights=tone.highlights;
+            proposal.light.shadows=tone.shadows;
+            proposal.light.whites=tone.whites;
+            proposal.light.blacks=tone.blacks;
+            proposal.color.vibrance=tone.vibrance;
+            proposal.color.saturation=tone.saturation;
+            proposal.curve.shadows=tone.curve_shadows;
+            proposal.curve.darks=tone.curve_darks;
+            proposal.curve.lights=tone.curve_lights;
+            proposal.curve.highlights=tone.curve_highlights;
+            if let Some(report)=wb.as_ref().filter(|r|
+                !r.camera_balance_retained && r.confidence>=0.14) {
+                proposal.wb.mode=WbMode::Auto;
+                proposal.wb.temp=report.temp;
+                proposal.wb.tint=report.tint;
+            }
+            let no_tone_change=tone==lightcraft_pipeline::auto::AutoTone::default();
+            let no_wb_change=manual_wb || wb.as_ref().is_none_or(|r|r.camera_balance_retained);
+            Ok(json!({
+                "sourceSettings":current,
+                "previewSettings":proposal,
+                "tone":tone,
+                "whiteBalance":wb,
+                "manualWbPreserved":manual_wb,
+                "noChangeRecommended":no_tone_change && no_wb_change,
+                "model":{"status":"not_connected","note":"Trained pilot is not yet approved for inference; current preview is the actual existing Smart Auto proposal."}
+            }))
+        }),
         cmd!("develop.auto", "Smart Auto", ["Photo"], Some("Shift+A"), "{}", has_active, |s, _p| {
             let id=active(s,"develop.auto")?;
             let src=s.source_now(id,SourceLevel::Preview)
