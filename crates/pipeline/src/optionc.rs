@@ -41,7 +41,7 @@ struct Tree {
 impl Forest {
     fn validated(self) -> Option<Self> {
         if self.schema != 1 || self.method != "random_forest"
-            || self.classes != ["preserve", "under", "over", "low_chroma", "low_contrast"]
+            || self.classes.iter().map(String::as_str).ne(["preserve", "under", "over", "low_chroma", "low_contrast"])
             || self.features.iter().map(String::as_str).ne(SCHEMA_FEATURES)
             || self.trees.len() != 64 { return None; }
         for tree in &self.trees {
@@ -247,7 +247,7 @@ mod tests {
         let f=serde_json::from_str::<Forest>(MODEL_JSON)
             .ok().and_then(Forest::validated);
         assert!(f.is_some(),"bundled pilot model malformed");
-        let forest=f.unwrap_or_else(||unreachable!());
+        let Some(forest)=f else {return;};
         let scores=forest.infer(&[0.0;22]);
         assert!(scores.is_some());
         let s=scores.unwrap_or_default();
