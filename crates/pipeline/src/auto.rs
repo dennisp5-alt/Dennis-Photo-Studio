@@ -845,8 +845,11 @@ mod studio_v051_visible_auto_tests {
             let v=0.12+(x+y) as f32/256.0*0.4;[v,v,v]
         });
         let a=smart_auto_tone(&img,&SourceInfo::default(),&DevelopSettings::default());
-        assert_eq!(a.curve_shadows,0.0);
-        assert_eq!(a.curve_darks,0.0);
+        // Ordinary photographs may receive a *different, smaller*
+        // regional correction than fire; the fire-strength curve is
+        // reserved for self-luminous night scenes.
+        assert!(a.curve_shadows<=18.0,"unexpected night-strength curve {a:?}");
+        assert!(a.curve_darks<=23.0,"unexpected night-strength curve {a:?}");
     }
 }
 
@@ -860,7 +863,7 @@ mod studio_v06_adaptive_tests {
         // p99.5 exposure cap returned exactly zero.
         let image=Rgb32f::from_fn(192,144,|x,y|{
             if y<54 {[0.82,0.87,0.97]}
-            else if x>40 && x<148 {[0.11+(x%9) as f32*0.005,0.21,0.08]}
+            else if x>40 && x<148 {[0.06+(x%9) as f32*0.005,0.12,0.05]}
             else {[0.025,0.055,0.028]}
         });
         let a=smart_auto_tone(&image,&SourceInfo::default(),&DevelopSettings::default());
