@@ -308,7 +308,7 @@ pub fn specs() -> Vec<CommandSpec> {
         // One-tap Smart Auto is the only user-facing tone Auto. No Classic
         // mode or amount knob. The old algorithm remains available inside
         // the pipeline for regression comparisons only.
-        // v0.6: one-tap scene analysis (tone + trusted colour balance).
+        // v0.6.1: one-tap tonal, colour and four-region curve analysis, plus trusted WB.
         // Preview pixels are needed for robust WB; both analyses downsample
         // their own proxy internally. Keep native Auto Detail independent.
         cmd!("develop.auto", "Smart Auto", ["Photo"], Some("Shift+A"), "{}", has_active, |s, _p| {
@@ -337,6 +337,10 @@ pub fn specs() -> Vec<CommandSpec> {
                 // visible while leaving flame cores and white clouds bright.
                 d.curve.shadows=a.curve_shadows;
                 d.curve.darks=a.curve_darks;
+                d.curve.lights=a.curve_lights;
+                d.curve.highlights=a.curve_highlights;
+                // Existing user RGB point-curve edits are deliberately
+                // retained; Auto only replaces its four parametric regions.
                 if let Some(report)=wb.filter(|r|
                     !r.camera_balance_retained && r.confidence>=0.14) {
                     d.wb.mode=WbMode::Auto;
