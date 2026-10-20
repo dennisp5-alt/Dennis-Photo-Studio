@@ -985,9 +985,9 @@ mod studio_v061_auto_colour_and_curve_tests {
             if y < 46 {
                 [0.20 + grad, 0.24 + grad, 0.28 + grad]
             } else if (x / 20) % 2 == 0 {
-                [0.11 + grad, 0.15 + grad, 0.12 + grad]
+                [0.060 + grad, 0.095 + grad, 0.070 + grad]
             } else {
-                [0.16 + grad, 0.18 + grad, 0.13 + grad]
+                [0.090 + grad, 0.105 + grad, 0.072 + grad]
             }
         })
     }
