@@ -164,6 +164,8 @@ jobs:
         run: |
           cargo +1.99.0 test -p lightcraft-pipeline --locked --lib
           cargo +1.99.0 test -p lightcraft-develop --locked --lib
+      - name: Type-check complete native engine before Android packaging
+        run: cargo +1.99.0 check -p lightcraft-engine --locked
       - name: Assemble ARM64 APK
         working-directory: apps/lightcraft-android/android
         run: |
