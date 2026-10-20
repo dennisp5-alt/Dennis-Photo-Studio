@@ -142,7 +142,7 @@ android {
     ndkVersion = "29.0.14206865"
 
     defaultConfig {
-        applicationId = "com.dennis.photostudio.lightref.v05"
+        applicationId = "com.dennis.photostudio.visibleauto.v051"
         minSdk = minApi
         targetSdk = 36
         versionCode = appVersionCode

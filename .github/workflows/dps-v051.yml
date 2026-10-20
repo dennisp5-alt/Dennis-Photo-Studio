@@ -1,0 +1,157 @@
+name: Dennis Photo Studio v0.5.1 — Visible Smart Auto + WB Diagnostics
+
+on:
+  push:
+    branches: [studio-v0.5.1-visible-auto]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dps-smart-v051
+  cancel-in-progress: true
+
+jobs:
+  quality-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 115
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit expected Smart Auto and WB source
+        run: |
+          test -s LICENSE-MIT
+          test -s LICENSE-APACHE
+          test -f apps/lightcraft-android/android/app/src/main/res/drawable/dennis_studio_lens.xml
+          python3 - <<'PY'
+          from pathlib import Path
+          a=Path('crates/pipeline/src/auto.rs').read_text()
+          assert 'pub fn smart_auto_tone' in a
+          assert 'pub fn auto_wb_classic' in a
+          assert 'pub fn auto_wb_report' in a
+          assert 'pub fn auto_wb(' in a
+          assert 'fn fire_glows_without_global_highlight_compression' in a
+          assert 'fn grey_neutral_warm_cast_can_trigger_auto_wb' in a
+          assert 'fn empty_night_scene_is_not_brightened' in a
+          assert 'let recoverable_fraction' in a
+          assert 'if recoverable { -4.0 } else { 0.0 }' in a
+          assert 'pub curve_shadows: f64' in a
+          assert 'pub curve_darks: f64' in a
+          assert 'fn auto_dark_curve_lifts_wood_but_preserves_flames' in a
+          assert 'fn no_wood_no_added_dark_curve' in a
+          assert 'fn coloured_rose_keeps_original_wb' in a
+          e=Path('crates/engine/src/cmd/develop.rs').read_text()
+          assert 'cmd!("develop.auto", "Smart Auto"' in e
+          assert 'smart_auto_tone(&src' in e
+          assert 'auto_wb_classic(&patch' in e
+          assert 'd.curve.shadows=a.curve_shadows' in e
+          assert 'd.curve.darks=a.curve_darks' in e
+          assert '"autoReport": auto_report' in e
+          assert 'SourceLevel::Preview)' in e
+          assert 'SourceLevel::Full} else {SourceLevel::Preview}' in e
+          assert 'luminance noise not detected' in a
+          assert 'colour noise not detected' in a
+          p=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/EditorScreen.kt').read_text()
+          assert 'AutoAmountDialog' not in p
+          assert 'Classic Auto' not in p
+          vm=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/AppViewModel.kt').read_text()
+          assert 'QuickAction.AUTO -> applySmartAuto()' in vm
+          assert 'EditSection.AUTO -> applySmartAuto()' in vm
+          assert 'autoAmountDialog' not in vm
+          assert 'runAutoDetail()' in vm
+          edit=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/EditPanels.kt').read_text()
+          assert 'vm.runAutoDetail()' in edit
+          assert 'Current: Luminance NR ' in edit
+          assert 'Advanced' in edit
+          assert 'Auto WB uses neutral references' in edit
+          assert 'lightcraft.version=0.5.1-beta' in Path('apps/lightcraft-android/android/gradle.properties').read_text()
+          assert 'com.dennis.photostudio.visibleauto.v051' in Path('apps/lightcraft-android/android/app/build.gradle.kts').read_text()
+          print('Source preservation and feature integrity: PASS')
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Android SDK manager
+        run: |
+          MANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -1)"
+          test -x "$MANAGER"
+          echo "$(dirname "$MANAGER")" >> "$GITHUB_PATH"
+      - name: Android SDK 37.0 and NDK 29
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --channel=3 "platforms;android-37.0" "ndk;29.0.14206865"
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
+          if [ ! -e "$ANDROID_HOME/platforms/android-37" ]; then
+            ln -s "$ANDROID_HOME/platforms/android-37.0" "$ANDROID_HOME/platforms/android-37"
+          fi
+      - name: Rust toolchain and target
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal --target aarch64-linux-android
+          rustup default 1.99.0
+          cargo +1.99.0 install cargo-ndk --version 4.1.2 --locked
+      - name: Cache native Rust build and dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          cache-on-failure: true
+      - name: Validate photographic pipeline and WB / Auto tests
+        run: |
+          cargo +1.99.0 test -p lightcraft-pipeline --locked --lib
+          cargo +1.99.0 test -p lightcraft-develop --locked --lib
+      - name: Assemble ARM64 APK
+        working-directory: apps/lightcraft-android/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace assembleDebug -Plightcraft.abis=arm64-v8a
+      - name: Verify APK and app identity
+        run: |
+          APK=apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          ls -lh "$APK"
+      - name: Upload test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dennis-Photo-Studio-v0.5.1-Visible-Auto-ARM64
+          path: apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish pre-release APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dennis-photo-studio-v0.5.1-visible-auto
+          name: Dennis Photo Studio v0.5.1 — Visible Smart Auto (Experimental)
+          prerelease: true
+          body: |
+            Dennis Photo Studio v0.5.1 — visible Smart Auto trial.
+
+            Fix: v0.5 only applied +11 Shadows/-4 Blacks to the
+            fire photograph, barely affecting the visible log/ground.
+            The renderer's Shadows tool weighted the deepest tones,
+            so the bright-dark midtone subject missed the lift.
+
+            v0.5.1 additionally applies measured parametric Shadows
+            and Darks curve corrections to recover flame-lit wood
+            without global Exposure or Highlight/White suppression.
+            Pure black sky and bright flame tips remain anchored.
+            Automated tests inspect ACTUAL curve output values.
+
+            White Balance no longer silently reports "Auto applied":
+            the engine response includes neutral evidence, confidence,
+            and whether the camera's balance was retained.
+            A fire scene does not necessarily have a neutral target,
+            and pretending otherwise would falsely cool the flames.
+            Use WB eyedropper on known neutral material if present.
+
+            Lightroom's APKM was examined for structural/reference
+            information, NOT copied or reverse engineered.
+            v0.3.1 Auto Detail stays unchanged; one-tap Auto remains.
+            Distinct package: com.dennis.photostudio.visibleauto.v051.
+
+            Side-by-side experimental build; judge against original
+            JPEG and Lightroom adjusted export. Real-world approval
+            requires full-size before/after comparison on device.
+          files: apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
