@@ -1894,7 +1894,7 @@ private fun AutoCandidatePreviewDialog(
                 )
                 Spacer(Modifier.height(7.dp))
                 Text(
-                    "Option C learned-model pilot: not yet connected. This preview is the existing Smart Auto result. No changes have been saved.",
+                    proposal.modelStatus + " No changes have been saved.",
                     color=Lc.panelTextSoft,
                     fontFamily=Inter,
                     fontSize=12.sp,
