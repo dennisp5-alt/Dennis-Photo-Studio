@@ -2920,7 +2920,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val t=result.getJSONObject("tone")
                 val fmt=java.util.Locale.US
                 val ev=String.format(fmt,"%+.2f",t.optDouble("exposure",0.0))
+                val contrast=t.optDouble("contrast",0.0).toInt()
                 val shadow=t.optDouble("shadows",0.0).toInt()
+                val highlight=t.optDouble("highlights",0.0).toInt()
+                val lights=t.optDouble("curve_lights",0.0).toInt()
                 val vibrance=t.optDouble("vibrance",0.0).toInt()
                 val darks=t.optDouble("curve_darks",0.0).toInt()
                 val wb=result.optJSONObject("whiteBalance")
