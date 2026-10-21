@@ -2221,3 +2221,59 @@ mod studio_v0610_wb_provenance_tests {
         assert_ne!(r.decision,"warm_light_preserved");
     }
 }
+
+#[cfg(test)]
+mod studio_v0611_scene_auto_integration {
+    use super::*;
+    #[test]
+    fn dark_subject_in_bright_reflections_gets_shadow_proposal() {
+        let img=Rgb32f::from_fn(270,270,|x,y|{
+            if (85..185).contains(&x) && (102..173).contains(&y) {
+                let f=((x*7+y*13)%15) as f32/130.0;
+                [0.08+f,0.07+f,0.055+f]
+            } else {[0.65,0.67,0.69]}
+        });
+        let (candidate,special)=smart_auto_candidate(
+            &img,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(!special);
+        assert!(candidate.shadows>=9.0,
+            "Darker textured subject is invisible to existing Auto: {candidate:?}");
+        assert!(candidate.exposure<=0.12,
+            "Reflective highlights require preserving overall exposure: {candidate:?}");
+        let audit=smart_auto_tone_report(
+            &img,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(audit.evidence.zonal.bright_surround_dark_detail);
+        assert_eq!(audit.proposed,candidate);
+    }
+
+    #[test]
+    fn texture_and_white_reference_allow_restrained_dark_fabric_development() {
+        let img=Rgb32f::from_fn(270,270,|x,y|{
+            if (120..150).contains(&x)&&(70..210).contains(&y) {
+                [0.82,0.82,0.82]
+            } else {
+                let v=0.055+((x*11+y*13)%19) as f32*0.004;
+                [v,v,v]
+            }
+        });
+        let (candidate,_) =smart_auto_candidate(
+            &img,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(candidate.shadows>=5.0,
+            "Dark textile detail should be considered: {candidate:?}");
+        assert!(candidate.exposure<=0.18,
+            "Do not normalize black clothing to middle-grey: {candidate:?}");
+    }
+
+    #[test]
+    fn flat_low_key_night_scene_is_not_forced_into_daylight() {
+        let img=Rgb32f::from_fn(270,270,|x,y|{
+            if x>124 && x<145 && y>84 && y<139 {[0.90,0.58,0.15]}
+            else {[0.005,0.005,0.005]}
+        });
+        let (candidate,special)=smart_auto_candidate(
+            &img,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(!special || candidate.exposure==0.0);
+        assert_eq!(candidate.exposure,0.0);
+        assert_eq!(candidate.curve_lights,0.0);
+    }
+}
