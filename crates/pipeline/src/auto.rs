@@ -533,8 +533,24 @@ pub struct AutoToneAuditReport {
     pub quality_guard_skipped_for_emission:bool,
 }
 
+/// Production audit: retain all established output-quality protections.
 pub fn smart_auto_tone_report(src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings)
     -> AutoToneAuditReport {
+    smart_auto_tone_report_mode(src,info,s,true)
+}
+
+/// v0.6.12c TEST ONLY: apply the complete scene-dependent Auto candidate
+/// directly, without the preview-render clipping/overlift/contrast vetoes.
+/// The candidate's inherent scene detection and valid slider bounds remain.
+/// Keep this separate from normal Auto; do not promote without photo review.
+pub fn smart_auto_tone_report_unguarded(src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings)
+    -> AutoToneAuditReport {
+    smart_auto_tone_report_mode(src,info,s,false)
+}
+
+fn smart_auto_tone_report_mode(
+    src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings,enforce_render_guard:bool
+) -> AutoToneAuditReport {
     let proxy=lightcraft_raster::resample::fit(
         src,256,256,lightcraft_raster::resample::Filter::Box);
     let mut linear=proxy;
@@ -564,7 +580,16 @@ pub fn smart_auto_tone_report(src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings)
         zonal:crate::scene::analyse_linear(&linear),
     };
     let (proposal,emissive)=smart_auto_candidate(src,info,s);
-    let guarded=if emissive {
+    let guarded=if !enforce_render_guard {
+        // Deliberately permit over-brightening, new clipping and dramatic
+        // curves for an isolated A/B photograph experiment. The diagnostic
+        // reports the true unmodified proposal that Auto will apply.
+        GuardOutcome {
+            tone:proposal,
+            reasons:vec!["experimental_render_quality_guards_bypassed"],
+            white_clip_change:0.0,black_clip_change:0.0,
+        }
+    }else if emissive {
         GuardOutcome {
             tone:proposal,
             reasons:vec!["warm_emitter_specialized_recovery"],
@@ -2352,6 +2377,38 @@ mod studio_v0611_scene_auto_integration {
         assert!(!special || candidate.exposure==0.0);
         assert_eq!(candidate.exposure,0.0);
         assert_eq!(candidate.curve_lights,0.0);
+    }
+}
+
+#[cfg(test)]
+mod studio_v0612c_unguarded_diagnostics {
+    use super::*;
+    #[test]
+    fn unguarded_report_is_exact_proposal_with_explicit_bypass_reason() {
+        let img=Rgb32f::from_fn(270,270,|x,y|{
+            if (85..185).contains(&x) && (102..173).contains(&y) {
+                let d=((x*7+y*13)%15) as f32/130.0;
+                [0.08+d,0.07+d,0.055+d]
+            }else{[0.65,0.67,0.69]}
+        });
+        let settings=DevelopSettings::default();
+        let (candidate,_)=smart_auto_candidate(&img,&SourceInfo::default(),&settings);
+        let audit=smart_auto_tone_report_unguarded(&img,&SourceInfo::default(),&settings);
+        assert_eq!(audit.proposed,candidate);
+        assert_eq!(audit.final_tone,candidate);
+        assert_eq!(audit.guard_reasons,vec!["experimental_render_quality_guards_bypassed"]);
+    }
+
+    #[test]
+    fn baseline_guarded_report_remains_available_for_comparison() {
+        let img=Rgb32f::filled(96,96,[0.20,0.20,0.20]);
+        let info=SourceInfo::default();
+        let settings=DevelopSettings::default();
+        let guarded=smart_auto_tone_report(&img,&info,&settings);
+        let unguarded=smart_auto_tone_report_unguarded(&img,&info,&settings);
+        assert_eq!(guarded.final_tone,smart_auto_tone(&img,&info,&settings));
+        assert_eq!(guarded.proposed,unguarded.proposed);
+        assert_eq!(unguarded.final_tone,unguarded.proposed);
     }
 }
 
