@@ -2962,6 +2962,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     " K, applied " + (wb?.optDouble("temp")?.toInt() ?: 0) +
                     " K, confidence " +
                     String.format(fmt,"%.2f",wb?.optDouble("confidence",0.0) ?: 0.0) +
+                    ". Trusted neutrals " +
+                    String.format(fmt,"%.1f%%",(wb?.optDouble("high_trust_neutral_fraction",0.0) ?: 0.0)*100.0) +
+                    " across " + (wb?.optInt("high_trust_neutral_tiles",0) ?: 0) +
+                    " tiles; bright fraction " +
+                    String.format(fmt,"%.0f%%",(wb?.optDouble("high_trust_bright_fraction",0.0) ?: 0.0)*100.0) +
+                    ". WB decision " + (wb?.optString("reason","unknown") ?: "manual") +
                     ". Source " + (if(evidence?.optBoolean("source_raw",false)==true) "RAW" else "rendered") +
                     "."
                 val modelExplanation="Auto tone / WB diagnostic preview. $wbStatus " +
