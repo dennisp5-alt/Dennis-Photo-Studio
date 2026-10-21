@@ -455,6 +455,7 @@ pub struct AutoToneEvidence {
     pub bright_fraction:f64,
     pub recoverable_fraction:f64,
     pub analysed_pixels:usize,
+    pub zonal:crate::scene::ZonalSceneEvidence,
 }
 
 /// Records estimation separately from protection decisions.
