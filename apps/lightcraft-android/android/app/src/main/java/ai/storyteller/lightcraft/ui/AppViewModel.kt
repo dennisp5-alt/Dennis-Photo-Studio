@@ -2938,7 +2938,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 ed.autoPreview=AutoPreviewData(
                     original=original,
                     candidate=candidate,
-                    summary="Exposure $ev EV  •  Shadows $shadow  •  Vibrance $vibrance  •  Curve Darks $darks",
+                    summary="Exposure $ev EV • Contrast $contrast • Highlights $highlight • Shadows $shadow • Vibrance $vibrance • Curves D$darks/L$lights",
                     unchanged=result.optBoolean("noChangeRecommended",false),
                     modelStatus=modelExplanation,
                 )
