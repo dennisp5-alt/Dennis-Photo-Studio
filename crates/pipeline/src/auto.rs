@@ -82,7 +82,7 @@ fn smart_auto_candidate(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) ->
         src,512,512,lightcraft_raster::resample::Filter::Box);
     let base=DevelopSettings { wb:s.wb, ..DevelopSettings::default() };
     crate::local::scene_linear_pre(&mut img,info,&base);
-    if img.data.is_empty() || img.width==0 {return AutoTone::default();}
+    if img.data.is_empty() || img.width==0 {return (AutoTone::default(),false);}
 
     let lum:Vec<f32>=img.data.iter()
         .map(|c|luminance_2020(*c).max(0.0)).collect();
