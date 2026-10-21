@@ -77,7 +77,7 @@ pub fn auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> AutoTo
 ///
 /// The model estimates parameters that the real render pipeline understands.
 /// It uses NO Adobe assets/models or claimed semantic/object recognition.
-pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> AutoTone {
+fn smart_auto_candidate(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> (AutoTone,bool) {
     let mut img=lightcraft_raster::resample::fit(
         src,512,512,lightcraft_raster::resample::Filter::Box);
     let base=DevelopSettings { wb:s.wb, ..DevelopSettings::default() };
@@ -169,7 +169,7 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
     // behaviour only with supporting warm-emitter pixels.
     if intentional_light && warm_emitters as f64 / n > 0.002 {
         let visible_wood=recoverable_fraction>0.012;
-        return AutoTone {
+        return (AutoTone {
             exposure:0.0,contrast:0.0,highlights:0.0,
             shadows:if visible_wood {
                 (26.0+145.0*recoverable_fraction).clamp(26.0,48.0).round()
@@ -179,7 +179,7 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
             curve_shadows:if visible_wood {30.0}else{0.0},
             curve_darks:if visible_wood {42.0}else{0.0},
             curve_lights:0.0,curve_highlights:0.0,
-        };
+        },true);
     }
 
     // v0.6.4: structure measures *subject evidence*, never exposure
@@ -406,31 +406,127 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
         blacks, vibrance, saturation,
         curve_shadows, curve_darks, curve_lights, curve_highlights,
     };
-    // Keep the actual before/after clipping and detail safeguards.
-    preview_quality_guard(src,info,s,candidate)
+    // Propose an image-dependent edit before any output-quality vetoes.
+    (candidate,false)
 
 }
 
+/// The production Smart Auto still uses real output-quality protections.
+pub fn smart_auto_tone(src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings)->AutoTone {
+    let (proposal,emissive)=smart_auto_candidate(src,info,s);
+    if emissive {proposal}
+    else {preview_quality_guard(src,info,s,proposal)}
+}
 
+/// Lightweight diagnostic measurements; no pixels or source images are saved.
+#[derive(Clone, Debug, Serialize)]
+pub struct AutoToneEvidence {
+    pub source_raw:bool,
+    pub as_shot_kelvin:f64,
+    pub median_ev:f64,
+    pub p05_ev:f64,
+    pub p95_ev:f64,
+    pub p995_ev:f64,
+    pub dark_fraction:f64,
+    pub bright_fraction:f64,
+    pub recoverable_fraction:f64,
+    pub analysed_pixels:usize,
+}
+
+/// Records estimation separately from protection decisions.
+#[derive(Clone, Debug, Serialize)]
+pub struct AutoToneAuditReport {
+    pub evidence:AutoToneEvidence,
+    pub proposed:AutoTone,
+    pub final_tone:AutoTone,
+    pub guard_reasons:Vec<&'static str>,
+    pub new_white_clip_fraction:f64,
+    pub new_black_clip_fraction:f64,
+    pub comparison_exposure_ev:f64,
+    pub quality_guard_skipped_for_emission:bool,
+}
+
+pub fn smart_auto_tone_report(src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings)
+    -> AutoToneAuditReport {
+    let proxy=lightcraft_raster::resample::fit(
+        src,256,256,lightcraft_raster::resample::Filter::Box);
+    let mut linear=proxy;
+    let analysis_base=DevelopSettings {wb:s.wb,..DevelopSettings::default()};
+    crate::local::scene_linear_pre(&mut linear,info,&analysis_base);
+    let mut ev:Vec<f32>=linear.data.iter().map(|c|
+        (luminance_2020(*c).max(1e-6)/0.18).log2()
+    ).collect();
+    let len=ev.len().max(1);
+    let dark=ev.iter().filter(|&&x|x< -2.68).count();
+    let bright=linear.data.iter()
+        .filter(|c|luminance_2020(**c)>0.70).count();
+    let recover=linear.data.iter().filter(|c|
+        (0.035..0.28).contains(&luminance_2020(**c))
+    ).count();
+    ev.sort_by(|a,b|a.total_cmp(b));
+    let evidence=AutoToneEvidence {
+        source_raw:info.raw, as_shot_kelvin:info.as_shot_temp,
+        median_ev:percentile(&ev,0.50) as f64,
+        p05_ev:percentile(&ev,0.05) as f64,
+        p95_ev:percentile(&ev,0.95) as f64,
+        p995_ev:percentile(&ev,0.995) as f64,
+        dark_fraction:dark as f64/len as f64,
+        bright_fraction:bright as f64/len as f64,
+        recoverable_fraction:recover as f64/len as f64,
+        analysed_pixels:ev.len(),
+    };
+    let (proposal,emissive)=smart_auto_candidate(src,info,s);
+    let guarded=if emissive {
+        GuardOutcome {
+            tone:proposal,
+            reasons:vec!["warm_emitter_specialized_recovery"],
+            white_clip_change:0.0,black_clip_change:0.0,
+        }
+    }else{preview_quality_guard_report(src,info,s,proposal)};
+    AutoToneAuditReport {
+        evidence, proposed:proposal, final_tone:guarded.tone,
+        guard_reasons:guarded.reasons,
+        new_white_clip_fraction:guarded.white_clip_change,
+        new_black_clip_fraction:guarded.black_clip_change,
+        comparison_exposure_ev:s.light.exposure,
+        quality_guard_skipped_for_emission:emissive,
+    }
+}
+
+struct GuardOutcome {
+    tone:AutoTone,
+    reasons:Vec<&'static str>,
+    white_clip_change:f64,
+    black_clip_change:f64,
+}
 fn preview_quality_guard(
-    src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings,mut a:AutoTone,
+    src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings,a:AutoTone,
 ) -> AutoTone {
+    preview_quality_guard_report(src,info,s,a).tone
+}
+
+fn preview_quality_guard_report(
+    src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings,mut a:AutoTone,
+) -> GuardOutcome {
+    let mut reasons=Vec::new();
     let strength=a.exposure.abs()+a.contrast.abs()+a.highlights.abs()
         +a.shadows.abs()+a.blacks.abs()+a.vibrance.abs()
         +a.saturation.abs()+a.curve_shadows.abs()+a.curve_darks.abs()
         +a.curve_lights.abs()+a.curve_highlights.abs();
-    if strength==0.0 {return a;}
+    if strength==0.0 {
+        return GuardOutcome {
+            tone:a,reasons,white_clip_change:0.0,black_clip_change:0.0
+        };
+    }
     // This is an inexpensive *safety* gate, not a learned aesthetic scorer.
     // A 160px full-pipeline render tests the actual RGB output including
     // tone curves and colour transforms, unlike checking slider positions.
     let proxy=lightcraft_raster::resample::fit(
         src,160,160,lightcraft_raster::resample::Filter::Box);
     let req=crate::RenderRequest::fit(160,160);
-    let mut baseline=DevelopSettings {wb:s.wb,..DevelopSettings::default()};
-    baseline.curve.master=s.curve.master.clone();
-    baseline.curve.red=s.curve.red.clone();
-    baseline.curve.green=s.curve.green.clone();
-    baseline.curve.blue=s.curve.blue.clone();
+    // Compare against the full current edit, including existing exposure,
+    // effects, profile, tone and curves—not a fabricated default baseline.
+    let baseline=s.clone();
     let mut changed=baseline.clone();
     changed.light.exposure=a.exposure;
     changed.light.contrast=a.contrast;
@@ -446,7 +542,11 @@ fn preview_quality_guard(
     let before=crate::render(&proxy,info,&baseline,&req).image;
     let after=crate::render(&proxy,info,&changed,&req).image;
     if before.data.is_empty() || before.data.len()!=after.data.len() {
-        return AutoTone::default();
+        reasons.push("guard_render_failed");
+        return GuardOutcome {
+            tone:AutoTone::default(),reasons,
+            white_clip_change:0.0,black_clip_change:0.0
+        };
     }
     let total=(before.data.len()*3) as f64;
     let clipped=|im:&lightcraft_raster::Rgba8,bright:bool|{
@@ -459,12 +559,14 @@ fn preview_quality_guard(
     let new_whites=clipped(&after,true)-clipped(&before,true);
     let new_blacks=clipped(&after,false)-clipped(&before,false);
     if new_whites>0.012 {
+        reasons.push("added_highlight_clipping");
         if a.exposure>0.0 {a.exposure=0.0;}
         a.curve_lights=0.0;
         a.vibrance=0.0;
         a.saturation=0.0;
     }
     if new_blacks>0.014 {
+        reasons.push("added_shadow_clipping");
         if a.exposure<0.0 {a.exposure=0.0;}
         a.blacks=0.0;
         if a.contrast<0.0 {a.contrast=0.0;}
@@ -493,6 +595,7 @@ fn preview_quality_guard(
     }
     if dark_count>200 && a.exposure<=0.0
         && dark_lift/dark_count as f64>14.0 {
+        reasons.push("dark_region_overlift");
         a.shadows=0.0;
         a.curve_shadows=0.0;
         a.curve_darks=0.0;
@@ -500,13 +603,18 @@ fn preview_quality_guard(
     // A major collapse of brightness edges means lost useful contrast:
     // reject the contrast/curve proposal, but keep warranted exposure.
     if grad0>1000.0 && grad1<grad0*0.72 {
+        reasons.push("structural_contrast_loss");
         a.contrast=0.0;
         a.curve_shadows=0.0;
         a.curve_darks=0.0;
         a.curve_lights=0.0;
         a.curve_highlights=0.0;
     }
-    a
+    GuardOutcome {
+        tone:a,reasons,
+        white_clip_change:new_whites,
+        black_clip_change:new_blacks,
+    }
 }
 
 /// Automatic edit SETTINGS, not a replacement denoiser or a claimed AI model.
@@ -1885,5 +1993,52 @@ mod studio_v068_refinement_regressions {
         let b=smart_auto_tone(&img,&SourceInfo::default(),&s);
         assert_eq!(a,b);
         assert_eq!(s,DevelopSettings::default());
+    }
+}
+
+#[cfg(test)]
+mod studio_v069_auto_audit_regressions {
+    use super::*;
+    #[test]
+    fn report_final_matches_one_tap_auto() {
+        let img=Rgb32f::from_fn(128,96,|x,y|{
+            let v=0.075+((x*7+y*13)%41) as f32*0.002;
+            [v,v*0.98,v*0.94]
+        });
+        let info=SourceInfo::default();
+        let mut settings=DevelopSettings::default();
+        settings.light.exposure=0.15;
+        settings.light.contrast=9.0;
+        let audit=smart_auto_tone_report(&img,&info,&settings);
+        let applied=smart_auto_tone(&img,&info,&settings);
+        assert_eq!(audit.final_tone,applied);
+        assert_eq!(audit.comparison_exposure_ev,0.15);
+        assert!(audit.evidence.analysed_pixels>300);
+    }
+
+    #[test]
+    fn report_records_proposal_and_vetoes_separately() {
+        let img=Rgb32f::from_fn(192,128,|x,_|
+            if x<96 {[0.92,0.92,0.92]} else {[0.30,0.30,0.30]}
+        );
+        let a=AutoTone {exposure:0.9,curve_lights:20.0,..Default::default()};
+        let outcome=preview_quality_guard_report(
+            &img,&SourceInfo::default(),&DevelopSettings::default(),a
+        );
+        assert_eq!(outcome.tone.exposure,0.0);
+        assert!(outcome.reasons.contains(&"added_highlight_clipping"));
+        assert!(outcome.white_clip_change>0.012);
+    }
+
+    #[test]
+    fn unchanged_candidate_uses_full_existing_settings() {
+        let img=Rgb32f::filled(96,96,[0.18,0.18,0.18]);
+        let mut s=DevelopSettings::default();
+        s.light.exposure=0.8;
+        s.light.contrast=11.0;
+        let report=smart_auto_tone_report(&img,&SourceInfo::default(),&s);
+        assert_eq!(report.comparison_exposure_ev,0.8);
+        assert_eq!(report.final_tone,
+            smart_auto_tone(&img,&SourceInfo::default(),&s));
     }
 }
