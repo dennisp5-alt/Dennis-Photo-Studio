@@ -942,6 +942,13 @@ pub struct AutoWbReport {
     pub decision:&'static str,
     pub candidate_temp:f64,
     pub candidate_tint:f64,
+    /// Why this correction was adopted or rejected.
+    pub reason:&'static str,
+    pub eligible_fraction:f64,
+    pub deep_shadow_fraction:f64,
+    pub warm_midtones_fraction:f64,
+    pub warm_emitter_fraction:f64,
+    pub raw_source:bool,
 }
 fn as_shot_report(info:&SourceInfo)->AutoWbReport{
     AutoWbReport {
@@ -949,6 +956,12 @@ fn as_shot_report(info:&SourceInfo)->AutoWbReport{
         confidence:0.0,neutral_fraction:0.0,spatial_coverage:0,
         camera_balance_retained:true,decision:"no_neutral",
         candidate_temp:info.as_shot_temp,candidate_tint:info.as_shot_tint,
+        reason:"no_reliable_neutral_reference",
+        eligible_fraction:0.0,
+        deep_shadow_fraction:0.0,
+        warm_midtones_fraction:0.0,
+        warm_emitter_fraction:0.0,
+        raw_source:info.raw,
     }
 }
 
@@ -961,7 +974,10 @@ pub fn auto_wb_report(src:&Rgb32f,info:&SourceInfo)->AutoWbReport{
     let mut report=as_shot_report(info);
     let img=lightcraft_raster::resample::fit(
         src,384,384,lightcraft_raster::resample::Filter::Box);
-    if img.width<24 || img.height<24 || img.data.is_empty(){return report;}
+    if img.width<24 || img.height<24 || img.data.is_empty(){
+        report.reason="insufficient_image_data";
+        return report;
+    }
     let (w,h)=(img.width,img.height);
     // Colour casts cannot be judged by grey-world statistics alone:
     // neutral-looking surfaces illuminated by fire or warm lamps are
@@ -985,6 +1001,9 @@ pub fn auto_wb_report(src:&Rgb32f,info:&SourceInfo)->AutoWbReport{
     let shadow_share=deep_shadow_pixels as f64/total_pixels;
     let warm_midtone_share=warm_lit_pixels as f64/total_pixels;
     let warm_emitter_share=warm_emitter_pixels as f64/total_pixels;
+    report.deep_shadow_fraction=shadow_share;
+    report.warm_midtones_fraction=warm_midtone_share;
+    report.warm_emitter_fraction=warm_emitter_share;
     // Preserve the camera look under visible warm practical lighting
     // rather than treating amber-lit greys as neutral reference cards.
     // Manual picker/temperature controls are unaffected by this gate.
@@ -1028,20 +1047,26 @@ pub fn auto_wb_report(src:&Rgb32f,info:&SourceInfo)->AutoWbReport{
     report.neutral_fraction=if eligible>0{
         neutral as f64/eligible as f64
     }else{0.0};
+    report.eligible_fraction=eligible as f64/total_pixels;
     report.spatial_coverage=cell_counts.iter()
         .filter(|&&n|n>15).count();
     if eligible<200 || neutral<100 || report.spatial_coverage<3
         || weight_sum<13.0 || report.neutral_fraction<0.012 {
+        report.reason="insufficient_spatial_neutral_support";
         return report;
     }
     let mean=sum.map(|v|(v/weight_sum) as f32);
     let patch=Rgb32f::filled(16,16,mean);
     let (t,tint)=auto_wb_classic(&patch,info);
-    if !t.is_finite() || !tint.is_finite(){return report;}
+    if !t.is_finite() || !tint.is_finite(){
+        report.reason="invalid_candidate_illuminant";
+        return report;
+    }
     report.candidate_temp=t;
     report.candidate_tint=tint;
     if intentional_warm_light {
         report.decision="warm_light_preserved";
+        report.reason="warm_lowlight_atmosphere_detected";
         return report;
     }
 
@@ -1074,6 +1099,7 @@ pub fn auto_wb_report(src:&Rgb32f,info:&SourceInfo)->AutoWbReport{
         .clamp(0.0,1.0);
     if report.confidence<0.14 {
         report.decision="ambiguous";
+        report.reason="neutral_region_evidence_ambiguous";
         return report;
     }
 
@@ -1105,6 +1131,9 @@ pub fn auto_wb_report(src:&Rgb32f,info:&SourceInfo)->AutoWbReport{
     report.decision=if report.camera_balance_retained{
         "already_neutral"
     }else{"corrected"};
+    report.reason=if report.camera_balance_retained {
+        "correction_below_reliable_threshold"
+    } else {"consistent_spatial_neutral_estimate"};
     report
 }
 
