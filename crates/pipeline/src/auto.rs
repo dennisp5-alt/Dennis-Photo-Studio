@@ -587,6 +587,20 @@ struct GuardOutcome {
     white_clip_change:f64,
     black_clip_change:f64,
 }
+/// Fraction of RGB channels that cross into clipping at the same pixel.
+fn newly_clipped_rgb_fraction(
+    before:&[[u8;4]], after:&[[u8;4]], bright:bool,
+) -> f64 {
+    if before.is_empty() || before.len()!=after.len() { return 0.0; }
+    let newly=before.iter().zip(after).map(|(b,a)|
+        (0..3).filter(|&c|
+            if bright {b[c]<254 && a[c]>=254}
+            else {b[c]>1 && a[c]<=1}
+        ).count()
+    ).sum::<usize>();
+    newly as f64/(before.len()*3) as f64
+}
+
 fn preview_quality_guard(
     src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings,a:AutoTone,
 ) -> AutoTone {
@@ -637,16 +651,13 @@ fn preview_quality_guard_report(
             white_clip_change:0.0,black_clip_change:0.0
         };
     }
-    let total=(before.data.len()*3) as f64;
-    let clipped=|im:&lightcraft_raster::Rgba8,bright:bool|{
-        im.data.iter().flat_map(|p|p.iter().take(3)).filter(|&&v|
-            if bright {v>=254}else{v<=1}
-        ).count() as f64/total
-    };
-    // Clamp *new* clipped RGB values; already clipped pixels cannot be
-    // recovered by simply reducing exposure on JPEGs.
-    let new_whites=clipped(&after,true)-clipped(&before,true);
-    let new_blacks=clipped(&after,false)-clipped(&before,false);
+    // Measure *newly* clipped channels at their original pixel positions,
+    // rather than subtracting whole-frame clipped totals. Otherwise one
+    // highlight becoming clipped can be hidden by a different highlight
+    // becoming unclipped in the same render (the net total would be zero).
+    // Existing JPEG clipping is excluded so Auto is not penalized for it.
+    let new_whites=newly_clipped_rgb_fraction(&before.data,&after.data,true);
+    let new_blacks=newly_clipped_rgb_fraction(&before.data,&after.data,false);
     // Experimental threshold: permit modest output changes rather than
     // treating ~1% newly bright RGB samples as an automatic full veto.
     // Severe clipping still triggers the established correction.
@@ -2347,6 +2358,36 @@ mod studio_v0611_scene_auto_integration {
 #[cfg(test)]
 mod studio_v0612_assertive_test {
     use super::*;
+
+    #[test]
+    fn clipping_swapped_between_regions_is_detected_despite_unchanged_total() {
+        // Fifty clipped pixels move to a different 50 pixels. A difference
+        // of global clip totals would incorrectly report zero newly clipped.
+        let mut before=vec![[220,220,220,255];100];
+        let mut after=before.clone();
+        for i in 0..50 {
+            before[i]=[255,255,255,255];
+            after[i]=[220,220,220,255];
+        }
+        for i in 50..100 { after[i]=[255,255,255,255]; }
+        let actual=newly_clipped_rgb_fraction(&before,&after,true);
+        assert!((actual-0.5).abs()<1e-9,"lost newly clipped highlights: {actual}");
+        assert_eq!(newly_clipped_rgb_fraction(&before,&before,true),0.0);
+    }
+
+    #[test]
+    fn new_black_clipping_cannot_cancel_against_recovered_blacks() {
+        let mut before=vec![[12,12,12,255];100];
+        let mut after=before.clone();
+        for i in 0..50 {
+            before[i]=[0,0,0,255];
+            after[i]=[12,12,12,255];
+        }
+        for i in 50..100 { after[i]=[0,0,0,255]; }
+        let actual=newly_clipped_rgb_fraction(&before,&after,false);
+        assert!((actual-0.5).abs()<1e-9,"lost newly clipped shadows: {actual}");
+        assert_eq!(newly_clipped_rgb_fraction(&before,&before,false),0.0);
+    }
     #[test]
     fn strong_underexposure_with_real_detail_now_proposes_meaningful_exposure() {
         let img=Rgb32f::from_fn(256,192,|x,y|{
