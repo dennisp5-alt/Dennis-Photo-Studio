@@ -277,6 +277,26 @@ fn smart_auto_candidate(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) ->
     let curve_darks=if shadow_need>0.20 {
         (shadow_need*26.0).round()
     }else{0.0};
+    // A high-key reflective background does not mean that an internally
+    // textured dark subject is properly developed. Keep global exposure
+    // stable; let genuine detail regions justify a modest Shadows/Curve
+    // proposal. The established render guard may further reduce it.
+    //
+    // A bright label on detailed dark fabric can justify a still smaller
+    // shadows-only correction despite a globally low-key histogram.
+    // Flat night backgrounds have no detailed shadow evidence.
+    let allow_zonal=warm_emitters as f64/n<0.002
+        && !protected_warm_colour && !backlit_daylight_scene;
+    let zonal_shadow=if allow_zonal
+        && (zonal.bright_surround_dark_detail
+            || zonal.dark_texture_with_bright_reference) {
+        zonal.proposed_shadow_recovery
+    }else{0.0};
+    let zonal_darks=if zonal_shadow>0.0 {
+        zonal.proposed_darks_curve
+    }else{0.0};
+    let shadows=shadows.max(zonal_shadow);
+    let curve_darks=curve_darks.max(zonal_darks);
 
     // Midtone luminance repair is separate from shadow lift. A sunset with
     // already appropriate upper midtones should not get a default +5.
