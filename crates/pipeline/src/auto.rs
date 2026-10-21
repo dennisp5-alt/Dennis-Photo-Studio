@@ -949,6 +949,14 @@ pub struct AutoWbReport {
     pub warm_midtones_fraction:f64,
     pub warm_emitter_fraction:f64,
     pub raw_source:bool,
+    /// Confidence support from the least-coloured pixels, separate from
+    /// the wider (possibly subject-coloured) candidate pool.
+    pub high_trust_neutral_fraction:f64,
+    pub high_trust_neutral_tiles:usize,
+    pub high_trust_bright_fraction:f64,
+    /// Difference in chromatic ratios between broad and high-trust pools.
+    pub neutral_estimator_disagreement:f64,
+    pub bright_cool_dominance:bool,
 }
 fn as_shot_report(info:&SourceInfo)->AutoWbReport{
     AutoWbReport {
@@ -962,6 +970,11 @@ fn as_shot_report(info:&SourceInfo)->AutoWbReport{
         warm_midtones_fraction:0.0,
         warm_emitter_fraction:0.0,
         raw_source:info.raw,
+        high_trust_neutral_fraction:0.0,
+        high_trust_neutral_tiles:0,
+        high_trust_bright_fraction:0.0,
+        neutral_estimator_disagreement:0.0,
+        bright_cool_dominance:false,
     }
 }
 
@@ -1018,6 +1031,11 @@ pub fn auto_wb_report(src:&Rgb32f,info:&SourceInfo)->AutoWbReport{
     let mut cell_weights=[0.0f64;16];
     let mut cell_counts=[0usize;16];
     let mut strong_colour=0usize;
+    let mut near_count=0usize;
+    let mut near_bright=0usize;
+    let mut near_sum=[0.0f64;3];
+    let mut near_weight=0.0f64;
+    let mut near_cells=[0usize;16];
     for (index,c) in img.data.iter().enumerate(){
         let y=luminance_2020(*c);
         if !(0.05..=0.78).contains(&y){continue;}
@@ -1026,6 +1044,22 @@ pub fn auto_wb_report(src:&Rgb32f,info:&SourceInfo)->AutoWbReport{
         let lo=c[0].min(c[1]).min(c[2]);
         let chroma=((hi-lo)/hi).clamp(0.0,1.0);
         if chroma>0.48{strong_colour+=1;}
+        // A high-trust, relatively achromatic anchor is evidence of an
+        // object's reflectance. Record it independently of the wider pool;
+        // the latter can include warm skin or cool water.
+        if chroma<0.085 {
+            let x=index%w;
+            let yy=index/w;
+            let cell=((yy*4/h).min(3))*4+((x*4/w).min(3));
+            near_cells[cell]+=1;
+            near_count+=1;
+            if y>0.50 {near_bright+=1;}
+            let weight=(1.0-chroma/0.085) as f64;
+            near_weight+=weight;
+            for ch in 0..3 {
+                near_sum[ch]+=c[ch] as f64*weight;
+            }
+        }
         // Keep stricter chroma criteria to avoid mistaking coloured petals
         // and blue sky for a neutral surface; improve *confidence* rather
         // than relaxing chroma until everything is "neutral".
@@ -1055,7 +1089,38 @@ pub fn auto_wb_report(src:&Rgb32f,info:&SourceInfo)->AutoWbReport{
         report.reason="insufficient_spatial_neutral_support";
         return report;
     }
-    let mean=sum.map(|v|(v/weight_sum) as f32);
+    let broad_mean=sum.map(|v|v/weight_sum);
+    report.high_trust_neutral_fraction=near_count as f64/eligible as f64;
+    report.high_trust_neutral_tiles=near_cells.iter().filter(|&&v|v>=12).count();
+    report.high_trust_bright_fraction=near_bright as f64/(near_count.max(1) as f64);
+    let trusted=near_count>=100 && near_weight>12.0
+        && report.high_trust_neutral_tiles>=3;
+    let near_mean=if trusted {
+        near_sum.map(|v|v/near_weight)
+    }else{broad_mean};
+    let ratio=|rgb:[f64;3]|[
+        rgb[0].max(1e-6)/rgb[1].max(1e-6),
+        rgb[2].max(1e-6)/rgb[1].max(1e-6),
+    ];
+    let br=ratio(broad_mean);
+    let nr=ratio(near_mean);
+    report.neutral_estimator_disagreement=if trusted {
+        (br[0]/nr[0]).ln().abs()+(br[1]/nr[1]).ln().abs()
+    }else{0.0};
+    // Strong, independent neutral anchors take precedence over light skin
+    // and other intrinsically coloured material that slips under the
+    // broader 0.24 chroma threshold.
+    let mean=if trusted {
+        std::array::from_fn(|i| (near_mean[i]*0.78+broad_mean[i]*0.22) as f32)
+    }else{broad_mean.map(|v|v as f32)};
+    let mr=ratio(mean.map(f64::from));
+    // A large cool, bright neutral-looking plane (e.g. sky reflections on
+    // water) does not prove a blue illuminant. For *rendered JPEGs*,
+    // treat a mild blue bias of this one appearance class as provisional.
+    report.bright_cool_dominance=!info.raw
+        && report.high_trust_neutral_fraction>0.16
+        && report.high_trust_bright_fraction>0.88
+        && mr[0]<0.988 && mr[1]>1.018;
     let patch=Rgb32f::filled(16,16,mean);
     let (t,tint)=auto_wb_classic(&patch,info);
     if !t.is_finite() || !tint.is_finite(){
@@ -1095,7 +1160,10 @@ pub fn auto_wb_report(src:&Rgb32f,info:&SourceInfo)->AutoWbReport{
     let colour_protection=if saturation>0.55 && report.neutral_fraction<0.035 {
         0.70
     }else{1.0};
-    report.confidence=(density*coverage*consistency*colour_protection)
+    let reference_weight=if report.bright_cool_dominance {
+        0.38
+    } else {1.0};
+    report.confidence=(density*coverage*consistency*colour_protection*reference_weight)
         .clamp(0.0,1.0);
     if report.confidence<0.14 {
         report.decision="ambiguous";
@@ -1131,8 +1199,12 @@ pub fn auto_wb_report(src:&Rgb32f,info:&SourceInfo)->AutoWbReport{
     report.decision=if report.camera_balance_retained{
         "already_neutral"
     }else{"corrected"};
-    report.reason=if report.camera_balance_retained {
+    report.reason=if report.bright_cool_dominance {
+        "bright_cool_reference_may_be_reflection"
+    } else if report.camera_balance_retained {
         "correction_below_reliable_threshold"
+    } else if report.neutral_estimator_disagreement>0.045 {
+        "high_trust_neutrals_override_coloured_regions"
     } else {"consistent_spatial_neutral_estimate"};
     report
 }
@@ -2069,5 +2141,57 @@ mod studio_v069_auto_audit_regressions {
         assert_eq!(report.comparison_exposure_ev,0.8);
         assert_eq!(report.final_tone,
             smart_auto_tone(&img,&SourceInfo::default(),&s));
+    }
+}
+
+#[cfg(test)]
+mod studio_v0610_wb_provenance_tests {
+    use super::*;
+    fn jpeg()->SourceInfo {SourceInfo::default()}
+
+    #[test]
+    fn cool_bright_reflections_get_lower_wb_confidence() {
+        let pond=Rgb32f::from_fn(256,192,|x,y|{
+            if x>93 && x<166 && y>68 && y<120 {
+                [0.16,0.12,0.08] // brown duck on the water
+            } else {
+                let ripple=((x*13+y*17)%21) as f32*0.001;
+                [0.60+ripple,0.63+ripple,0.67+ripple]
+            }
+        });
+        let r=auto_wb_report(&pond,&jpeg());
+        assert!(r.high_trust_neutral_fraction>0.15,
+            "Expected bright reflective neutral-like area: {r:?}");
+        assert!(r.bright_cool_dominance,"Cool pond reflection risk missed: {r:?}");
+        assert!(r.confidence<0.40,"Reflected sky must not dominate JPEG WB: {r:?}");
+    }
+
+    #[test]
+    fn near_neutral_label_not_outvoted_by_warmish_cloth() {
+        let img=Rgb32f::from_fn(256,192,|x,y|{
+            if (x>80 && x<116 && y>35 && y<135) ||
+                (x>149 && x<182 && y>54 && y<158) {
+                [0.38,0.375,0.37] // bright, nearly neutral labels
+            }else{
+                [0.21,0.185,0.17] // slightly warm clothing
+            }
+        });
+        let r=auto_wb_report(&img,&jpeg());
+        assert!(r.high_trust_neutral_fraction>0.04,"Lost label evidence: {r:?}");
+        assert!(r.high_trust_neutral_tiles>=3,"Labels did not span cells: {r:?}");
+        assert!(r.neutral_estimator_disagreement>0.01,
+            "Need to observe broad vs strong neutral disagreement: {r:?}");
+        assert!(!r.bright_cool_dominance);
+    }
+
+    #[test]
+    fn cast_neutral_patch_can_still_be_corrected() {
+        let image=Rgb32f::from_fn(256,192,|x,y|{
+            let v=0.18+((x/20+y/19)%7) as f32*0.025;
+            [v*1.08,v,v*0.94]
+        });
+        let r=auto_wb_report(&image,&jpeg());
+        assert!(r.confidence>=0.14,"Moderate colour cast must remain analysable: {r:?}");
+        assert_ne!(r.decision,"warm_light_preserved");
     }
 }
