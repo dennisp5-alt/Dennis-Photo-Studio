@@ -2984,7 +2984,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     ". WB decision " + (wb?.optString("reason","unknown") ?: "manual") +
                     ". Source " + (if(evidence?.optBoolean("source_raw",false)==true) "RAW" else "rendered") +
                     "."
-                val modelExplanation="Auto tone / WB diagnostic preview. $wbStatus " +
+                val modelExplanation="Experimental Assertive Auto: lighter estimation gates and relaxed clipping/detail vetoes. Compare carefully; it may over-adjust some photos. $wbStatus " +
                     "Review Original and Suggested before applying."
                 ed.autoPreview=AutoPreviewData(
                     original=original,
