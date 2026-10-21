@@ -2933,7 +2933,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val wbStatus=when(wb?.optString("decision")) {
                     "warm_light_preserved" -> "Warm ambient light preserved; Auto WB unchanged."
                     "corrected" -> "White balance: evidence-supported correction proposed."
-                    "already_neutral" -> "White balance: camera colour already acceptable."
+                    "already_neutral" -> "White balance: unchanged; no sufficiently reliable improvement."
                     else -> "White balance: camera setting retained."
                 }
                 val toneAudit=result.optJSONObject("toneAudit")
@@ -2949,7 +2949,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         reductions.optString(i)
                     }
                 }
-                val auditDetails="Scene evidence: median " +
+                val zone=evidence?.optJSONObject("zonal")
+                val sceneSignal=when {
+                    zone?.optBoolean("bright_surround_dark_detail",false)==true ->
+                        "Bright surroundings with recoverable dark detail"
+                    zone?.optBoolean("dark_texture_with_bright_reference",false)==true ->
+                        "Dark textured regions with a bright reference"
+                    else -> "No strong zonal shadow-imbalance signal"
+                }
+                val sceneDetails="$sceneSignal; luminous zones " +
+                    (zone?.optInt("luminous_zones",0) ?: 0) + "/9, dark-detail zones " +
+                    (zone?.optInt("shadow_detail_zones",0) ?: 0) + "/9, " +
+                    "suggested local-evidence Shadows " +
+                    (zone?.optDouble("proposed_shadow_recovery",0.0)?.toInt() ?: 0) +
+                    ". "
+                val auditDetails=sceneDetails+"Scene evidence: median " +
                     String.format(fmt,"%+.2f",evidence?.optDouble("median_ev",0.0) ?: 0.0) +
                     " EV, 5th–95th percentile " +
                     String.format(fmt,"%.2f",evidence?.optDouble("p05_ev",0.0) ?: 0.0) +
