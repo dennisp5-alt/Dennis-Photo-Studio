@@ -438,11 +438,17 @@ fn smart_auto_candidate(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) ->
     // bright reference can need much more than the historical 0.46 EV cap.
     // Strongly coloured warm emitters, sunsets, flat night sky and already
     // well-lit subjects cannot qualify from histogram darkness alone.
+    // A coherent dark subject against a darker background is not evidence
+    // of underexposure: this includes naturally darker skin and low-key
+    // portraits. The scene's existing tonal separation can be intentional.
+    // Only the genuine whole-frame deficit path may request strong global
+    // exposure in this experiment; low-key subjects remain eligible for
+    // separately justified *local* shadow development.
     let recoverable_dark_subject=recoverable_fraction>0.17
         && structure_fraction>0.013 && subject_ev< -0.70
         && median< -0.58 && p95<0.72
         && warm_emitters as f64/n<0.002
-        && !protected_warm_colour && !high_key;
+        && !protected_warm_colour && !high_key && !low_key;
     if recoverable_dark_subject {
         let need=(0.24+0.29*(-0.7-subject_ev).max(0.0)
             +0.13*(-0.7-median).max(0.0)).clamp(0.24,1.20);
