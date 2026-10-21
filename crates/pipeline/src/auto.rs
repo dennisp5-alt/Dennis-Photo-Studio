@@ -348,11 +348,59 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
     let exposure=if backlit_daylight_scene && exposure>0.0 {
         exposure.min(0.12)
     }else{exposure};
+    // v0.6.8: Lightcraft-style finishing. The defect-driven v0.6.5
+    // analysis often gives a genuine photograph twelve zero sliders:
+    // useful *corrections* were preserved, but normal studio refinements
+    // disappeared. Give normally exposed photographs a measured nudge
+    // through their REAL editable Lightroom-style controls instead of
+    // requiring a defect before any adjustment is allowed.
+    //
+    // Avoid universal fixed curves, saturation boosts or exposure lifts:
+    // a high-key image, intentional night, warm emitter or clipped sky
+    // needs a different result from a softly lit landscape.
+    let ordinary_photo=!low_key && !high_key;
+    let polish_structure=structure_fraction>0.010
+        && dynamic_range>2.5 && dynamic_range<6.8;
+    let exposure=if ordinary_photo && !backlit_daylight_scene
+        && !protected_warm_colour && exposure.abs()<0.005 {
+        let nudge=if median< -0.30 && median> -1.45 {
+            (0.09*(-0.30-median)/0.95).clamp(0.0,0.07)
+        }else if median>0.35 && median<0.75 && bright_fraction<0.18 {
+            -(0.06*(median-0.35)/0.40).clamp(0.0,0.05)
+        }else {0.0};
+        (nudge*100.0).round()/100.0
+    }else{exposure};
+    // Small, data-responsive contrast is a finish, not a claim that the
+    // photograph was incorrectly exposed. A genuine exposure correction
+    // or a strongly compressed dynamic range still uses the main Auto.
+    let contrast=if ordinary_photo && polish_structure
+        && contrast.abs()<0.5 {
+        if dynamic_range<3.8 {4.0}
+        else if dynamic_range<5.3 {3.0}
+        else {2.0}
+    }else{contrast};
+    // Subtle upper-midtones only on cool/neutral moderate-key scenes.
+    // Do not brighten a warm sunset's sky or intentionally black areas.
+    let curve_lights=if ordinary_photo && !protected_warm_colour
+        && !backlit_daylight_scene && curve_lights==0.0
+        && median< -0.52 && median> -1.35 && p75<0.25
+        && dynamic_range<6.5 && structure_fraction>0.015 {
+        3.0
+    }else{curve_lights};
+    // Real scenes with ordinary gentle colours benefit from a tiny
+    // vibrance finish; vivid flowers, faces, sunsets and greys do not.
+    let vibrance=if ordinary_photo && !protected_warm_colour
+        && vibrance==0.0 && has_colour && mean_sat<0.34
+        && rich_fraction<0.10 && skin_fraction<0.22
+        && soft_fraction>0.12 {
+        if mean_sat<0.19 {3.0}else{2.0}
+    }else{vibrance};
     let candidate=AutoTone {
         exposure, contrast, highlights, shadows, whites:0.0,
         blacks, vibrance, saturation,
         curve_shadows, curve_darks, curve_lights, curve_highlights,
     };
+    // Keep the actual before/after clipping and detail safeguards.
     preview_quality_guard(src,info,s,candidate)
 
 }
@@ -1775,5 +1823,61 @@ mod studio_v067_restoration_regressions {
         });
         let a=smart_auto_tone(&img,&SourceInfo::default(),&DevelopSettings::default());
         assert!(a.curve_darks<12.0,"Sunset unexpectedly treated as backlit land: {a:?}");
+    }
+}
+
+#[cfg(test)]
+mod studio_v068_refinement_regressions {
+    use super::*;
+    fn run(i:&Rgb32f)->AutoTone {
+        smart_auto_tone(i,&SourceInfo::default(),&DevelopSettings::default())
+    }
+    #[test]
+    fn balanced_textured_photo_gets_some_gentle_refinement() {
+        let image=Rgb32f::from_fn(256,192,|x,y|{
+            let grain=((x*17+y*11)%19) as f32*0.0013;
+            if y<66 {[0.37+grain,0.45+grain,0.52+grain]}
+            else if y<130 {[0.21+grain,0.31+grain,0.16+grain]}
+            else {[0.105+grain,0.135+grain,0.095+grain]}
+        });
+        let a=run(&image);
+        assert!(a.contrast>=2.0 || a.exposure.abs()>0.0
+            || a.vibrance>0.0 || a.curve_lights>0.0,
+            "A balanced but detailed photograph should still get a small polish: {a:?}");
+        assert!(a.exposure.abs()<=0.10,"Polish must not become global re-exposure: {a:?}");
+        assert!(a.contrast.abs()<=6.0,"Polish should be restrained: {a:?}");
+    }
+
+    #[test]
+    fn mildly_dim_normal_photo_does_not_require_major_defect() {
+        let image=Rgb32f::from_fn(256,192,|x,y|{
+            let v=0.120+((x/12+y/11)%7) as f32*0.009;
+            [v*1.04,v,v*0.93]
+        });
+        let a=run(&image);
+        assert!(a.exposure>0.0 || a.contrast>0.0 || a.curve_lights>0.0,
+            "Normal slightly dim photo should receive a gentle correction: {a:?}");
+        assert!(a.exposure<0.20,"Subtle refinement should not wash out a scene: {a:?}");
+    }
+
+    #[test]
+    fn neutral_flat_subject_keeps_colour_neutral() {
+        let i=Rgb32f::filled(128,128,[0.18,0.18,0.18]);
+        let a=run(&i);
+        assert_eq!(a.vibrance,0.0);
+        assert_eq!(a.saturation,0.0);
+    }
+
+    #[test]
+    fn finishing_is_repeatable_without_changing_develop_settings() {
+        let img=Rgb32f::from_fn(128,128,|x,y|{
+            let v=0.12+((x*7+y*11)%20) as f32*0.007;
+            [v,v*0.92,v*0.87]
+        });
+        let s=DevelopSettings::default();
+        let a=smart_auto_tone(&img,&SourceInfo::default(),&s);
+        let b=smart_auto_tone(&img,&SourceInfo::default(),&s);
+        assert_eq!(a,b);
+        assert_eq!(s,DevelopSettings::default());
     }
 }
