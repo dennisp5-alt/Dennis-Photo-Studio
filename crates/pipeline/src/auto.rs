@@ -467,8 +467,8 @@ fn smart_auto_candidate(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) ->
     // when a coarse high-key label previously forced this control to zero.
     if p995>1.70 && bright_fraction>0.16
         && warm_emitters as f64/n<0.002 && !protected_warm_colour {
-        let h=(-(8.0+12.0*(p995-1.7).max(0.0))
-            .clamp(8.0,24.0)).round();
+        let h=-(8.0+12.0*(p995-1.7).max(0.0))
+            .clamp(8.0,24.0).round();
         candidate.highlights=candidate.highlights.min(h);
         // Use the already-editable Whites control, previously hardcoded 0.
         if p995>2.1 && bright_fraction>0.21 {
