@@ -321,7 +321,8 @@ pub fn specs() -> Vec<CommandSpec> {
                 .map_err(|e|bad("develop.autoPreview",e))?;
             let info=s.source_info(id);
             let current=s.develop_of(id).unwrap_or_default();
-            let tone=lightcraft_pipeline::auto::smart_auto_tone(&src,&info,&current);
+            let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report(&src,&info,&current);
+            let tone=tone_audit.final_tone;
             let manual_wb=current.wb.mode==WbMode::Custom;
             let wb=if manual_wb {None} else {
                 Some(lightcraft_pipeline::auto::auto_wb_report(&src,&info))
@@ -353,11 +354,58 @@ pub fn specs() -> Vec<CommandSpec> {
                 "sourceSettings":current,
                 "previewSettings":proposal,
                 "tone":tone,
+                "toneAudit":tone_audit,
                 "whiteBalance":wb,
                 "manualWbPreserved":manual_wb,
                 "noChangeRecommended":no_change,
                 "model":model
             }))
+        }),
+        // Apply EXACTLY the settings compared in Auto Preview. Recomputing
+        // can produce a different image if source/edit state has changed.
+        // The request is validated against the original edit and limited
+        // to the same light/colour/curve/WB settings Auto is allowed to edit.
+        cmd!("develop.autoApplyPreview", "Apply Previewed Smart Auto", ["Photo"], None,
+            "{sourceSettings, previewSettings}", has_active, |s,p| {
+            let id=active(s,"develop.autoApplyPreview")?;
+            let source:DevelopSettings=serde_json::from_value(
+                p.get("sourceSettings").cloned()
+                    .ok_or_else(||bad("develop.autoApplyPreview","missing sourceSettings"))?)
+                .map_err(|e|bad("develop.autoApplyPreview",e.to_string()))?;
+            let proposed:DevelopSettings=serde_json::from_value(
+                p.get("previewSettings").cloned()
+                    .ok_or_else(||bad("develop.autoApplyPreview","missing previewSettings"))?)
+                .map_err(|e|bad("develop.autoApplyPreview",e.to_string()))?;
+            let current=s.develop_of(id).unwrap_or_default();
+            if *current!=source {
+                return Err(bad("develop.autoApplyPreview",
+                    "The photograph changed after the preview; inspect Auto again"));
+            }
+            let mut allowed=source.clone();
+            allowed.light.exposure=proposed.light.exposure;
+            allowed.light.contrast=proposed.light.contrast;
+            allowed.light.highlights=proposed.light.highlights;
+            allowed.light.shadows=proposed.light.shadows;
+            allowed.light.whites=proposed.light.whites;
+            allowed.light.blacks=proposed.light.blacks;
+            allowed.color.vibrance=proposed.color.vibrance;
+            allowed.color.saturation=proposed.color.saturation;
+            allowed.curve.shadows=proposed.curve.shadows;
+            allowed.curve.darks=proposed.curve.darks;
+            allowed.curve.lights=proposed.curve.lights;
+            allowed.curve.highlights=proposed.curve.highlights;
+            if source.wb.mode!=WbMode::Custom {
+                allowed.wb=proposed.wb.clone();
+            }
+            if allowed!=proposed {
+                return Err(bad("develop.autoApplyPreview",
+                    "Only Auto tone/curve/colour/WB values can be applied from preview"));
+            }
+            edit(s,"develop.autoApplyPreview","Smart Auto",|d|{
+                *d=proposed.clone();
+                Ok(())
+            })?;
+            Ok(json!({"appliedSettings":proposed,"matchesPreview":true}))
         }),
         cmd!("develop.auto", "Smart Auto", ["Photo"], Some("Shift+A"), "{}", has_active, |s, _p| {
             let id=active(s,"develop.auto")?;
@@ -365,7 +413,8 @@ pub fn specs() -> Vec<CommandSpec> {
                 .map_err(|e|bad("develop.auto",e))?;
             let info=s.source_info(id);
             let d=s.develop_of(id).unwrap_or_default();
-            let a=lightcraft_pipeline::auto::smart_auto_tone(&src,&info,&d);
+            let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report(&src,&info,&d);
+            let a=tone_audit.final_tone;
             // A manually chosen Custom or picked white balance is intentional;
             // Smart Auto must not silently override it.
             let manual_wb=d.wb.mode==WbMode::Custom;
@@ -397,7 +446,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 }
                 Ok(())
             })?;
-            Ok(json!({"tone":a,"whiteBalance":wb,"manualWbPreserved":manual_wb}))
+            Ok(json!({"tone":a,"toneAudit":tone_audit,"whiteBalance":wb,"manualWbPreserved":manual_wb}))
         }),
         cmd!("develop.autoDetail", "Auto Detail & Noise", ["Photo"], None, "{}", has_active, |s, _p| {
             let id=active(s,"develop.autoDetail")?;
