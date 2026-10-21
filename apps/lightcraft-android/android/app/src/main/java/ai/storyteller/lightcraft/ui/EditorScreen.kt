@@ -17,6 +17,8 @@ import androidx.compose.animation.core.exponentialDecay
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -1865,7 +1867,7 @@ private fun AutoCandidatePreviewDialog(
         onDismissRequest=onDismiss,
         title={ Text("Preview Smart Auto", color=Lc.menuText, fontFamily=Inter) },
         text={
-            Column {
+            Column(Modifier.heightIn(max=560.dp).verticalScroll(rememberScrollState())) {
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick={edited=false}) {
                         Text(if(!edited) "● Original" else "Original")
