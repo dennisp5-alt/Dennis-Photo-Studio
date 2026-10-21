@@ -321,7 +321,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 .map_err(|e|bad("develop.autoPreview",e))?;
             let info=s.source_info(id);
             let current=s.develop_of(id).unwrap_or_default();
-            let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report(&src,&info,&current);
+            let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report_unguarded(&src,&info,&current);
             let tone=tone_audit.final_tone;
             let manual_wb=current.wb.mode==WbMode::Custom;
             let wb=if manual_wb {None} else {
@@ -413,7 +413,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 .map_err(|e|bad("develop.auto",e))?;
             let info=s.source_info(id);
             let d=s.develop_of(id).unwrap_or_default();
-            let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report(&src,&info,&d);
+            let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report_unguarded(&src,&info,&d);
             let a=tone_audit.final_tone;
             // A manually chosen Custom or picked white balance is intentional;
             // Smart Auto must not silently override it.
