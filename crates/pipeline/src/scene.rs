@@ -105,9 +105,21 @@ pub fn analyse_linear(img:&Rgb32f)->ZonalSceneEvidence {
     let tonal_separation=(high-low).max(0.0);
     let detail_peak=zones.iter()
         .map(|z|z.dark_detail_fraction).fold(0.0f64,f64::max);
+    // Do not confuse a natural top-to-bottom landscape gradient
+    // (bright sky, medium ground, dark foreground) with a dark subject
+    // surrounded by bright water. Independent bright and dark textured
+    // areas must coexist in the image's middle band. The established
+    // top-vs-bottom backlit-landscape path handles genuine foreground
+    // deficits separately.
+    let middle_bright=zones[3..6].iter()
+        .filter(|z|z.bright_fraction>0.38 && z.median_luma>0.34).count();
+    let middle_dark_detail=zones[3..6].iter()
+        .filter(|z|z.dark_detail_fraction>0.007
+            && z.recoverable_fraction>0.095).count();
     let bright_surround_dark_detail=luminous_zones>=3
         && shadow_detail_zones>=1 && tonal_separation>0.20
-        && detail_peak>0.014;
+        && detail_peak>0.014 && middle_bright>=2
+        && middle_dark_detail>=1;
     // Dim product or portrait with a *small real bright reference*: can
     // have useful dark texture even if global histogram says 'low key'.
     // This signal alone does NOT authorize brightening the whole frame.
@@ -150,6 +162,20 @@ mod tests {
         assert!(z.bright_surround_dark_detail,"dark subject missed: {z:?}");
         assert!(z.proposed_shadow_recovery>=9.0);
         assert!(z.luminous_zones>=7);
+    }
+
+    #[test]
+    fn bright_sky_over_textured_ground_is_not_dark_subject_surrounded() {
+        let img=Rgb32f::from_fn(256,192,|x,y|{
+            let detail=((x*29+y*43)%23) as f32/23.0*0.024;
+            if y<64 {[0.43+detail,0.55+detail,0.66+detail]}
+            else if y<145 {[0.15+detail,0.29+detail,0.15+detail]}
+            else {[0.055+detail,0.070+detail,0.052+detail]}
+        });
+        let z=analyse_linear(&img);
+        assert!(!z.bright_surround_dark_detail,
+            "Finished landscape mistaken for reflective water: {z:?}");
+        assert_eq!(z.proposed_darks_curve,0.0);
     }
 
     #[test]
