@@ -84,6 +84,10 @@ fn smart_auto_candidate(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) ->
     crate::local::scene_linear_pre(&mut img,info,&base);
     if img.data.is_empty() || img.width==0 {return (AutoTone::default(),false);}
 
+    // Evaluate all nine image regions before deciding on global sliders.
+    // Unlike full-frame percentiles, spatial evidence can detect a dark
+    // detailed subject within otherwise bright surroundings.
+    let zonal=crate::scene::analyse_linear(&img);
     let lum:Vec<f32>=img.data.iter()
         .map(|c|luminance_2020(*c).max(0.0)).collect();
     let mut ev:Vec<f32>=lum.iter()
