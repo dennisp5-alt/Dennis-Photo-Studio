@@ -381,7 +381,7 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
     }else{contrast};
     // Keep the existing scene-derived contrast correction, but avoid
     // unnecessary heavy contrast on already normally exposed photographs.
-    let contrast=if ordinary_photo && polish_structure &&
+    let contrast=if ordinary_photo &&
         contrast>8.0 && exposure.abs()<=0.06 && !backlit_daylight_scene {
         8.0
     }else{contrast};
