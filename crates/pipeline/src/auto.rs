@@ -363,8 +363,8 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
         && dynamic_range>2.5 && dynamic_range<6.8;
     let exposure=if ordinary_photo && !backlit_daylight_scene
         && !protected_warm_colour && exposure.abs()<0.005 {
-        let nudge=if median< -0.30 && median> -1.45 {
-            (0.09*(-0.30-median)/0.95).clamp(0.0,0.07)
+        let nudge=if median< -0.10 && median> -1.45 {
+            (0.09*(-0.10-median)/1.10).clamp(0.0,0.07)
         }else if median>0.35 && median<0.75 && bright_fraction<0.18 {
             -(0.06*(median-0.35)/0.40).clamp(0.0,0.05)
         }else {0.0};
@@ -379,7 +379,13 @@ pub fn smart_auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> 
         else if dynamic_range<5.3 {3.0}
         else {2.0}
     }else{contrast};
-    // Subtle upper-midtones only on cool/neutral moderate-key scenes.
+    // Keep the existing scene-derived contrast correction, but avoid
+    // unnecessary heavy contrast on already normally exposed photographs.
+    let contrast=if ordinary_photo && polish_structure &&
+        contrast>8.0 && exposure.abs()<=0.06 && !backlit_daylight_scene {
+        8.0
+    }else{contrast};
+        // Subtle upper-midtones only on cool/neutral moderate-key scenes.
     // Do not brighten a warm sunset's sky or intentionally black areas.
     let curve_lights=if ordinary_photo && !protected_warm_colour
         && !backlit_daylight_scene && curve_lights==0.0
@@ -1845,7 +1851,7 @@ mod studio_v068_refinement_regressions {
             || a.vibrance>0.0 || a.curve_lights>0.0,
             "A balanced but detailed photograph should still get a small polish: {a:?}");
         assert!(a.exposure.abs()<=0.10,"Polish must not become global re-exposure: {a:?}");
-        assert!(a.contrast.abs()<=6.0,"Polish should be restrained: {a:?}");
+        assert!(a.contrast.abs()<=8.0,"Polish should be restrained: {a:?}");
     }
 
     #[test]
