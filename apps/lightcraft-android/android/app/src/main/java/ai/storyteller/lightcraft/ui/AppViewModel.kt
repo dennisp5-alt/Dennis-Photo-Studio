@@ -2948,6 +2948,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     (0 until reductions.length()).joinToString(", ") { i ->
                         reductions.optString(i)
                     }
+                }
                 val auditDetails="Scene evidence: median " +
                     String.format(fmt,"%+.2f",evidence?.optDouble("median_ev",0.0) ?: 0.0) +
                     " EV, 5th–95th percentile " +
