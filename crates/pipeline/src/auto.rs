@@ -425,11 +425,67 @@ fn smart_auto_candidate(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) ->
         && soft_fraction>0.12 {
         if mean_sat<0.19 {3.0}else{2.0}
     }else{vibrance};
-    let candidate=AutoTone {
+    // v0.6.12 A/B EXPERIMENT — less restrictive estimation, NOT production.
+    // The preceding deficit-based policy frequently vetoed an edit before
+    // the render guard could test it. Use multi-region and tonal evidence to
+    // propose corrections, then let the actual output render constrain them.
+    let mut candidate=AutoTone {
         exposure, contrast, highlights, shadows, whites:0.0,
         blacks, vibrance, saturation,
         curve_shadows, curve_darks, curve_lights, curve_highlights,
     };
+    // Dark, textured photographs with usable tonal range and no dominant
+    // bright reference can need much more than the historical 0.46 EV cap.
+    // Strongly coloured warm emitters, sunsets, flat night sky and already
+    // well-lit subjects cannot qualify from histogram darkness alone.
+    let recoverable_dark_subject=recoverable_fraction>0.17
+        && structure_fraction>0.013 && subject_ev< -0.70
+        && median< -0.58 && p95<0.72
+        && warm_emitters as f64/n<0.002
+        && !protected_warm_colour && !high_key;
+    if recoverable_dark_subject {
+        let need=(0.24+0.29*(-0.7-subject_ev).max(0.0)
+            +0.13*(-0.7-median).max(0.0)).clamp(0.24,1.20);
+        candidate.exposure=candidate.exposure.max((need*100.0).round()/100.0);
+        candidate.shadows=candidate.shadows.max(
+            (8.0+20.0*(recoverable_fraction-0.17).max(0.0)).clamp(8.0,18.0).round());
+    }
+    // A photograph with bright reflective surroundings and recoverable
+    // dark subject structure needs joint highlight AND shadow development.
+    // Treat these as evidence from zones, not object recognition.
+    if zonal.bright_surround_dark_detail && warm_emitters as f64/n<0.002 {
+        candidate.shadows=candidate.shadows.max(18.0);
+        candidate.curve_darks=candidate.curve_darks.max(8.0);
+        candidate.exposure=candidate.exposure.min(0.12);
+    }
+    if zonal.dark_texture_with_bright_reference
+        && warm_emitters as f64/n<0.002 && p95<1.85 {
+        candidate.shadows=candidate.shadows.max(12.0);
+        candidate.curve_darks=candidate.curve_darks.max(7.0);
+    }
+    // Permit highlight compression on bright non-emissive images, even
+    // when a coarse high-key label previously forced this control to zero.
+    if p995>1.70 && bright_fraction>0.16
+        && warm_emitters as f64/n<0.002 && !protected_warm_colour {
+        let h=(-(8.0+12.0*(p995-1.7).max(0.0))
+            .clamp(8.0,24.0)).round();
+        candidate.highlights=candidate.highlights.min(h);
+        // Use the already-editable Whites control, previously hardcoded 0.
+        if p995>2.1 && bright_fraction>0.21 {
+            candidate.whites=-((p995-2.1)*9.0).clamp(0.0,12.0).round();
+        }
+    }
+    // A nearly neutral moderate-key image can still benefit from normal
+    // development. Never add unconditional saturation.
+    if !low_key && !high_key && dynamic_range<5.5
+        && p95<1.6 && structure_fraction>0.025 {
+        candidate.contrast=candidate.contrast.max(4.0);
+    }
+    // Keep adjustments editable and bounded for an experimental comparison.
+    candidate.exposure=candidate.exposure.clamp(-1.2,1.2);
+    candidate.shadows=candidate.shadows.clamp(-35.0,35.0);
+    candidate.highlights=candidate.highlights.clamp(-35.0,20.0);
+    candidate.curve_darks=candidate.curve_darks.clamp(-24.0,24.0);
     // Propose an image-dependent edit before any output-quality vetoes.
     (candidate,false)
 
@@ -536,7 +592,7 @@ fn preview_quality_guard_report(
 ) -> GuardOutcome {
     let mut reasons=Vec::new();
     let strength=a.exposure.abs()+a.contrast.abs()+a.highlights.abs()
-        +a.shadows.abs()+a.blacks.abs()+a.vibrance.abs()
+        +a.shadows.abs()+a.whites.abs()+a.blacks.abs()+a.vibrance.abs()
         +a.saturation.abs()+a.curve_shadows.abs()+a.curve_darks.abs()
         +a.curve_lights.abs()+a.curve_highlights.abs();
     if strength==0.0 {
@@ -559,6 +615,7 @@ fn preview_quality_guard_report(
     changed.light.highlights=a.highlights;
     changed.light.shadows=a.shadows;
     changed.light.blacks=a.blacks;
+    changed.light.whites=a.whites;
     changed.color.vibrance=a.vibrance;
     changed.color.saturation=a.saturation;
     changed.curve.shadows=a.curve_shadows;
@@ -584,14 +641,17 @@ fn preview_quality_guard_report(
     // recovered by simply reducing exposure on JPEGs.
     let new_whites=clipped(&after,true)-clipped(&before,true);
     let new_blacks=clipped(&after,false)-clipped(&before,false);
-    if new_whites>0.012 {
+    // Experimental threshold: permit modest output changes rather than
+    // treating ~1% newly bright RGB samples as an automatic full veto.
+    // Severe clipping still triggers the established correction.
+    if new_whites>0.028 {
         reasons.push("added_highlight_clipping");
         if a.exposure>0.0 {a.exposure=0.0;}
         a.curve_lights=0.0;
         a.vibrance=0.0;
         a.saturation=0.0;
     }
-    if new_blacks>0.014 {
+    if new_blacks>0.028 {
         reasons.push("added_shadow_clipping");
         if a.exposure<0.0 {a.exposure=0.0;}
         a.blacks=0.0;
@@ -620,7 +680,7 @@ fn preview_quality_guard_report(
         }
     }
     if dark_count>200 && a.exposure<=0.0
-        && dark_lift/dark_count as f64>14.0 {
+        && dark_lift/dark_count as f64>24.0 {
         reasons.push("dark_region_overlift");
         a.shadows=0.0;
         a.curve_shadows=0.0;
@@ -628,7 +688,7 @@ fn preview_quality_guard_report(
     }
     // A major collapse of brightness edges means lost useful contrast:
     // reject the contrast/curve proposal, but keep warranted exposure.
-    if grad0>1000.0 && grad1<grad0*0.72 {
+    if grad0>1000.0 && grad1<grad0*0.61 {
         reasons.push("structural_contrast_loss");
         a.contrast=0.0;
         a.curve_shadows=0.0;
@@ -2275,5 +2335,46 @@ mod studio_v0611_scene_auto_integration {
         assert!(!special || candidate.exposure==0.0);
         assert_eq!(candidate.exposure,0.0);
         assert_eq!(candidate.curve_lights,0.0);
+    }
+}
+
+#[cfg(test)]
+mod studio_v0612_assertive_test {
+    use super::*;
+    #[test]
+    fn strong_underexposure_with_real_detail_now_proposes_meaningful_exposure() {
+        let img=Rgb32f::from_fn(256,192,|x,y|{
+            let t=((x*17+y*29)%25) as f32/25.0;
+            let v=0.060+t*0.022;
+            [v*1.04,v,v*0.92]
+        });
+        let (a,_) = smart_auto_candidate(
+            &img,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(a.exposure>=0.24,
+            "Test must challenge historical exposure cap / defect veto: {a:?}");
+    }
+    #[test]
+    fn bright_water_with_dark_subject_can_propose_joint_adjustment() {
+        let img=Rgb32f::from_fn(270,270,|x,y|{
+            if (85..185).contains(&x) && (102..173).contains(&y) {
+                let d=((x*7+y*13)%15) as f32/130.0;
+                [0.08+d,0.07+d,0.055+d]
+            }else{[0.65,0.67,0.69]}
+        });
+        let (a,_) =smart_auto_candidate(
+            &img,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(a.shadows>=18.0,"Dark feathers not addressed: {a:?}");
+        assert!(a.exposure<=0.12,"Water should not be globally brightened: {a:?}");
+    }
+    #[test]
+    fn all_tone_controls_are_included_in_experimental_render_guard() {
+        let img=Rgb32f::from_fn(128,128,|x,y|{
+            let d=((x*3+y*5)%13) as f32/100.0;
+            [0.28+d,0.30+d,0.32+d]
+        });
+        let proposal=AutoTone {whites:-10.0,..AutoTone::default()};
+        let report=preview_quality_guard_report(
+            &img,&SourceInfo::default(),&DevelopSettings::default(),proposal);
+        assert_eq!(report.tone.whites,-10.0);
     }
 }
