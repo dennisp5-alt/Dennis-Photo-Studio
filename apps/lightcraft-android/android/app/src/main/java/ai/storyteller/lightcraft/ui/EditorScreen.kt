@@ -1860,6 +1860,7 @@ private fun AutoCandidatePreviewDialog(
     onApply: () -> Unit,
 ) {
     var edited by remember(proposal) { mutableStateOf(true) }
+    var showAudit by remember(proposal) { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest=onDismiss,
         title={ Text("Preview Smart Auto", color=Lc.menuText, fontFamily=Inter) },
@@ -1899,6 +1900,17 @@ private fun AutoCandidatePreviewDialog(
                     fontFamily=Inter,
                     fontSize=12.sp,
                 )
+                TextButton(onClick={ showAudit=!showAudit }) {
+                    Text(if(showAudit) "Hide Auto diagnostics" else "Show Auto diagnostics")
+                }
+                if (showAudit) {
+                    Text(
+                        proposal.auditDetails,
+                        color=Lc.panelTextSoft,
+                        fontFamily=Inter,
+                        fontSize=11.sp,
+                    )
+                }
             }
         },
         confirmButton={
