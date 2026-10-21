@@ -2156,7 +2156,7 @@ mod studio_v0610_wb_provenance_tests {
                 [0.16,0.12,0.08] // brown duck on the water
             } else {
                 let ripple=((x*13+y*17)%21) as f32*0.001;
-                [0.60+ripple,0.63+ripple,0.67+ripple]
+                [0.61+ripple,0.625+ripple,0.646+ripple]
             }
         });
         let r=auto_wb_report(&pond,&jpeg());
