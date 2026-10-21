@@ -117,6 +117,9 @@ data class AutoPreviewData(
     val summary: String,
     val unchanged: Boolean,
     val modelStatus: String,
+    val sourceSettings: String,
+    val previewSettings: String,
+    val auditDetails: String,
 )
 
 class EditorState(val photoId: ULong, info: PhotoInfo, val device: DeviceOrigin? = null) {
@@ -2933,14 +2936,44 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     "already_neutral" -> "White balance: camera colour already acceptable."
                     else -> "White balance: camera setting retained."
                 }
-                val modelExplanation="Restored Lightroom-style Smart Auto. $wbStatus " +
-                    "Review the Original and Suggested images before applying."
+                val toneAudit=result.optJSONObject("toneAudit")
+                val evidence=toneAudit?.optJSONObject("evidence")
+                val proposedTone=toneAudit?.optJSONObject("proposed")
+                val originalProposalEv=proposedTone?.optDouble("exposure",0.0) ?: 0.0
+                val finalEv=t.optDouble("exposure",0.0)
+                val reductions=toneAudit?.optJSONArray("guard_reasons")
+                val reductionText=if (reductions==null || reductions.length()==0) {
+                    "No render-safety reductions"
+                } else {
+                    (0 until reductions.length()).joinToString(", ") { i ->
+                        reductions.optString(i)
+                    }
+                val auditDetails="Scene evidence: median " +
+                    String.format(fmt,"%+.2f",evidence?.optDouble("median_ev",0.0) ?: 0.0) +
+                    " EV, 5th–95th percentile " +
+                    String.format(fmt,"%.2f",evidence?.optDouble("p05_ev",0.0) ?: 0.0) +
+                    " to " +
+                    String.format(fmt,"%.2f",evidence?.optDouble("p95_ev",0.0) ?: 0.0) +
+                    " EV. Proposed exposure " + String.format(fmt,"%+.2f",originalProposalEv) +
+                    " EV; after safeguards " + String.format(fmt,"%+.2f",finalEv) +
+                    " EV. Guard: $reductionText. " +
+                    "WB proposed " + (wb?.optDouble("candidate_temp")?.toInt() ?: 0) +
+                    " K, applied " + (wb?.optDouble("temp")?.toInt() ?: 0) +
+                    " K, confidence " +
+                    String.format(fmt,"%.2f",wb?.optDouble("confidence",0.0) ?: 0.0) +
+                    ". Source " + (if(evidence?.optBoolean("source_raw",false)==true) "RAW" else "rendered") +
+                    "."
+                val modelExplanation="Auto tone / WB diagnostic preview. $wbStatus " +
+                    "Review Original and Suggested before applying."
                 ed.autoPreview=AutoPreviewData(
                     original=original,
                     candidate=candidate,
                     summary="Exposure $ev EV • Contrast $contrast • Highlights $highlight • Shadows $shadow • Vibrance $vibrance • Curves D$darks/L$lights",
                     unchanged=result.optBoolean("noChangeRecommended",false),
                     modelStatus=modelExplanation,
+                    sourceSettings=oldSettings,
+                    previewSettings=newSettings,
+                    auditDetails=auditDetails,
                 )
             } catch (ex: Exception) {
                 say("Smart Auto preview unavailable: ${ex.message}")
@@ -2952,9 +2985,29 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun applyAutoPreview() {
         val ed=editor ?: return
-        if (ed.autoPreview==null) return
+        val e=engine ?: return
+        val approved=ed.autoPreview ?: return
         ed.autoPreview=null
-        applySmartAuto()
+        viewModelScope.launch {
+            runCatching {
+                val params=JSONObject()
+                    .put("sourceSettings",JSONObject(approved.sourceSettings))
+                    .put("previewSettings",JSONObject(approved.previewSettings))
+                    .toString()
+                e.command {
+                    execute("develop.autoApplyPreview",params)
+                    snapshot(ed.photoId)
+                }
+            }.onSuccess { state ->
+                if (editor !== ed) return@onSuccess
+                ed.update(state)
+                if (ed.sub == "curve") refreshCurve()
+                requestView()
+                say("Applied the exact Smart Auto settings you previewed.")
+            }.onFailure {
+                say("Auto preview not applied: ${it.message}")
+            }
+        }
     }
 
     fun applySmartAuto() {
