@@ -499,6 +499,7 @@ pub fn smart_auto_tone_report(src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings)
         bright_fraction:bright as f64/len as f64,
         recoverable_fraction:recover as f64/len as f64,
         analysed_pixels:ev.len(),
+        zonal:crate::scene::analyse_linear(&linear),
     };
     let (proposal,emissive)=smart_auto_candidate(src,info,s);
     let guarded=if emissive {
