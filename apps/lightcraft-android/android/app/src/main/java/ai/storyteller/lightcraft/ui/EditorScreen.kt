@@ -1886,7 +1886,7 @@ private fun AutoCandidatePreviewDialog(
                 }
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    if(proposal.unchanged) "No adjustment recommended."
+                    if(proposal.unchanged) "Auto settings already match this photo. Compare the two versions."
                     else proposal.summary,
                     color=Lc.menuText,
                     fontFamily=Inter,
