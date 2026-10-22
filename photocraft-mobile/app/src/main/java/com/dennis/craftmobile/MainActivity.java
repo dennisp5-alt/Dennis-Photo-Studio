@@ -11,6 +11,7 @@ import android.graphics.Matrix;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
@@ -19,6 +20,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.WindowInsets;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
@@ -71,6 +73,7 @@ public final class MainActivity extends Activity {
     private TextView openPlaceholder, status;
     private Mode mode = Mode.LOOKS;
     private String activeAdjustment = "Exposure";
+    private int jpegQuality = 95;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -106,7 +109,19 @@ public final class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
+        // Android 15/16 enforce edge-to-edge; keep toolbar and tabs inside safe insets.
+        if (Build.VERSION.SDK_INT >= 30) {
+            root.setOnApplyWindowInsetsListener((view, insets) -> {
+                android.graphics.Insets safe = insets.getInsets(
+                        WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                view.setPadding(safe.left, safe.top, safe.right, safe.bottom);
+                return insets;
+            });
+        } else {
+            root.setFitsSystemWindows(true);
+        }
         setContentView(root);
+        root.requestApplyInsets();
 
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
@@ -149,7 +164,7 @@ public final class MainActivity extends Activity {
         controls = new LinearLayout(this);
         controls.setBackgroundColor(PANEL);
         controls.setOrientation(LinearLayout.VERTICAL);
-        root.addView(controls, new LinearLayout.LayoutParams(-1, dp(156)));
+        root.addView(controls, new LinearLayout.LayoutParams(-1, dp(184)));
 
         tabs = new LinearLayout(this);
         tabs.setGravity(Gravity.CENTER_VERTICAL);
@@ -196,8 +211,48 @@ public final class MainActivity extends Activity {
         controls.addView(scroll, new LinearLayout.LayoutParams(-1, dp(83)));
     }
 
+    private void addActionStrip() {
+        LinearLayout strip = new LinearLayout(this);
+        strip.setGravity(Gravity.CENTER_VERTICAL);
+        strip.setPadding(dp(4), dp(3), dp(4), dp(3));
+        action(strip, "Looks", () -> { mode = Mode.LOOKS; drawTabs(); drawControls(); }, false);
+        action(strip, "AUTO", this::autoTune, true);
+        action(strip, "Adjust", () -> { mode = Mode.ADJUST; drawTabs(); drawControls(); }, false);
+        action(strip, "Crop", () -> { mode = Mode.CROP; drawTabs(); drawControls(); }, false);
+        action(strip, "Q" + jpegQuality, this::chooseQuality, false);
+        action(strip, "Export", () -> save(false), false);
+        controls.addView(strip, new LinearLayout.LayoutParams(-1, dp(52)));
+    }
+
+    private void action(LinearLayout row, String name, Runnable onClick, boolean primary) {
+        TextView button = label(name, 12, Color.WHITE);
+        button.setBackground(background(primary ? ACCENT : Color.rgb(42, 46, 55), 8));
+        button.setOnClickListener(v -> onClick.run());
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(43), 1);
+        p.setMargins(dp(2), 0, dp(2), 0);
+        row.addView(button, p);
+    }
+
+    private void chooseQuality() {
+        String[] options = {"85 · Smaller file", "90 · High quality",
+                "95 · Very high (default)", "100 · Maximum JPEG quality"};
+        int selected = jpegQuality == 85 ? 0 : jpegQuality == 90 ? 1 : jpegQuality == 100 ? 3 : 2;
+        new AlertDialog.Builder(this)
+                .setTitle("JPEG export quality")
+                .setSingleChoiceItems(options, selected, (dialog, which) -> {
+                    jpegQuality = new int[]{85, 90, 95, 100}[which];
+                    dialog.dismiss();
+                    drawControls();
+                    status.setText("Export: JPEG quality " + jpegQuality +
+                            " · Maximum quality is not lossless");
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
     private void drawControls() {
         controls.removeAllViews();
+        addActionStrip();
         if (mode == Mode.LOOKS) {
             controls.addView(label("LOOKS  •  Original / Natural / Warm / Cool / Dramatic / B&W", 12,
                     Color.LTGRAY), new LinearLayout.LayoutParams(-1, dp(38)));
@@ -327,29 +382,46 @@ public final class MainActivity extends Activity {
     }
 
     private void autoTune() {
-        if (previewSource == null) { openImage(); return; }
-        checkpoint();
+        if (previewSource == null) {
+            Toast.makeText(this, "Open a photo before using Auto", Toast.LENGTH_SHORT).show();
+            openImage();
+            return;
+        }
         int[] hist = new int[256];
         int width = previewSource.getWidth(), height = previewSource.getHeight();
         int stride = Math.max(1, (int)Math.sqrt((double)width * height / 18000));
         int sampled = 0;
-        for (int y=0; y<height; y+=stride) for (int x=0; x<width; x+=stride) {
-            int pixel = previewSource.getPixel(x, y);
-            int l = Math.round(.2126f*Color.red(pixel)+.7152f*Color.green(pixel)+
-                    .0722f*Color.blue(pixel));
-            hist[Math.min(255, Math.max(0, l))]++; sampled++;
+        for (int y = 0; y < height; y += stride) {
+            for (int x = 0; x < width; x += stride) {
+                int pixel = previewSource.getPixel(x, y);
+                int luminance = Math.round(.2126f * Color.red(pixel) +
+                        .7152f * Color.green(pixel) + .0722f * Color.blue(pixel));
+                hist[Math.max(0, Math.min(255, luminance))]++;
+                sampled++;
+            }
         }
         int low = percentile(hist, sampled, .05f);
         int middle = percentile(hist, sampled, .50f);
         int high = percentile(hist, sampled, .95f);
-        // Deliberately conservative Auto: preserves bright clouds better than fixed auto-levels.
-        edit.exposure = clamp((float)(Math.log(.44 / Math.max(.08, middle/255.0)) /
-                Math.log(2)), -.85f, .85f);
-        edit.contrast = clamp((170-(high-low)) * .13f, -14, 19);
-        edit.shadows = low < 38 ? 20 : (low < 65 ? 10 : 0);
-        edit.highlights = high > 230 ? -22 : (high > 210 ? -9 : 0);
+        checkpoint();
+        // Scene-adaptive tone baseline: never deliberately brighten a bright sky
+        // enough to flatten cloud structure.
+        float target = high > 235 && low < 48 ? .45f : .49f;
+        float median = Math.max(.06f, middle / 255f);
+        edit.exposure = clamp((float)(Math.log(target / median) / Math.log(2)),
+                -.90f, 1.00f);
+        if (high > 235 && edit.exposure > .33f) edit.exposure = .33f;
+        edit.contrast = clamp((164 - (high - low)) * .15f, -15f, 17f);
+        edit.shadows = clamp((70f - low) * .58f, 0f, 33f);
+        edit.highlights = clamp((208f - high) * .93f, -38f, 0f);
+        edit.saturation = 0f;
+        edit.warmth = 0f;
+        edit.tint = 0f;
         edit.look = "Auto";
         render(); drawControls();
+        Toast.makeText(this, String.format(Locale.US,
+                "Auto applied: %+.2f EV · highlights %+.0f",
+                edit.exposure, edit.highlights), Toast.LENGTH_LONG).show();
     }
     private static int percentile(int[] hist, int n, float f) {
         int count=0; for (int i=0;i<256;i++) { count+=hist[i]; if (count >= n*f) return i; }
@@ -412,7 +484,13 @@ public final class MainActivity extends Activity {
                 ui.post(() -> {
                     if (serial != generation.get()) return;
                     renderedPreview = output; photo.setImageBitmap(output);
-                    status.setText("Live preview · Full-quality JPEG export");
+                    if ("Auto".equals(snapshot.look)) {
+                        status.setText(String.format(Locale.US,
+                                "AUTO applied · %+.2f EV · highlights %+.0f · shadows %+.0f",
+                                snapshot.exposure, snapshot.highlights, snapshot.shadows));
+                    } else {
+                        status.setText("Live preview · JPEG export Q" + jpegQuality);
+                    }
                 });
             } catch (OutOfMemoryError ex) { showError("Not enough memory for preview"); }
         });
@@ -475,7 +553,7 @@ public final class MainActivity extends Activity {
 
     private void save(boolean share) {
         if (input == null) { openImage(); return; }
-        Uri toLoad = input; Edit snapshot = edit.copy();
+        Uri toLoad = input; Edit snapshot = edit.copy(); final int quality = jpegQuality;
         status.setText("Exporting image…");
         work.execute(() -> {
             Uri saved = null;
@@ -494,7 +572,7 @@ public final class MainActivity extends Activity {
                         MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
                 if (saved == null) throw new IllegalStateException("MediaStore create failed");
                 try (OutputStream stream = getContentResolver().openOutputStream(saved)) {
-                    if (stream == null || !result.compress(Bitmap.CompressFormat.JPEG, 95, stream))
+                    if (stream == null || !result.compress(Bitmap.CompressFormat.JPEG, quality, stream))
                         throw new IllegalStateException("JPEG export failed");
                 }
                 values.clear(); values.put(MediaStore.Images.Media.IS_PENDING, 0);
@@ -503,8 +581,8 @@ public final class MainActivity extends Activity {
                 original.recycle();
                 Uri finished = saved;
                 ui.post(() -> {
-                    status.setText("Saved to Pictures/Dennis Craft Mobile");
-                    Toast.makeText(this, "Saved to Pictures", Toast.LENGTH_LONG).show();
+                    status.setText("Saved JPEG Q" + quality + " to Pictures/Dennis Craft Mobile");
+                    Toast.makeText(this, "Exported JPEG Q" + quality, Toast.LENGTH_LONG).show();
                     if (share) {
                         Intent intent = new Intent(Intent.ACTION_SEND);
                         intent.setType("image/jpeg");
@@ -535,14 +613,14 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.1")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.2")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: open JPEG/HEIC and other supported images, looks, " +
-                        "tone/colour adjustments, simple Auto, centre crop, rotate, " +
+                        "tone/colour adjustments, improved Auto with visible results, centre crop, rotate, " +
                         "undo/redo, press-and-hold before view, export and share.\n\n" +
                         "Limitations: no healing, local masks, layers or RAW workflow yet. " +
                         "PhotoCraft's Rust engine is NOT integrated in this version. " +
-                        "Export is JPEG 95, up to 8192px / 50MP and currently does not " +
+                        "Export is selectable JPEG 85/90/95/100 (not lossless), capped at 8192px / 50MP and does not " +
                         "preserve original metadata. Editing never overwrites the source.")
                 .setPositiveButton("Close", null).show();
     }

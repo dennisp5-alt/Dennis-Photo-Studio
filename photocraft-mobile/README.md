@@ -1,4 +1,4 @@
-# Dennis Craft Mobile v0.1 (Android)
+# Dennis Craft Mobile v0.2 (Android)
 
 A separate experimental phone-first offline photo editor for the Samsung Galaxy S23 Ultra, inspired by the mobile workflow demonstrated by the user. This is an Android Java proof-of-concept, NOT a port of PhotoCraft's Rust engine yet. It is independently named and has a distinct Android package com.dennis.craftmobile.
 
@@ -7,11 +7,11 @@ Implemented:
 - Live preview, original comparison by pressing Hold
 - Looks (Original, Natural, Warm, Cool, Dramatic, B&W)
 - Exposure, contrast, highlights, shadows, saturation, warmth, tint
-- Conservative histogram-based Auto, undo/redo
+- Visible Auto button in the editing strip and more responsive scene-adaptive tone corrections; undo/redo
 - Centre crop ratios, 90-degree rotation
-- Offline export to Pictures/Dennis Craft Mobile and share sheet
+- Selectable JPEG export qualities 85/90/95/100 and share sheet; original remains untouched
 - No all-files permission, no network permission, no access to existing Dennis Photo Studio data
-- Single-threaded background processing, preview resolution 2000px, output capped to 8192px / 50MP for memory safety
+- Android 15/16 safe insets for visible toolbar/navigation; single-threaded background processing, preview resolution 2000px, output capped to 8192px / 50MP for memory safety
 
 Not implemented: PhotoCraft engine integration, PSD editing, layers, masks, heal/clone, raw DNG pipeline, freeform crop handles, 16-bit colour, ICC profiles, metadata preservation. Do not label this as a PhotoCraft port or release until engine integration is real.
 
