@@ -28,6 +28,7 @@ import ai.storyteller.lightcraft.engine.DeviceMedia
 import ai.storyteller.lightcraft.engine.DevicePhoto
 import ai.storyteller.lightcraft.engine.Engine
 import ai.storyteller.lightcraft.engine.PhotoFiles
+import ai.storyteller.lightcraft.engine.SemanticMasker
 import ai.storyteller.lightcraft.engine.toImageBitmap
 import android.app.Application
 import android.net.Uri
@@ -43,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import androidx.lifecycle.AndroidViewModel
@@ -216,6 +218,8 @@ class EditorState(val photoId: ULong, info: PhotoInfo, val device: DeviceOrigin?
 
     /** Masking's sheet over the editor: `new` (create a mask) or `list` (the photo's masks), if open. */
     var maskPicker by mutableStateOf<String?>(null)
+    /** Offline semantic selection is running; prevents overlapping mask writes. */
+    var semanticMaskBusy by mutableStateOf(false)
 
     /** The colour or luminance range picker, while it's open (its sheet takes the rows' place). */
     var rangePicker by mutableStateOf<RangePicker?>(null)
@@ -2250,6 +2254,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** A new mask of [kind] (brush, linear, radial, placed in the middle of the view; a colour or luminance range, picked next). */
     fun addMask(kind: String) {
         val ed = editor ?: return
+        if (kind == "subject" || kind == "sky" || kind == "background") return addSemanticMask(kind, null)
         if (kind == "colorRange" || kind == "luminanceRange") return startRangeMask(kind, null)
         val params = shapeParams(ed, kind)
         ed.maskPicker = null
@@ -2264,6 +2269,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun addMaskPart(op: String, kind: String) {
         val ed = editor ?: return
         val mask = ed.selectedMask ?: return
+        if (kind == "subject" || kind == "sky" || kind == "background") return addSemanticMask(kind, op)
         if (kind == "colorRange" || kind == "luminanceRange") return startRangeMask(kind, op)
         val params = shapeParams(ed, kind).put("id", mask.toLong()).put("op", op)
         ed.maskPicker = null
@@ -2271,6 +2277,58 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             refreshMasks(lastPart = true)
             showNewMask(ed)
         }) { it.execute("mask.addComponent", params.toString()) }
+    }
+
+    /** Offline semantic inference, never on the UI thread. A completed compressed
+     * segmentation uses the existing Rust mask renderer at every output size.
+     */
+    private fun addSemanticMask(kind: String, op: String?) {
+        val ed = editor ?: return
+        val e = engine ?: return
+        if (ed.semanticMaskBusy) return
+        val maskId = if (op == null) null else (ed.selectedMask ?: return)
+        val photoId = ed.photoId
+        val title = when (kind) {
+            "subject" -> "Select Subject"
+            "sky" -> "Select Sky"
+            else -> "Select Background"
+        }
+        ed.maskPicker = null
+        ed.semanticMaskBusy = true
+        tell("Analysing image offline…")
+        viewModelScope.launch {
+            try {
+                // No crop, straightening or coloured overlay; mask coordinates
+                // refer to the uncropped, EXIF-oriented photograph.
+                val original = withContext(e.looks) {
+                    e.session.renderCropView(photoId, 512u, 512u, false)
+                        .toImageBitmap().asAndroidBitmap()
+                }
+                val segmentation = withContext(Dispatchers.Default) {
+                    SemanticMasker.segment(getApplication(), original, kind)
+                }
+                if (editor !== ed || ed.photoId != photoId) return@launch
+                val params = JSONObject().put("kind", "object").put("seg", segmentation)
+                val command = if (maskId == null) "mask.add" else "mask.addComponent"
+                if (maskId == null) params.put("name", title)
+                else params.put("id", maskId.toLong()).put("op", op)
+                val snap = e.command {
+                    execute(command, params.toString())
+                    snapshot(photoId)
+                }
+                if (editor === ed && ed.photoId == photoId) {
+                    ed.update(snap)
+                    ed.maskPart = if (maskId == null) 0 else ed.maskPart
+                    refreshMasks(lastPart = maskId != null)
+                    showNewMask(ed)
+                    requestView()
+                }
+            } catch (err: Exception) {
+                if (editor === ed) tell("Mask selection failed: ${err.message ?: "unknown error"}")
+            } finally {
+                ed.semanticMaskBusy = false
+            }
+        }
     }
 
     /**
