@@ -510,6 +510,21 @@ fn smart_auto_candidate_mode(
     candidate.shadows=candidate.shadows.clamp(if no_guards {-100.0}else{-35.0},if no_guards {100.0}else{35.0});
     candidate.highlights=candidate.highlights.clamp(if no_guards {-100.0}else{-35.0},if no_guards {100.0}else{20.0});
     candidate.curve_darks=candidate.curve_darks.clamp(if no_guards {-100.0}else{-24.0},if no_guards {100.0}else{24.0});
+    // Firelight photometry: an illuminated emitter must set its own
+    // exposure target rather than allowing the black background to dictate
+    // a +2 EV whole-frame lift. This is NOT the broad preview-quality guard:
+    // it only applies when a dark frame contains confirmed warm emitters.
+    // Recover wood and charcoal through editable local tonal controls.
+    if no_guards && intentional_light && warm_emitters as f64/n>0.002 {
+        candidate.exposure=((1.65-p995).max(0.0)*0.40)
+            .clamp(0.0,0.20);
+        if recoverable_fraction>0.012 {
+            candidate.shadows=candidate.shadows.max(
+                (10.0+90.0*recoverable_fraction).clamp(10.0,30.0).round());
+            candidate.curve_darks=candidate.curve_darks.max(
+                (8.0+72.0*recoverable_fraction).clamp(8.0,22.0).round());
+        }
+    }
     // Propose an image-dependent edit before any output-quality vetoes.
     (candidate,false)
 
@@ -2430,6 +2445,43 @@ mod studio_v0611_scene_auto_integration {
         assert!(!special || candidate.exposure==0.0);
         assert_eq!(candidate.exposure,0.0);
         assert_eq!(candidate.curve_lights,0.0);
+    }
+}
+
+#[cfg(test)]
+mod studio_v0613_emissive_auto_test {
+    use super::*;
+    #[test]
+    fn fire_on_dark_background_keeps_flame_exposure_without_disabling_shadows() {
+        let img=Rgb32f::from_fn(256,192,|x,y|{
+            // Dark charcoal with red embers and small bright orange flames.
+            if (105..152).contains(&x) && (28..136).contains(&y) {
+                if (x+y)%7==0 {[1.0,0.68,0.13]}
+                else {[0.82,0.37,0.06]}
+            }else if y>98 && (48..209).contains(&x) {
+                let v=0.045+((x*7+y*3)%23) as f32*0.002;
+                [v*1.55,v*0.48,v*0.22]
+            }else{[0.002,0.002,0.002]}
+        });
+        let out=smart_auto_tone_report_all_guards_off(
+            &img,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(out.final_tone.exposure<=0.20,
+            "flame highlights globally overexposed: {:?}",out.final_tone);
+        assert!(out.final_tone.shadows>0.0,
+            "detail in glowing charcoal could not be recovered: {:?}",out.final_tone);
+        assert_eq!(out.proposed,out.final_tone);
+    }
+
+    #[test]
+    fn dark_scene_without_warm_emitter_retains_unrestricted_exposure() {
+        let img=Rgb32f::from_fn(192,128,|x,y|{
+            let v=0.028+((x*7+y*9)%19) as f32*0.002;
+            [v*0.95,v,v*1.10]
+        });
+        let out=smart_auto_tone_report_all_guards_off(
+            &img,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(out.final_tone.exposure>0.20,
+            "normal dark scene should not inherit firelight exposure: {:?}",out.final_tone);
     }
 }
 
