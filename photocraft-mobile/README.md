@@ -1,0 +1,32 @@
+# Dennis Craft Mobile v0.1 (Android)
+
+A separate experimental phone-first offline photo editor for the Samsung Galaxy S23 Ultra, inspired by the mobile workflow demonstrated by the user. This is an Android Java proof-of-concept, NOT a port of PhotoCraft's Rust engine yet. It is independently named and has a distinct Android package com.dennis.craftmobile.
+
+Implemented:
+- Android Storage Access Framework image open (JPEG, HEIC and other Android-supported formats), including EXIF orientation through ImageDecoder
+- Live preview, original comparison by pressing Hold
+- Looks (Original, Natural, Warm, Cool, Dramatic, B&W)
+- Exposure, contrast, highlights, shadows, saturation, warmth, tint
+- Conservative histogram-based Auto, undo/redo
+- Centre crop ratios, 90-degree rotation
+- Offline export to Pictures/Dennis Craft Mobile and share sheet
+- No all-files permission, no network permission, no access to existing Dennis Photo Studio data
+- Single-threaded background processing, preview resolution 2000px, output capped to 8192px / 50MP for memory safety
+
+Not implemented: PhotoCraft engine integration, PSD editing, layers, masks, heal/clone, raw DNG pipeline, freeform crop handles, 16-bit colour, ICC profiles, metadata preservation. Do not label this as a PhotoCraft port or release until engine integration is real.
+
+## Build
+
+Requires JDK 17 and Android SDK 35 and Gradle 8.10.2.
+
+    gradle -p photocraft-mobile assembleDebug
+
+GitHub Actions automatically produces an APK as a workflow artifact when this feature branch receives a push.
+
+## Why separate?
+
+The production Dennis Photo Studio code is not modified. This app lives in its own photocraft-mobile directory on an isolated feature branch and uses a different Android package. Migration to a dedicated repository can occur before future releases.
+
+## Planned PhotoCraft integration
+
+Evaluate the existing arm64 Android shell from kanaaka/photocraft-android pinned to PhotoCraft 0.7 and replace the desktop egui shell with a mobile-first Kotlin/Java to Rust JNI command bridge. Audit source and licence, then implement native colour processing with real masks, layers and composite/export parity. PhotoCraft is MIT OR Apache-2.0, however ArtCraft trademarks and brand assets must not be reused in a modified product.
