@@ -226,12 +226,128 @@ fn analyse_micro_linear(img:&Rgb32f,lum:&[f32])->MicroSceneEvidence {
     r
 }
 
+
+/// Experimental 128×128 confirmation for coherent, near-white subjects.
+/// Tiny tiles do not control global metering or spatially edit pixels.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+pub struct NanoSceneEvidence {
+    pub grid_side:usize,
+    pub usable_zones:usize,
+    pub neutral_white_zones:usize,
+    pub near_clip_white_zones:usize,
+    pub dark_surround_zones:usize,
+    pub largest_white_cluster:usize,
+    pub neutral_white_coverage:f64,
+    pub near_clip_coverage:f64,
+    pub dark_surround_coverage:f64,
+    /// Only a spatially connected, bright neutral object against darker
+    /// surroundings can support stronger high-resolution highlight metering.
+    pub neutral_white_subject:bool,
+}
+const NANO_SIDE:usize=128;
+const NANO_ZONES:usize=NANO_SIDE*NANO_SIDE;
+
+#[derive(Clone, Copy, Default)]
+struct NanoCell {
+    count:u16,
+    neutral_white:u16,
+    near_clip_white:u16,
+    dark:u16,
+}
+
+/// Analyse the same linear 512px Smart Auto proxy as the 3/32/64 grids.
+/// Typical 512×384 photos give ~12 samples per 128×128 cell; low-sample
+/// and highly elongated images fall back to the existing 64×64 logic.
+/// Require contiguous white *groups*, not independent JPEG halo pixels.
+fn analyse_nano_linear(img:&Rgb32f,lum:&[f32])->NanoSceneEvidence {
+    let mut report=NanoSceneEvidence {grid_side:NANO_SIDE,..Default::default()};
+    if img.width<256 || img.height<256 {return report;}
+    let mut cells=vec![NanoCell::default();NANO_ZONES];
+    for y in 0..img.height {
+        for x in 0..img.width {
+            let i=y*img.width+x;
+            let zone=(y*NANO_SIDE/img.height).min(NANO_SIDE-1)*NANO_SIDE
+                +(x*NANO_SIDE/img.width).min(NANO_SIDE-1);
+            let p=lum[i];
+            let c=&mut cells[zone];
+            c.count+=1;
+            let rgb=img.data[i];
+            if p>0.82 && rgb[0]>0.75 && rgb[1]>0.75 && rgb[2]>0.75 {
+                c.neutral_white+=1;
+                if p>0.93 && rgb[0]>0.91 && rgb[1]>0.91 && rgb[2]>0.91 {
+                    c.near_clip_white+=1;
+                }
+            }
+            if p<0.35 {c.dark+=1;}
+        }
+    }
+    let mut mask=vec![false;NANO_ZONES];
+    for (index,c) in cells.iter().enumerate() {
+        if c.count<8 {continue;}
+        report.usable_zones+=1;
+        let n=c.count as f64;
+        if c.neutral_white as f64/n>=0.50 {
+            report.neutral_white_zones+=1;
+            mask[index]=true;
+        }
+        if c.near_clip_white as f64/n>=0.50 {
+            report.near_clip_white_zones+=1;
+        }
+        if c.dark as f64/n>0.65 {report.dark_surround_zones+=1;}
+    }
+    // A meaningful fraction of the fine grid must have enough samples.
+    // In particular, do not trust single-pixel zones on resized thumbnails.
+    if report.usable_zones<256 {return report;}
+    let n=report.usable_zones as f64;
+    report.neutral_white_coverage=report.neutral_white_zones as f64/n;
+    report.near_clip_coverage=report.near_clip_white_zones as f64/n;
+    report.dark_surround_coverage=report.dark_surround_zones as f64/n;
+
+    // 8-connected white tiles belong to coherent photographed structures.
+    // This deliberately rejects isolated sparkle/hot pixel/small JPEG halos.
+    let mut seen=vec![false;NANO_ZONES];
+    let mut stack=Vec::new();
+    for start in 0..NANO_ZONES {
+        if !mask[start] || seen[start] {continue;}
+        seen[start]=true;
+        stack.push(start);
+        let mut connected=0usize;
+        while let Some(i)=stack.pop() {
+            connected+=1;
+            let x=i%NANO_SIDE;
+            let y=i/NANO_SIDE;
+            for dy in -1i32..=1 {
+                for dx in -1i32..=1 {
+                    if dx==0 && dy==0 {continue;}
+                    let nx=x as i32+dx;
+                    let ny=y as i32+dy;
+                    if nx<0 || ny<0 || nx>=NANO_SIDE as i32 || ny>=NANO_SIDE as i32 {
+                        continue;
+                    }
+                    let j=ny as usize*NANO_SIDE+nx as usize;
+                    if mask[j] && !seen[j] {
+                        seen[j]=true;
+                        stack.push(j);
+                    }
+                }
+            }
+        }
+        report.largest_white_cluster=report.largest_white_cluster.max(connected);
+    }
+    report.neutral_white_subject=report.largest_white_cluster>=12
+        && report.neutral_white_coverage>=0.001
+        && report.neutral_white_coverage<0.32
+        && report.dark_surround_coverage>0.25;
+    report
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
 pub struct ZonalSceneEvidence {
     /// Row-major 3x3 zones (top-left to bottom-right).
     pub zones:[ZoneEvidence;9],
     pub fine:FineSceneEvidence,
     pub micro:MicroSceneEvidence,
+    pub nano:NanoSceneEvidence,
     pub luminous_zones:usize,
     pub shadow_detail_zones:usize,
     pub tonal_separation:f64,
@@ -349,6 +465,7 @@ pub fn analyse_linear(img:&Rgb32f)->ZonalSceneEvidence {
     ZonalSceneEvidence {
         zones,fine:analyse_fine_linear(img,&lum),
         micro:analyse_micro_linear(img,&lum),
+        nano:analyse_nano_linear(img,&lum),
         luminous_zones,shadow_detail_zones,tonal_separation,
         bright_surround_dark_detail,dark_texture_with_bright_reference,
         proposed_shadow_recovery:strength.round(),
@@ -359,6 +476,73 @@ pub fn analyse_linear(img:&Rgb32f)->ZonalSceneEvidence {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn nano_grid_recognises_coherent_bright_moon_without_lifting_dark_sky() {
+        let img=Rgb32f::from_fn(512,384,|x,y|{
+            let dx=x as i32-256;
+            let dy=y as i32-192;
+            if dx*dx+dy*dy<38*38 {[0.97,0.96,0.95]}
+            else {[0.004,0.004,0.004]}
+        });
+        let z=analyse_linear(&img);
+        assert_eq!(z.nano.grid_side,128);
+        assert_eq!(z.nano.usable_zones,NANO_ZONES);
+        assert!(z.nano.neutral_white_subject,"128x128 Moon missed: {:?}",z.nano);
+        assert!(z.nano.largest_white_cluster>12);
+        assert!(z.nano.near_clip_coverage>0.005);
+    }
+
+    #[test]
+    fn nano_grid_recognises_connected_white_flower_on_dark_green() {
+        let img=Rgb32f::from_fn(512,384,|x,y|{
+            let dx=(x as i32-256).abs();
+            let dy=(y as i32-192).abs();
+            let petals=(dx<26&&dy<145)||(dy<23&&dx<190)
+                ||(dx+dy<156&&dx>28&&dy>28);
+            if petals {[0.97,0.97,0.97]}
+            else {
+                let t=((x*5+y*3)%11) as f32*0.003;
+                [0.07+t,0.17+t,0.045+t]
+            }
+        });
+        let z=analyse_linear(&img);
+        assert!(z.nano.neutral_white_subject,"128x128 petals missed: {:?}",z.nano);
+        assert!(z.nano.dark_surround_coverage>0.25);
+    }
+
+    #[test]
+    fn nano_grid_rejects_isolated_hot_pixels_and_warm_flame() {
+        let isolated=Rgb32f::from_fn(512,384,|x,y|{
+            if x%64<4 && y%64<4 {[0.99,0.99,0.99]}
+            else {[0.003,0.003,0.003]}
+        });
+        let z=analyse_linear(&isolated);
+        assert!(!z.nano.neutral_white_subject,"hot pixels triggered subject: {:?}",z.nano);
+        let fire=Rgb32f::from_fn(512,384,|x,y|{
+            if (214..301).contains(&x)&&(105..254).contains(&y) {
+                [0.99,0.58,0.09]
+            }else{[0.004,0.004,0.004]}
+        });
+        let z=analyse_linear(&fire);
+        assert_eq!(z.nano.neutral_white_zones,0);
+        assert!(!z.nano.neutral_white_subject);
+    }
+
+    #[test]
+    fn nano_grid_rejects_wide_white_sky_and_small_images() {
+        let white_sky=Rgb32f::from_fn(512,384,|_,y|{
+            if y<190 {[0.97,0.97,0.97]}
+            else {[0.10,0.18,0.08]}
+        });
+        let z=analyse_linear(&white_sky);
+        assert!(!z.nano.neutral_white_subject,
+            "large bright sky misread as isolated subject: {:?}",z.nano);
+        let tiny=Rgb32f::filled(256,192,[0.96,0.96,0.96]);
+        let z=analyse_linear(&tiny);
+        assert_eq!(z.nano.usable_zones,0);
+        assert!(!z.nano.neutral_white_subject);
+    }
+
     #[test]
     fn micro_grid_recognises_small_neutral_moon_on_black_sky() {
         let img=Rgb32f::from_fn(256,192,|x,y|{
