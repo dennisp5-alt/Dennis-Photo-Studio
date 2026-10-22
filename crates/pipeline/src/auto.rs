@@ -303,8 +303,19 @@ fn smart_auto_candidate_mode(
     let zonal_darks=if zonal_shadow>0.0 {
         zonal.proposed_darks_curve
     }else{0.0};
-    let shadows=shadows.max(zonal_shadow);
-    let curve_darks=curve_darks.max(zonal_darks);
+    // The 32×32 layer is additional scene evidence, not a per-cell mask.
+    // Give small recoverable subjects a modest adjustment when they are
+    // diluted into a 3×3 zone. On already successful photographs this
+    // changes nothing because the current proposal stays dominant.
+    // Keep legacy guarded mode bit-for-bit on the established branch path.
+    let fine_shadow=if no_guards && zonal.fine.mixed_light_shadow_detail {
+        zonal.fine.proposed_shadow_recovery
+    }else{0.0};
+    let fine_darks=if fine_shadow>0.0 {
+        zonal.fine.proposed_darks_curve
+    }else{0.0};
+    let shadows=shadows.max(zonal_shadow).max(fine_shadow);
+    let curve_darks=curve_darks.max(zonal_darks).max(fine_darks);
 
     // Midtone luminance repair is separate from shadow lift. A sunset with
     // already appropriate upper midtones should not get a default +5.
@@ -2445,6 +2456,44 @@ mod studio_v0611_scene_auto_integration {
         assert!(!special || candidate.exposure==0.0);
         assert_eq!(candidate.exposure,0.0);
         assert_eq!(candidate.curve_lights,0.0);
+    }
+}
+
+#[cfg(test)]
+mod studio_v0614_fine_evidence_test {
+    use super::*;
+
+    #[test]
+    fn tiny_dark_subject_in_bright_surroundings_gets_editable_fine_shadow_evidence() {
+        let img=Rgb32f::from_fn(256,192,|x,y|{
+            if (124..147).contains(&x) && (88..115).contains(&y) {
+                let t=((x*17+y*23)%13) as f32*0.004;
+                [0.055+t,0.067+t,0.052+t]
+            }else{[0.62,0.65,0.67]}
+        });
+        let info=SourceInfo::default();
+        let settings=DevelopSettings::default();
+        let evidence=crate::scene::analyse_linear(&img);
+        assert!(evidence.fine.mixed_light_shadow_detail);
+        let candidate=smart_auto_tone_report_all_guards_off(&img,&info,&settings);
+        assert!(candidate.final_tone.shadows>=7.0,
+            "32×32 recoverable shadow not included: {:?}",candidate.final_tone);
+        assert!(candidate.final_tone.curve_darks>=3.0,
+            "32×32 darks curve not included: {:?}",candidate.final_tone);
+        assert_eq!(candidate.final_tone,candidate.proposed);
+    }
+
+    #[test]
+    fn fine_grid_does_not_add_tonal_adjustments_to_flat_finished_photo() {
+        let img=Rgb32f::filled(256,192,[0.30,0.31,0.32]);
+        let info=SourceInfo::default();
+        let settings=DevelopSettings::default();
+        let evidence=crate::scene::analyse_linear(&img);
+        assert!(!evidence.fine.mixed_light_shadow_detail);
+        assert_eq!(evidence.fine.proposed_shadow_recovery,0.0);
+        assert_eq!(evidence.fine.proposed_darks_curve,0.0);
+        let candidate=smart_auto_tone_report_all_guards_off(&img,&info,&settings);
+        assert!(candidate.final_tone.exposure.is_finite());
     }
 }
 
