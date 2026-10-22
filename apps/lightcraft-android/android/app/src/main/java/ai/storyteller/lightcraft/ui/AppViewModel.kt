@@ -620,7 +620,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun say(text: String?, actionLabel: String? = null, action: (() -> Unit)? = null, brief: Boolean = false) {
+    private fun say(text: String?, actionLabel: String? = null, brief: Boolean = false, action: (() -> Unit)? = null) {
         messages.trySend(UiMessage(text ?: "Something went wrong", actionLabel, action, brief))
     }
 
