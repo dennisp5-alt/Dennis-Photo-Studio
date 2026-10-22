@@ -2565,7 +2565,7 @@ mod studio_v0616_nano_highlight_test {
     fn v0616_dark_scene_with_a_warm_flame_uses_existing_firelight_policy() {
         let img=Rgb32f::from_fn(512,384,|x,y|{
             if (214..301).contains(&x)&&(105..254).contains(&y) {
-                [0.99,0.58,0.09]
+                [1.0,0.65,0.09]
             }else{[0.004,0.004,0.004]}
         });
         let z=crate::scene::analyse_linear(&img);
