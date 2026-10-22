@@ -53,6 +53,8 @@ public final class MainActivity extends Activity {
         float[] autoZones;  // Immutable zone map measured on original preview.
         float autoStrength = 100f;
         float luminanceNR, colorNR, sharpen, clarity, texture, dehaze;
+        // Colour gains estimated only when spatial neutral evidence is convincing.
+        float wbRed = 1f, wbGreen = 1f, wbBlue = 1f, wbConfidence;
         Edit copy() {
             Edit d = new Edit();
             d.exposure = exposure; d.contrast = contrast; d.highlights = highlights;
@@ -61,6 +63,8 @@ public final class MainActivity extends Activity {
             d.autoZones = autoZones; d.autoStrength = autoStrength;
             d.luminanceNR = luminanceNR; d.colorNR = colorNR; d.sharpen = sharpen;
             d.clarity = clarity; d.texture = texture; d.dehaze = dehaze;
+            d.wbRed = wbRed; d.wbGreen = wbGreen; d.wbBlue = wbBlue;
+            d.wbConfidence = wbConfidence;
             return d;
         }
     }
@@ -601,11 +605,12 @@ public final class MainActivity extends Activity {
             return;
         }
         int serial = generation.incrementAndGet();
-        status.setText("AUTO  •  Analysing 64×64 scene zones…");
+        status.setText("AUTO  •  64×64 tone, detail and white balance…");
         work.execute(() -> {
             try {
                 SpatialAuto64.Scene scene = SpatialAuto64.analyse(original);
                 DetailEngine.Recommended details = DetailEngine.analyse(original);
+                AutoWhiteBalance.Estimate whiteBalance = AutoWhiteBalance.analyse(original);
                 ui.post(() -> {
                     if (serial != generation.get() || previewSource != original) return;
                     checkpoint();
@@ -616,6 +621,10 @@ public final class MainActivity extends Activity {
                     edit.saturation = 0f;
                     edit.warmth = 0f;
                     edit.tint = 0f;
+                    edit.wbRed = whiteBalance.red;
+                    edit.wbGreen = whiteBalance.green;
+                    edit.wbBlue = whiteBalance.blue;
+                    edit.wbConfidence = whiteBalance.confidence;
                     edit.autoZones = scene.zones;
                     edit.autoStrength = 100f;
                     edit.look = "Auto";
@@ -626,8 +635,10 @@ public final class MainActivity extends Activity {
                     render();
                     drawControls();
                     Toast.makeText(this, String.format(Locale.US,
-                            "64×64 Auto: %+.2f EV · bright pixels protected",
-                            scene.exposure), Toast.LENGTH_LONG).show();
+                            "64×64 Auto: %+.2f EV · WB %s",
+                            scene.exposure, whiteBalance.confidence > 0f ?
+                                    "corrected" : "preserved"),
+                            Toast.LENGTH_LONG).show();
                 });
             } catch (RuntimeException | OutOfMemoryError failure) {
                 showError("Auto analysis failed: " + failure.getMessage());
@@ -712,8 +723,9 @@ public final class MainActivity extends Activity {
                     renderedPreview = output; photo.setImageBitmap(output);
                     if ("Auto".equals(snapshot.look) && snapshot.autoZones != null) {
                         status.setText(String.format(Locale.US,
-                                "64×64 AUTO  •  %+.2f EV  •  Strength %.0f%%  •  Highlights safe",
-                                snapshot.exposure, snapshot.autoStrength));
+                                "64×64 AUTO  •  %+.2f EV  •  %.0f%%  •  WB %s",
+                                snapshot.exposure, snapshot.autoStrength,
+                                snapshot.wbConfidence > 0f ? "corrected" : "preserved"));
                     } else {
                         status.setText("Live preview · JPEG export Q" + jpegQuality);
                     }
@@ -793,8 +805,34 @@ public final class MainActivity extends Activity {
                     if (scale > 1f && maxChannel > 0f) {
                         scale = Math.min(scale, .997f/maxChannel);
                     }
+                    float baseR = r0*scale, baseG = g0*scale, baseB = b0*scale;
+                    if (e.wbConfidence > 0f || warmth != 0f || tint != 0f) {
+                        // Hue-neutral WB: preserve local luminance and retain headroom.
+                        // Saturated subject colours and nearly white pixels are
+                        // protected; manual Warmth/Tint remain independently usable.
+                        float chroma = (maxChannel-Math.min(r0,Math.min(g0,b0))) /
+                                Math.max(.01f,maxChannel);
+                        float colourGate=(1f-.35f*SpatialAuto64.smoothstep(
+                                .20f,.65f,chroma)) *
+                                (1f-.78f*SpatialAuto64.smoothstep(.84f,.99f,maxChannel));
+                        float dr = baseR*(e.wbRed-1f)*strength*colourGate +
+                                (warmth+tint)*colourGate;
+                        float dg = baseG*(e.wbGreen-1f)*strength*colourGate -
+                                tint*colourGate;
+                        float db = baseB*(e.wbBlue-1f)*strength*colourGate +
+                                (-warmth+tint)*colourGate;
+                        float deltaLum = .2126f*dr+.7152f*dg+.0722f*db;
+                        baseR += dr-deltaLum;
+                        baseG += dg-deltaLum;
+                        baseB += db-deltaLum;
+                        float upper=Math.max(baseR,Math.max(baseG,baseB));
+                        if (upper>.997f) {
+                            float keep=.997f/upper;
+                            baseR*=keep; baseG*=keep; baseB*=keep;
+                        }
+                    }
                     pixels[x] = Color.argb(Color.alpha(pixel),
-                            quant(r0*scale),quant(g0*scale),quant(b0*scale));
+                            quant(baseR),quant(baseG),quant(baseB));
                     continue;
                 }
                 float r = Color.red(pixel)/255f * multiplier;
@@ -897,13 +935,13 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.5")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
-                        "tone/colour adjustments, 64×64 Auto, luminance/chroma NR, sharpening, " +
+                        "tone/colour adjustments, 64×64 Auto WB, luminance/chroma NR, sharpening, " +
                         "clarity, texture, contrast dehaze, centre crop, rotate, " +
                         "undo/redo, press-and-hold before view, export and share.\n\n" +
-                        "Auto analyses noise and detail from 64×64 local probes. Each detail group also has " +
+                        "Auto WB uses cautious neutral samples, avoids colourful subjects and skips uncertain scenes. Auto analyses noise and detail from 64×64 local probes. Each detail group also has " +
                         "its own Auto button and six manual sliders. Dehaze is a contrast-based " +
                         "approximation, not a depth map. " +
                         "Limitations: no healing, local masks, layers or RAW workflow yet. " +
