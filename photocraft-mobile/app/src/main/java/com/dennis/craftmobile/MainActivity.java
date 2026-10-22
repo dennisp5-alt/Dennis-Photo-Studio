@@ -40,9 +40,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public final class MainActivity extends Activity {
     private static final int OPEN_IMAGE = 701;
-    private static final int BG = Color.rgb(11, 12, 15);
-    private static final int PANEL = Color.rgb(20, 23, 29);
-    private static final int ACCENT = Color.rgb(40, 132, 242);
+    private static final int BG = Color.rgb(8, 12, 19);
+    private static final int PANEL = Color.rgb(13, 21, 32);
+    private static final int ACCENT = Color.rgb(36, 136, 255);
 
     private enum Mode { LOOKS, ADJUST, CROP }
     private static final class Edit {
@@ -125,12 +125,23 @@ public final class MainActivity extends Activity {
 
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(dp(6), dp(3), dp(6), dp(3));
-        root.addView(bar, new LinearLayout.LayoutParams(-1, dp(58)));
-        toolbar(bar, "Open", this::openImage);
-        toolbar(bar, "?", this::about);
-        toolbar(bar, "Auto", this::autoTune);
-        TextView compare = label("Hold", 12, Color.WHITE);
+        bar.setPadding(dp(8), dp(3), dp(8), dp(3));
+        bar.setBackgroundColor(Color.rgb(13, 20, 30));
+        root.addView(bar, new LinearLayout.LayoutParams(-1, dp(62)));
+        toolbar(bar, "＋", this::openImage);
+        LinearLayout brand = new LinearLayout(this);
+        brand.setOrientation(LinearLayout.VERTICAL);
+        brand.setGravity(Gravity.CENTER_VERTICAL);
+        TextView brandTop = label("DENNIS CRAFT", 13, Color.WHITE);
+        brandTop.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        brandTop.setTypeface(android.graphics.Typeface.create("sans-serif-medium", 0));
+        TextView brandSub = label("MOBILE PHOTO STUDIO", 9, Color.rgb(112, 163, 222));
+        brandSub.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        brand.addView(brandTop, new LinearLayout.LayoutParams(-1, dp(22)));
+        brand.addView(brandSub, new LinearLayout.LayoutParams(-1, dp(15)));
+        bar.addView(brand, new LinearLayout.LayoutParams(0, -1, 1));
+        TextView compare = label("◫", 24, Color.WHITE);
+        compare.setContentDescription("Hold to compare with the original");
         compare.setOnTouchListener((v, event) -> {
             if (previewSource == null) return true;
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
@@ -144,9 +155,9 @@ public final class MainActivity extends Activity {
             return true;
         });
         bar.addView(compare, new LinearLayout.LayoutParams(0, dp(48), 1));
-        toolbar(bar, "Undo", this::undo);
-        toolbar(bar, "Redo", this::redo);
-        toolbar(bar, "Save", () -> save(false));
+        toolbar(bar, "↶", this::undo);
+        toolbar(bar, "↷", this::redo);
+        toolbar(bar, "⇩", this::exportDialog);
 
         canvas = new FrameLayout(this);
         root.addView(canvas, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -154,61 +165,130 @@ public final class MainActivity extends Activity {
         photo.setScaleType(ImageView.ScaleType.FIT_CENTER);
         photo.setBackgroundColor(BG);
         canvas.addView(photo, new FrameLayout.LayoutParams(-1, -1));
-        openPlaceholder = label("DENNIS CRAFT MOBILE\n\nOpen a photo to start editing\n\nTap here", 19, Color.LTGRAY);
+        openPlaceholder = label("◉\n\nDENNIS CRAFT MOBILE\n\nProfessional photo editing, offline.\n\n＋  TAP TO OPEN PHOTO", 18, Color.rgb(212, 229, 245));
         openPlaceholder.setOnClickListener(v -> openImage());
         canvas.addView(openPlaceholder, new FrameLayout.LayoutParams(-1, -1));
 
-        status = label("Offline · Original preserved", 11, Color.LTGRAY);
+        status = label("OFFLINE  •  ORIGINAL PRESERVED  •  JPEG Q95", 10, Color.rgb(148, 173, 198));
+        status.setBackgroundColor(Color.rgb(12, 21, 32));
         root.addView(status, new LinearLayout.LayoutParams(-1, dp(24)));
 
         controls = new LinearLayout(this);
         controls.setBackgroundColor(PANEL);
         controls.setOrientation(LinearLayout.VERTICAL);
-        root.addView(controls, new LinearLayout.LayoutParams(-1, dp(184)));
+        root.addView(controls, new LinearLayout.LayoutParams(-1, dp(189)));
 
         tabs = new LinearLayout(this);
         tabs.setGravity(Gravity.CENTER_VERTICAL);
-        tabs.setBackgroundColor(Color.rgb(13, 16, 20));
-        root.addView(tabs, new LinearLayout.LayoutParams(-1, dp(69)));
+        tabs.setBackgroundColor(Color.rgb(9, 16, 25));
+        root.addView(tabs, new LinearLayout.LayoutParams(-1, dp(72)));
         drawTabs(); drawControls();
     }
 
     private void toolbar(LinearLayout row, String title, Runnable callback) {
-        TextView v = label(title, 12, Color.WHITE);
+        TextView v = label(title, 24, Color.rgb(231, 242, 255));
+        v.setContentDescription(title.equals("⇩") ? "Export image" :
+                title.equals("＋") ? "Choose photo" : title);
         v.setOnClickListener(x -> callback.run());
-        row.addView(v, new LinearLayout.LayoutParams(0, dp(48), 1));
+        row.addView(v, new LinearLayout.LayoutParams(dp(41), dp(52)));
     }
 
     private void drawTabs() {
         tabs.removeAllViews();
-        tab("Looks", Mode.LOOKS);
-        tab("Adjust", Mode.ADJUST);
-        tab("Crop", Mode.CROP);
-        TextView more = label("More", 14, Color.LTGRAY);
-        more.setOnClickListener(x -> more());
-        tabs.addView(more, new LinearLayout.LayoutParams(0, -1, 1));
+        tab("Looks", "◉", mode == Mode.LOOKS, () -> selectMode(Mode.LOOKS));
+        tab("Adjust", "☷", mode == Mode.ADJUST, () -> selectMode(Mode.ADJUST));
+        tab("Auto", "✦", false, this::autoTune);
+        tab("Crop", "⌗", mode == Mode.CROP, () -> selectMode(Mode.CROP));
+        tab("More", "•••", false, this::more);
     }
 
-    private void tab(String name, Mode selection) {
-        TextView v = label(name, 14, mode == selection ? ACCENT : Color.LTGRAY);
-        v.setOnClickListener(x -> { mode = selection; drawTabs(); drawControls(); });
-        tabs.addView(v, new LinearLayout.LayoutParams(0, -1, 1));
+    private void selectMode(Mode newMode) {
+        mode = newMode;
+        drawTabs();
+        drawControls();
+    }
+
+    private void tab(String name, String glyph, boolean active, Runnable callback) {
+        LinearLayout group = new LinearLayout(this);
+        group.setOrientation(LinearLayout.VERTICAL);
+        group.setGravity(Gravity.CENTER);
+        int tint = active ? ACCENT : Color.rgb(179, 195, 213);
+        TextView icon = label(glyph, 22, tint);
+        TextView caption = label(name, 11, tint);
+        group.addView(icon, new LinearLayout.LayoutParams(-1, dp(31)));
+        group.addView(caption, new LinearLayout.LayoutParams(-1, dp(22)));
+        group.setContentDescription(name);
+        group.setOnClickListener(v -> callback.run());
+        tabs.addView(group, new LinearLayout.LayoutParams(0, -1, 1));
+    }
+
+    private void panelTitle(String heading, String description) {
+        LinearLayout row = new LinearLayout(this);
+        row.setPadding(dp(16), dp(3), dp(14), dp(2));
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = label(heading, 13, Color.WHITE);
+        title.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        title.setTypeface(android.graphics.Typeface.create("sans-serif-medium", 0));
+        row.addView(title, new LinearLayout.LayoutParams(0, -1, 1));
+        TextView info = label(description, 11, Color.rgb(144, 164, 186));
+        row.addView(info, new LinearLayout.LayoutParams(-2, -1));
+        controls.addView(row, new LinearLayout.LayoutParams(-1, dp(40)));
+    }
+
+    private Edit presetFor(String name) {
+        Edit v = new Edit();
+        v.look = name;
+        switch (name) {
+            case "Natural": v.contrast = 9; v.shadows = 10; v.saturation = 5; break;
+            case "Warm": v.contrast = 7; v.warmth = 24; v.saturation = 9; break;
+            case "Cool": v.contrast = 8; v.warmth = -25; v.saturation = 4; break;
+            case "Dramatic": v.contrast = 30; v.highlights = -24;
+                v.shadows = -12; v.saturation = -8; break;
+            case "B&W": v.contrast = 15; v.saturation = -100; break;
+        }
+        return v;
     }
 
     private void addHorizontalChoices(String[] names, java.util.function.Consumer<String> consumer) {
         HorizontalScrollView scroll = new HorizontalScrollView(this);
         scroll.setHorizontalScrollBarEnabled(false);
         LinearLayout strip = new LinearLayout(this);
-        strip.setGravity(Gravity.CENTER_VERTICAL);
-        strip.setPadding(dp(10), dp(8), dp(10), dp(8));
+        strip.setPadding(dp(11), dp(2), dp(11), 0);
+        strip.setGravity(Gravity.TOP);
         scroll.addView(strip);
+        Bitmap tiny = (previewSource != null && mode == Mode.LOOKS) ?
+                Bitmap.createScaledBitmap(previewSource, 120, 90, true) : null;
         for (String name : names) {
-            TextView choice = touchButton(name, () -> consumer.accept(name));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, dp(58));
-            lp.setMargins(dp(4), 0, dp(4), 0);
-            strip.addView(choice, lp);
+            LinearLayout cell = new LinearLayout(this);
+            cell.setOrientation(LinearLayout.VERTICAL);
+            cell.setGravity(Gravity.CENTER_HORIZONTAL);
+            cell.setPadding(dp(3), dp(3), dp(3), dp(3));
+            boolean active = name.equals(edit.look) && mode == Mode.LOOKS;
+            GradientDrawable border = background(
+                    active ? Color.rgb(19, 60, 105) : Color.rgb(26, 39, 56), 11);
+            border.setStroke(dp(active ? 2 : 1),
+                    active ? ACCENT : Color.rgb(44, 61, 82));
+            cell.setBackground(border);
+            if (tiny != null) {
+                ImageView swatch = new ImageView(this);
+                swatch.setImageBitmap(process(tiny, presetFor(name)));
+                swatch.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                cell.addView(swatch, new LinearLayout.LayoutParams(dp(88), dp(75)));
+            } else {
+                TextView glyph = label(mode == Mode.LOOKS ? "◉" : "⌗", 24,
+                        Color.rgb(118, 167, 220));
+                glyph.setBackground(background(Color.rgb(35, 56, 79), 8));
+                cell.addView(glyph, new LinearLayout.LayoutParams(dp(88), dp(75)));
+            }
+            TextView caption = label(name, 11,
+                    active ? Color.WHITE : Color.rgb(183, 200, 217));
+            cell.addView(caption, new LinearLayout.LayoutParams(dp(88), dp(30)));
+            cell.setOnClickListener(v -> consumer.accept(name));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(94), dp(114));
+            lp.setMargins(dp(3), 0, dp(3), 0);
+            strip.addView(cell, lp);
         }
-        controls.addView(scroll, new LinearLayout.LayoutParams(-1, dp(83)));
+        controls.addView(scroll, new LinearLayout.LayoutParams(-1, dp(139)));
     }
 
     private void addActionStrip() {
@@ -233,6 +313,24 @@ public final class MainActivity extends Activity {
         row.addView(button, p);
     }
 
+    private void exportDialog() {
+        if (input == null) { openImage(); return; }
+        String[] options = {"85 · Smaller file", "90 · High quality",
+                "95 · Very high quality", "100 · Maximum JPEG quality"};
+        int selected = jpegQuality == 85 ? 0 : jpegQuality == 90 ? 1 :
+                jpegQuality == 100 ? 3 : 2;
+        new AlertDialog.Builder(this)
+                .setTitle("Export JPEG")
+                .setSingleChoiceItems(options, selected, (dialog, position) -> {
+                    jpegQuality = new int[]{85, 90, 95, 100}[position];
+                    status.setText("READY TO EXPORT  •  JPEG Q" + jpegQuality);
+                })
+                .setPositiveButton("SAVE PHOTO", (dialog, which) -> save(false))
+                .setNeutralButton("SHARE", (dialog, which) -> save(true))
+                .setNegativeButton("CANCEL", null)
+                .show();
+    }
+
     private void chooseQuality() {
         String[] options = {"85 · Smaller file", "90 · High quality",
                 "95 · Very high (default)", "100 · Maximum JPEG quality"};
@@ -252,13 +350,12 @@ public final class MainActivity extends Activity {
 
     private void drawControls() {
         controls.removeAllViews();
-        addActionStrip();
         if (mode == Mode.LOOKS) {
-            controls.addView(label("LOOKS  •  Original / Natural / Warm / Cool / Dramatic / B&W", 12,
-                    Color.LTGRAY), new LinearLayout.LayoutParams(-1, dp(38)));
+            panelTitle("LOOKS", "Tap a style to apply");
             addHorizontalChoices(new String[]{"Original", "Natural", "Warm", "Cool", "Dramatic", "B&W"},
                     this::applyLook);
         } else if (mode == Mode.ADJUST) {
+            panelTitle("ADJUSTMENTS", "Fine tune your photo");
             HorizontalScrollView scroll = new HorizontalScrollView(this);
             scroll.setHorizontalScrollBarEnabled(false);
             LinearLayout options = new LinearLayout(this);
@@ -270,11 +367,10 @@ public final class MainActivity extends Activity {
                 options.addView(v);
             }
             scroll.addView(options);
-            controls.addView(scroll, new LinearLayout.LayoutParams(-1, dp(46)));
+            controls.addView(scroll, new LinearLayout.LayoutParams(-1, dp(43)));
             showSlider();
         } else {
-            controls.addView(label("CROP  •  Centre crop for now", 13, Color.LTGRAY),
-                    new LinearLayout.LayoutParams(-1, dp(38)));
+            panelTitle("CROP & ROTATE", "Non-destructive preview");
             addHorizontalChoices(new String[]{"Original", "1:1", "4:5", "16:9", "Rotate 90°"},
                     choice -> {
                         if (previewSource == null) { openImage(); return; }
@@ -429,12 +525,26 @@ public final class MainActivity extends Activity {
     }
 
     private void openImage() {
-        Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        pick.addCategory(Intent.CATEGORY_OPENABLE);
-        pick.setType("image/*");
-        pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION |
-                Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-        startActivityForResult(pick, OPEN_IMAGE);
+        // Android 13+ has the system photo picker built in; no storage permissions.
+        Intent pick;
+        if (Build.VERSION.SDK_INT >= 33) {
+            pick = new Intent(MediaStore.ACTION_PICK_IMAGES);
+            pick.setType("image/*");
+        } else {
+            // Compatible fallback when the platform Photo Picker is unavailable.
+            pick = new Intent(Intent.ACTION_GET_CONTENT);
+            pick.addCategory(Intent.CATEGORY_OPENABLE);
+            pick.setType("image/*");
+        }
+        pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivityForResult(pick, OPEN_IMAGE);
+        } catch (android.content.ActivityNotFoundException ex) {
+            Intent legacy = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            legacy.addCategory(Intent.CATEGORY_OPENABLE);
+            legacy.setType("image/*");
+            startActivityForResult(legacy, OPEN_IMAGE);
+        }
     }
     @Override protected void onActivityResult(int code, int result, Intent data) {
         super.onActivityResult(code, result, data);
@@ -599,23 +709,24 @@ public final class MainActivity extends Activity {
     }
 
     private void more() {
-        String[] options = {"Open another photo", "Share edited photo", "Reset edits",
+        String[] options = {"Modern photo picker", "Export / share", "JPEG quality", "Reset edits",
                 "About / limitations"};
         new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile")
                 .setItems(options, (dialog, which) -> {
                     if (which==0) openImage();
-                    if (which==1) save(true);
-                    if (which==2 && previewSource != null) {
+                    if (which==1) exportDialog();
+                    if (which==2) chooseQuality();
+                    if (which==3 && previewSource != null) {
                         checkpoint(); edit = new Edit(); render(); drawControls();
                     }
-                    if (which==3) about();
+                    if (which==4) about();
                 }).show();
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.2")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.3")
                 .setMessage("Offline native Android editing prototype.\n\n" +
-                        "Working: open JPEG/HEIC and other supported images, looks, " +
+                        "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
                         "tone/colour adjustments, improved Auto with visible results, centre crop, rotate, " +
                         "undo/redo, press-and-hold before view, export and share.\n\n" +
                         "Limitations: no healing, local masks, layers or RAW workflow yet. " +
