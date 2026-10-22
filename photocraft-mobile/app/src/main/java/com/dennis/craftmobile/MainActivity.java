@@ -50,11 +50,14 @@ public final class MainActivity extends Activity {
         float ratio = 0f;
         int rotation = 0;
         String look = "Original";
+        float[] autoZones;  // Immutable zone map measured on original preview.
+        float autoStrength = 100f;
         Edit copy() {
             Edit d = new Edit();
             d.exposure = exposure; d.contrast = contrast; d.highlights = highlights;
             d.shadows = shadows; d.saturation = saturation; d.warmth = warmth;
             d.tint = tint; d.ratio = ratio; d.rotation = rotation; d.look = look;
+            d.autoZones = autoZones; d.autoStrength = autoStrength;
             return d;
         }
     }
@@ -359,8 +362,12 @@ public final class MainActivity extends Activity {
             HorizontalScrollView scroll = new HorizontalScrollView(this);
             scroll.setHorizontalScrollBarEnabled(false);
             LinearLayout options = new LinearLayout(this);
-            for (String field : new String[]{"Exposure", "Contrast", "Highlights", "Shadows",
-                    "Saturation", "Warmth", "Tint"}) {
+            String[] fields = "Auto".equals(edit.look) ?
+                    new String[]{"Auto Strength", "Exposure", "Contrast", "Highlights",
+                            "Shadows", "Saturation", "Warmth", "Tint"} :
+                    new String[]{"Exposure", "Contrast", "Highlights", "Shadows",
+                            "Saturation", "Warmth", "Tint"};
+            for (String field : fields) {
                 TextView v = label(field, 12, field.equals(activeAdjustment) ? ACCENT : Color.LTGRAY);
                 v.setPadding(dp(12), dp(7), dp(12), dp(7));
                 v.setOnClickListener(x -> { activeAdjustment = field; drawControls(); });
@@ -396,19 +403,24 @@ public final class MainActivity extends Activity {
         line.addView(value, new LinearLayout.LayoutParams(-1, dp(24)));
         SeekBar slider = new SeekBar(this);
         slider.setMax(1000);
+        boolean strengthSlider = activeAdjustment.equals("Auto Strength");
         float range = activeAdjustment.equals("Exposure") ? 2f : 100f;
         float original = getField(activeAdjustment);
-        slider.setProgress(Math.round((original / range + 1) * 500f));
-        value.setText(activeAdjustment + ": " + String.format(Locale.US,
-                activeAdjustment.equals("Exposure") ? "%+.2f EV" : "%+.0f", original));
+        slider.setProgress(strengthSlider ? Math.round(original * 10f) :
+                Math.round((original / range + 1) * 500f));
+        value.setText(strengthSlider ? "Auto Strength: " + Math.round(original) + "%" :
+                activeAdjustment + ": " + String.format(Locale.US,
+                        activeAdjustment.equals("Exposure") ? "%+.2f EV" : "%+.0f", original));
         Edit starting = edit.copy();
         slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
                 if (!fromUser || previewSource == null) return;
-                float result = ((float) progress / 500 - 1) * range;
+                float result = strengthSlider ? progress / 10f :
+                        ((float) progress / 500 - 1) * range;
                 setField(activeAdjustment, result);
-                value.setText(activeAdjustment + ": " + String.format(Locale.US,
-                        activeAdjustment.equals("Exposure") ? "%+.2f EV" : "%+.0f", result));
+                value.setText(strengthSlider ? "Auto Strength: " + Math.round(result) + "%" :
+                        activeAdjustment + ": " + String.format(Locale.US,
+                                activeAdjustment.equals("Exposure") ? "%+.2f EV" : "%+.0f", result));
                 render();
             }
             @Override public void onStartTrackingTouch(SeekBar bar) {}
@@ -426,6 +438,7 @@ public final class MainActivity extends Activity {
 
     private float getField(String which) {
         switch (which) {
+            case "Auto Strength": return edit.autoStrength;
             case "Exposure": return edit.exposure;
             case "Contrast": return edit.contrast;
             case "Highlights": return edit.highlights;
@@ -437,6 +450,7 @@ public final class MainActivity extends Activity {
     }
     private void setField(String which, float value) {
         switch (which) {
+            case "Auto Strength": edit.autoStrength = clamp(value, 0f, 100f); break;
             case "Exposure": edit.exposure = value; break;
             case "Contrast": edit.contrast = value; break;
             case "Highlights": edit.highlights = value; break;
@@ -478,47 +492,43 @@ public final class MainActivity extends Activity {
     }
 
     private void autoTune() {
-        if (previewSource == null) {
+        Bitmap original = previewSource;
+        if (original == null) {
             Toast.makeText(this, "Open a photo before using Auto", Toast.LENGTH_SHORT).show();
             openImage();
             return;
         }
-        int[] hist = new int[256];
-        int width = previewSource.getWidth(), height = previewSource.getHeight();
-        int stride = Math.max(1, (int)Math.sqrt((double)width * height / 18000));
-        int sampled = 0;
-        for (int y = 0; y < height; y += stride) {
-            for (int x = 0; x < width; x += stride) {
-                int pixel = previewSource.getPixel(x, y);
-                int luminance = Math.round(.2126f * Color.red(pixel) +
-                        .7152f * Color.green(pixel) + .0722f * Color.blue(pixel));
-                hist[Math.max(0, Math.min(255, luminance))]++;
-                sampled++;
+        int serial = generation.incrementAndGet();
+        status.setText("AUTO  •  Analysing 64×64 scene zones…");
+        work.execute(() -> {
+            try {
+                SpatialAuto64.Scene scene = SpatialAuto64.analyse(original);
+                ui.post(() -> {
+                    if (serial != generation.get() || previewSource != original) return;
+                    checkpoint();
+                    edit.exposure = scene.exposure;
+                    edit.contrast = scene.contrast;
+                    edit.highlights = scene.highlights;
+                    edit.shadows = scene.shadows;
+                    edit.saturation = 0f;
+                    edit.warmth = 0f;
+                    edit.tint = 0f;
+                    edit.autoZones = scene.zones;
+                    edit.autoStrength = 100f;
+                    edit.look = "Auto";
+                    activeAdjustment = "Auto Strength";
+                    render();
+                    drawControls();
+                    Toast.makeText(this, String.format(Locale.US,
+                            "64×64 Auto: %+.2f EV · bright pixels protected",
+                            scene.exposure), Toast.LENGTH_LONG).show();
+                });
+            } catch (RuntimeException | OutOfMemoryError failure) {
+                showError("Auto analysis failed: " + failure.getMessage());
             }
-        }
-        int low = percentile(hist, sampled, .05f);
-        int middle = percentile(hist, sampled, .50f);
-        int high = percentile(hist, sampled, .95f);
-        checkpoint();
-        // Scene-adaptive tone baseline: never deliberately brighten a bright sky
-        // enough to flatten cloud structure.
-        float target = high > 235 && low < 48 ? .45f : .49f;
-        float median = Math.max(.06f, middle / 255f);
-        edit.exposure = clamp((float)(Math.log(target / median) / Math.log(2)),
-                -.90f, 1.00f);
-        if (high > 235 && edit.exposure > .33f) edit.exposure = .33f;
-        edit.contrast = clamp((164 - (high - low)) * .15f, -15f, 17f);
-        edit.shadows = clamp((70f - low) * .58f, 0f, 33f);
-        edit.highlights = clamp((208f - high) * .93f, -38f, 0f);
-        edit.saturation = 0f;
-        edit.warmth = 0f;
-        edit.tint = 0f;
-        edit.look = "Auto";
-        render(); drawControls();
-        Toast.makeText(this, String.format(Locale.US,
-                "Auto applied: %+.2f EV · highlights %+.0f",
-                edit.exposure, edit.highlights), Toast.LENGTH_LONG).show();
+        });
     }
+
     private static int percentile(int[] hist, int n, float f) {
         int count=0; for (int i=0;i<256;i++) { count+=hist[i]; if (count >= n*f) return i; }
         return 128;
@@ -594,10 +604,10 @@ public final class MainActivity extends Activity {
                 ui.post(() -> {
                     if (serial != generation.get()) return;
                     renderedPreview = output; photo.setImageBitmap(output);
-                    if ("Auto".equals(snapshot.look)) {
+                    if ("Auto".equals(snapshot.look) && snapshot.autoZones != null) {
                         status.setText(String.format(Locale.US,
-                                "AUTO applied · %+.2f EV · highlights %+.0f · shadows %+.0f",
-                                snapshot.exposure, snapshot.highlights, snapshot.shadows));
+                                "64×64 AUTO  •  %+.2f EV  •  Strength %.0f%%  •  Highlights safe",
+                                snapshot.exposure, snapshot.autoStrength));
                     } else {
                         status.setText("Live preview · JPEG export Q" + jpegQuality);
                     }
@@ -624,10 +634,52 @@ public final class MainActivity extends Activity {
         float tint = e.tint / 100f * .07f;
         float high = e.highlights / 100f * .30f;
         float shadow = e.shadows / 100f * .30f;
+        boolean spatial = "Auto".equals(e.look) && e.autoZones != null &&
+                e.autoZones.length == SpatialAuto64.SIZE * SpatialAuto64.SIZE;
+        int[] zoneX = null;
+        float[] fractionX = null, rowZones = null;
+        float strength = clamp(e.autoStrength / 100f, 0f, 1f);
+        float autoGain = ((float)Math.pow(2, e.exposure) - 1f) * strength;
+        float autoShadow = e.shadows / 100f * .24f * strength;
+        float autoHighlights = e.highlights / 100f * .13f * strength;
+        float autoContrast = e.contrast / 100f * .22f * strength;
+        if (spatial) {
+            zoneX = SpatialAuto64.xIndices(w);
+            fractionX = SpatialAuto64.xFractions(w);
+            rowZones = new float[SpatialAuto64.SIZE];
+        }
         for (int y=0; y<h; y++) {
+            if (spatial) SpatialAuto64.interpolateRow(e.autoZones, y, h, rowZones);
             src.getPixels(pixels, 0, w, 0, y, w, 1);
             for (int x=0; x<w; x++) {
                 int pixel = pixels[x];
+                if (spatial) {
+                    float r0 = Color.red(pixel) / 255f;
+                    float g0 = Color.green(pixel) / 255f;
+                    float b0 = Color.blue(pixel) / 255f;
+                    float lum = .2126f*r0 + .7152f*g0 + .0722f*b0;
+                    float maxChannel = Math.max(r0, Math.max(g0, b0));
+                    float xf = fractionX[x];
+                    int zi = zoneX[x];
+                    float zone = rowZones[zi]*(1f-xf) +
+                            rowZones[Math.min(SpatialAuto64.SIZE-1,zi+1)]*xf;
+                    float protection = 1f - SpatialAuto64.smoothstep(.64f,.94f,maxChannel);
+                    float darkness = 1f - SpatialAuto64.smoothstep(.12f,.68f,lum);
+                    float highlights = SpatialAuto64.smoothstep(.61f,.94f,lum);
+                    float requested = lum*(1f + autoGain*protection)
+                            + autoShadow*zone*darkness
+                            + autoHighlights*highlights
+                            + autoContrast*(lum-.5f)*(1f-highlights);
+                    requested = clamp(requested,0f,1f);
+                    float scale = lum > .012f ? requested/lum : 1f;
+                    // Leave pristine pixels untouched when strength=0.
+                    if (scale > 1f && maxChannel > 0f) {
+                        scale = Math.min(scale, .997f/maxChannel);
+                    }
+                    pixels[x] = Color.argb(Color.alpha(pixel),
+                            quant(r0*scale),quant(g0*scale),quant(b0*scale));
+                    continue;
+                }
                 float r = Color.red(pixel)/255f * multiplier;
                 float g = Color.green(pixel)/255f * multiplier;
                 float b = Color.blue(pixel)/255f * multiplier;
@@ -724,10 +776,10 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.3")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.4")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
-                        "tone/colour adjustments, improved Auto with visible results, centre crop, rotate, " +
+                        "tone/colour adjustments, 64×64 Auto with clipped-highlights guard, centre crop, rotate, " +
                         "undo/redo, press-and-hold before view, export and share.\n\n" +
                         "Limitations: no healing, local masks, layers or RAW workflow yet. " +
                         "PhotoCraft's Rust engine is NOT integrated in this version. " +
