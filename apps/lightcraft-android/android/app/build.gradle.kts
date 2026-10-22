@@ -86,7 +86,11 @@ abstract class CargoNdkBuild : DefaultTask() {
             environment("CARGO_ENCODED_RUSTFLAGS", remap.joinToString("\u001f"))
             commandLine(
                 listOf(cargo.get(), "ndk") + targets +
-                    listOf("--platform", apiLevel.get().toString(), "-o", out, "build", "--release", "-p", "lightcraft-android", "--lib"),
+                    listOf("--platform", apiLevel.get().toString(), "-o", out,
+                        "build", "--release", "-p", "lightcraft-android", "--lib",
+                        // Enable the existing HEIC still decoder on Android.
+                        // The original HEIC file remains the library source.
+                        "--features", "lightcraft-codecs/heif"),
             )
         }
     }
