@@ -119,11 +119,119 @@ fn analyse_fine_linear(img:&Rgb32f,lum:&[f32])->FineSceneEvidence {
     result
 }
 
+
+/// High-resolution, 64×64 *evidence*, used alongside the established
+/// 3×3 and 32×32 summaries. It does not render local corrections.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+pub struct MicroSceneEvidence {
+    pub grid_side:usize,
+    pub populated_zones:usize,
+    pub usable_zones:usize,
+    pub luminous_zones:usize,
+    pub textured_shadow_zones:usize,
+    pub neutral_white_zones:usize,
+    pub dark_zones:usize,
+    pub luminous_coverage:f64,
+    pub shadow_detail_coverage:f64,
+    pub neutral_white_coverage:f64,
+    /// A distinct neutral-white subject, e.g. pale petals or the Moon,
+    /// whose highlights should not be brightened merely because its
+    /// surroundings are darker. This does not claim clipped JPEG recovery.
+    pub neutral_white_subject:bool,
+    pub mixed_light_shadow_detail:bool,
+    pub proposed_shadow_recovery:f64,
+    pub proposed_darks_curve:f64,
+}
+
+const MICRO_SIDE:usize=64;
+const MICRO_ZONES:usize=MICRO_SIDE*MICRO_SIDE;
+#[derive(Clone, Copy, Default)]
+struct MicroCell {
+    samples:u16,
+    luminous:u16,
+    dark:u16,
+    neutral_white:u16,
+    recoverable:u16,
+    textured_shadow:u16,
+}
+
+/// The fitted 512px Smart Auto proxy normally contributes tens of samples
+/// per cell. Empty and undersampled cells are excluded from classification:
+/// at 64×64, an 8px-long cell still contains enough observations, whereas a
+/// 27px image must not be treated as 4,096 independent exposure readings.
+fn analyse_micro_linear(img:&Rgb32f,lum:&[f32])->MicroSceneEvidence {
+    let mut cells=[MicroCell::default();MICRO_ZONES];
+    for y in 0..img.height {
+        for x in 0..img.width {
+            let i=y*img.width+x;
+            let zone=(y*MICRO_SIDE/img.height).min(MICRO_SIDE-1)*MICRO_SIDE
+                +(x*MICRO_SIDE/img.width).min(MICRO_SIDE-1);
+            let p=lum[i];
+            let c=&mut cells[zone];
+            c.samples+=1;
+            if p>0.48 {c.luminous+=1;}
+            if p<0.028 {c.dark+=1;}
+            if (0.035..0.28).contains(&p) {c.recoverable+=1;}
+            // Near-white neutral highlight, not a colourful flame or a
+            // saturated yellow flower. All three channels must be bright.
+            let rgb=img.data[i];
+            if p>0.82 && rgb[0]>0.75 && rgb[1]>0.75 && rgb[2]>0.75 {
+                c.neutral_white+=1;
+            }
+            if x>0 && y>0 && (0.035..0.24).contains(&p) {
+                let a=lum[i-1];
+                let b=lum[i-img.width];
+                let edge=((p-a).abs()+(p-b).abs())/(0.035+p+a+b);
+                if edge>0.058 {c.textured_shadow+=1;}
+            }
+        }
+    }
+    let mut r=MicroSceneEvidence {grid_side:MICRO_SIDE,..Default::default()};
+    for c in cells {
+        if c.samples==0 {continue;}
+        r.populated_zones+=1;
+        if c.samples<8 {continue;}
+        r.usable_zones+=1;
+        let n=c.samples as f64;
+        if c.luminous as f64/n>0.38 {r.luminous_zones+=1;}
+        if c.dark as f64/n>0.70 {r.dark_zones+=1;}
+        if c.neutral_white as f64/n>0.40 {r.neutral_white_zones+=1;}
+        if c.recoverable as f64/n>0.24
+            && c.textured_shadow>=2 && c.textured_shadow as f64/n>0.035 {
+            r.textured_shadow_zones+=1;
+        }
+    }
+    // Do not make a spatial recommendation if there are too few reliably
+    // populated cells (small images, extreme crops, or very narrow photos).
+    if r.usable_zones<64 {return r;}
+    let n=r.usable_zones as f64;
+    r.luminous_coverage=r.luminous_zones as f64/n;
+    r.shadow_detail_coverage=r.textured_shadow_zones as f64/n;
+    r.neutral_white_coverage=r.neutral_white_zones as f64/n;
+    let other_coverage=1.0-r.neutral_white_coverage;
+    r.neutral_white_subject=r.neutral_white_zones>=6
+        && r.neutral_white_coverage>0.008
+        && r.neutral_white_coverage<0.48
+        && other_coverage>0.52;
+    r.mixed_light_shadow_detail=r.luminous_coverage>0.16
+        && r.textured_shadow_zones>=5
+        && r.shadow_detail_coverage>0.003
+        && r.shadow_detail_coverage<0.35;
+    if r.mixed_light_shadow_detail {
+        r.proposed_shadow_recovery=(6.0+
+            27.0*r.shadow_detail_coverage.min(0.20)).clamp(6.0,12.0).round();
+        r.proposed_darks_curve=(3.0+
+            16.0*r.shadow_detail_coverage.min(0.20)).clamp(3.0,7.0).round();
+    }
+    r
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
 pub struct ZonalSceneEvidence {
     /// Row-major 3x3 zones (top-left to bottom-right).
     pub zones:[ZoneEvidence;9],
     pub fine:FineSceneEvidence,
+    pub micro:MicroSceneEvidence,
     pub luminous_zones:usize,
     pub shadow_detail_zones:usize,
     pub tonal_separation:f64,
@@ -240,6 +348,7 @@ pub fn analyse_linear(img:&Rgb32f)->ZonalSceneEvidence {
     }else{0.0};
     ZonalSceneEvidence {
         zones,fine:analyse_fine_linear(img,&lum),
+        micro:analyse_micro_linear(img,&lum),
         luminous_zones,shadow_detail_zones,tonal_separation,
         bright_surround_dark_detail,dark_texture_with_bright_reference,
         proposed_shadow_recovery:strength.round(),
@@ -250,6 +359,60 @@ pub fn analyse_linear(img:&Rgb32f)->ZonalSceneEvidence {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn micro_grid_recognises_small_neutral_moon_on_black_sky() {
+        let img=Rgb32f::from_fn(256,192,|x,y|{
+            let dx=x as i32-128;
+            let dy=y as i32-96;
+            if dx*dx+dy*dy<24*24 {[0.96,0.95,0.94]}
+            else {[0.004,0.004,0.004]}
+        });
+        let z=analyse_linear(&img);
+        assert_eq!(z.micro.grid_side,64);
+        assert!(z.micro.neutral_white_subject,"Moon whites not found: {:?}",z.micro);
+        assert_eq!(z.micro.proposed_shadow_recovery,0.0);
+    }
+
+    #[test]
+    fn micro_grid_recognises_white_petals_over_green_shadows() {
+        let img=Rgb32f::from_fn(256,192,|x,y|{
+            // Long white petals with green nonwhite surroundings.
+            let dx=(x as i32-128).abs();
+            let dy=(y as i32-94).abs();
+            let petals=(dx<18&&dy<74)||(dy<15&&dx<100)
+                ||(dx+dy<75&&dx>20&&dy>20);
+            if petals {[0.96,0.95,0.94]}
+            else {
+                let t=((x*3+y*7)%9) as f32*0.005;
+                [0.06+t,0.16+t,0.04+t]
+            }
+        });
+        let z=analyse_linear(&img);
+        assert!(z.micro.neutral_white_subject,"Petals not recognised: {:?}",z.micro);
+        assert!(z.micro.neutral_white_zones>=6);
+    }
+
+    #[test]
+    fn micro_grid_does_not_treat_warm_flames_as_neutral_white() {
+        let img=Rgb32f::from_fn(256,192,|x,y|{
+            if (110..155).contains(&x)&&(50..110).contains(&y) {
+                [0.99,0.60,0.08]
+            } else {[0.003,0.003,0.003]}
+        });
+        let z=analyse_linear(&img);
+        assert_eq!(z.micro.neutral_white_zones,0);
+        assert!(!z.micro.neutral_white_subject);
+    }
+
+    #[test]
+    fn micro_grid_ignores_undersampled_cells() {
+        let img=Rgb32f::filled(27,27,[0.96,0.96,0.96]);
+        let z=analyse_linear(&img);
+        assert_eq!(z.micro.grid_side,64);
+        assert_eq!(z.micro.usable_zones,0);
+        assert!(!z.micro.neutral_white_subject);
+    }
+
     #[test]
     fn fine_grid_finds_small_dark_subject_diluted_in_a_three_by_three_tile() {
         let img=Rgb32f::from_fn(256,192,|x,y|{
