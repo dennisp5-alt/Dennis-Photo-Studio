@@ -1367,6 +1367,29 @@ pub fn auto_wb_report(src:&Rgb32f,info:&SourceInfo)->AutoWbReport{
     report
 }
 
+/// v0.6.12d DIAGNOSTIC ONLY: take the direct calculated colour
+/// temperature and tint with no warm-light, neutral-confidence, reflected
+/// water, saturation or minimum-adjustment preservation rules.
+/// Retain finite physical WB ranges from the colour conversion itself.
+pub fn auto_wb_report_all_guards_off(
+    src:&Rgb32f,info:&SourceInfo
+) -> AutoWbReport {
+    let mut report=auto_wb_report(src,info);
+    let (temperature,tint)=auto_wb_classic(src,info);
+    if temperature.is_finite() && tint.is_finite() {
+        report.temp=temperature;
+        report.tint=tint;
+        report.candidate_temp=temperature;
+        report.candidate_tint=tint;
+        report.confidence=1.0;
+        report.camera_balance_retained=
+            temperature==info.as_shot_temp && tint==info.as_shot_tint;
+        report.decision="unrestricted";
+        report.reason="photographic_wb_preservation_gates_bypassed_test_only";
+    }
+    report
+}
+
 /// White Balance Auto returns the report's actual, bounded correction.
 pub fn auto_wb(src: &Rgb32f, info: &SourceInfo) -> (f64,f64) {
     let report=auto_wb_report(src,info);
@@ -2426,6 +2449,20 @@ mod studio_v0612d_fully_unrestricted_auto {
         assert_eq!(report.guard_reasons,vec!["all_photographic_auto_guards_disabled_test_only"]);
         assert!(report.final_tone.exposure>0.1,
             "dark photo still vetoed: {:?}",report.final_tone);
+    }
+
+    #[test]
+    fn unrestricted_white_balance_exposes_classic_direct_measurement() {
+        let photo=Rgb32f::from_fn(192,128,|x,y|{
+            let v=0.18+((x/15+y/11)%7) as f32*0.014;
+            [v*1.12,v,v*0.83]
+        });
+        let info=SourceInfo::default();
+        let (temp,tint)=auto_wb_classic(&photo,&info);
+        let report=auto_wb_report_all_guards_off(&photo,&info);
+        assert_eq!((report.temp,report.tint),(temp,tint));
+        assert_eq!(report.decision,"unrestricted");
+        assert_eq!(report.confidence,1.0);
     }
 
     #[test]
