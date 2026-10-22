@@ -65,14 +65,14 @@ internal object SemanticMasker {
         }
         input.rewind()
 
-        val scores: Array<Array<FloatArray>>
-        OnnxTensor.createTensor(environment, input, longArrayOf(1, 3, INPUT.toLong(), INPUT.toLong())).use { tensor ->
-            session(context).run(mapOf("pixel_values" to tensor)).use { result ->
-                @Suppress("UNCHECKED_CAST")
-                val output = result[0].value as Array<Array<Array<FloatArray>>>
-                scores = output[0]
+        val scores: Array<Array<FloatArray>> =
+            OnnxTensor.createTensor(environment, input, longArrayOf(1, 3, INPUT.toLong(), INPUT.toLong())).use { tensor ->
+                session(context).run(mapOf("pixel_values" to tensor)).use { result ->
+                    @Suppress("UNCHECKED_CAST")
+                    val output = result[0].value as Array<Array<Array<FloatArray>>>
+                    output[0]
+                }
             }
-        }
         require(scores.size >= 150 && scores[0].isNotEmpty()) { "Unexpected semantic model output" }
         val h = scores[0].size
         val w = scores[0][0].size
