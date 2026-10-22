@@ -250,5 +250,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.jna) { artifact { type = "aar" } }
+    // Bundled, fully offline ADE20K semantic segmentation inference.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
     testImplementation(libs.junit)
 }
