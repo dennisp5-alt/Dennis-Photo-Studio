@@ -314,8 +314,17 @@ fn smart_auto_candidate_mode(
     let fine_darks=if fine_shadow>0.0 {
         zonal.fine.proposed_darks_curve
     }else{0.0};
-    let shadows=shadows.max(zonal_shadow).max(fine_shadow);
-    let curve_darks=curve_darks.max(zonal_darks).max(fine_darks);
+    // The 64×64 layer can see recoverable subject texture too small to
+    // influence 32×32, without blindly lifting flat dark backgrounds.
+    // Maintain every earlier scene/control as a separate reference signal.
+    let micro_shadow=if no_guards && zonal.micro.mixed_light_shadow_detail {
+        zonal.micro.proposed_shadow_recovery
+    }else{0.0};
+    let micro_darks=if micro_shadow>0.0 {
+        zonal.micro.proposed_darks_curve
+    }else{0.0};
+    let shadows=shadows.max(zonal_shadow).max(fine_shadow).max(micro_shadow);
+    let curve_darks=curve_darks.max(zonal_darks).max(fine_darks).max(micro_darks);
 
     // Midtone luminance repair is separate from shadow lift. A sunset with
     // already appropriate upper midtones should not get a default +5.
@@ -534,6 +543,29 @@ fn smart_auto_candidate_mode(
                 (10.0+90.0*recoverable_fraction).clamp(10.0,30.0).round());
             candidate.curve_darks=candidate.curve_darks.max(
                 (8.0+72.0*recoverable_fraction).clamp(8.0,22.0).round());
+        }
+    }
+    // 64×64 neutral-white metering: an isolated white subject is its own
+    // exposure reference even when the frame's darker surroundings
+    // dominate the median. E.g. pale flowers or a bright Moon.
+    // This is evidence-driven subject metering, not a universal scene veto.
+    // Any already-clipped JPEG data remains unrecoverable.
+    if no_guards && zonal.micro.neutral_white_subject {
+        if candidate.exposure>0.0 {
+            let maximum=if zonal.micro.neutral_white_coverage>0.05 {
+                0.10
+            }else{0.16};
+            candidate.exposure=candidate.exposure.min(maximum);
+        }
+        // Spend the remaining tonal latitude on the highlights slider
+        // instead of globally brightening a subject that is already white.
+        if p995>2.0 {
+            candidate.highlights=candidate.highlights.min(
+                -((p995-1.60)*13.0).clamp(8.0,26.0).round());
+            if p995>2.2 {
+                candidate.whites=candidate.whites.min(
+                    -((p995-1.95)*9.0).clamp(0.0,14.0).round());
+            }
         }
     }
     // Propose an image-dependent edit before any output-quality vetoes.
@@ -2456,6 +2488,72 @@ mod studio_v0611_scene_auto_integration {
         assert!(!special || candidate.exposure==0.0);
         assert_eq!(candidate.exposure,0.0);
         assert_eq!(candidate.curve_lights,0.0);
+    }
+}
+
+#[cfg(test)]
+mod studio_v0615_micro_evidence_test {
+    use super::*;
+
+    #[test]
+    fn isolated_white_moon_does_not_turn_black_sky_into_positive_exposure() {
+        let img=Rgb32f::from_fn(256,192,|x,y|{
+            let dx=x as i32-128;
+            let dy=y as i32-96;
+            if dx*dx+dy*dy<24*24 {
+                // Bright crater-like grey and white features.
+                let v=0.89+((x*7+y*11)%12) as f32*0.009;
+                [v,v,v]
+            }else{[0.004,0.004,0.004]}
+        });
+        let scene=crate::scene::analyse_linear(&img);
+        assert!(scene.micro.neutral_white_subject,"moon missed: {:?}",scene.micro);
+        let out=smart_auto_tone_report_all_guards_off(
+            &img,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(out.final_tone.exposure<=0.16,
+            "Moon was brightened globally: {:?}",out.final_tone);
+        assert!(out.final_tone.highlights<0.0,
+            "Bright crater detail should not be lifted: {:?}",out.final_tone);
+    }
+
+    #[test]
+    fn white_petals_against_deep_green_do_not_receive_a_global_ev_boost() {
+        let img=Rgb32f::from_fn(256,192,|x,y|{
+            let dx=(x as i32-128).abs();
+            let dy=(y as i32-94).abs();
+            let petals=(dx<18&&dy<74)||(dy<15&&dx<100)
+                ||(dx+dy<75&&dx>20&&dy>20);
+            if petals {[0.95,0.96,0.95]}
+            else {
+                let t=((x*3+y*7)%9) as f32*0.005;
+                [0.06+t,0.16+t,0.04+t]
+            }
+        });
+        let scene=crate::scene::analyse_linear(&img);
+        assert!(scene.micro.neutral_white_subject,"white petals missed: {:?}",scene.micro);
+        let out=smart_auto_tone_report_all_guards_off(
+            &img,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(out.final_tone.exposure<=0.16,
+            "Pale petals need highlight preservation: {:?}",out.final_tone);
+        assert!(out.final_tone.highlights<0.0,
+            "Pale petals were not protected: {:?}",out.final_tone);
+    }
+
+    #[test]
+    fn existing_v0614_32x32_shadow_signal_is_still_used() {
+        let img=Rgb32f::from_fn(256,192,|x,y|{
+            if (124..147).contains(&x) && (88..115).contains(&y) {
+                let t=((x*17+y*23)%13) as f32*0.004;
+                [0.055+t,0.067+t,0.052+t]
+            }else{[0.62,0.65,0.67]}
+        });
+        let z=crate::scene::analyse_linear(&img);
+        assert!(z.fine.mixed_light_shadow_detail);
+        let out=smart_auto_tone_report_all_guards_off(
+            &img,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(out.final_tone.shadows>=7.0,
+            "32×32 correction lost: {:?}",out.final_tone);
+        assert_eq!(out.final_tone,out.proposed);
     }
 }
 
