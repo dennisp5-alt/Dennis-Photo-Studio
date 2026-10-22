@@ -265,7 +265,7 @@ jobs:
           model=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/engine/SemanticMasker.kt').read_text()
           assert 'SemanticMasker.segment(getApplication(), original, kind)' in vm
           assert 'e.session.renderCropView(photoId, 512u, 512u, false)' in vm
-          assert 'params.put("seg", segmentation)' in vm
+          assert 'JSONObject().put("kind", "object").put("seg", segmentation)' in vm
           assert 'val command = if (maskId == null) "mask.add" else "mask.addComponent"' in vm
           assert 'private const val SKY = 2' in model and 'private const val PERSON = 12' in model
           assert 'Deflater(8, true)' in model
