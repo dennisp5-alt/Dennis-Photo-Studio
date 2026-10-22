@@ -7,6 +7,7 @@ on:
       - experiment/dennis-craft-mobile-v0.3
       - experiment/dennis-craft-mobile-v0.4
       - experiment/dennis-craft-mobile-v0.5
+      - experiment/dennis-craft-mobile-v0.6
     paths:
       - 'photocraft-mobile/**'
       - '.github/workflows/dennis-craft-mobile-apk.yml'
@@ -28,7 +29,7 @@ jobs:
         run: gradle -p photocraft-mobile --no-daemon assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: dennis-craft-mobile-v0.5-debug-apk
+          name: dennis-craft-mobile-v0.6-debug-apk
           path: photocraft-mobile/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14

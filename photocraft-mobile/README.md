@@ -72,3 +72,22 @@ Processing (DetailEngine.java): bounded-ring-buffer pixel filters combine guided
 Auto: 64×64 local scene probes estimate flat-patch luminance/chroma variation, structural detail and tonal spread. Conservative recommendations can legitimately be zero if noise or haze is not supported by evidence. Auto Strength on the Tone group still affects the v0.4 tonal Auto; detail group strengths are independently adjustable.
 
 Limitations: this is an image-processing prototype, not trained or validated scene intelligence. Real-device testing with ISO/noise, portraits, clouds and foliage is required before considering the algorithms production-quality. No PhotoCraft Rust port is claimed. Dehaze is contrast-based, not physical scattering inversion or depth estimation.
+
+
+## v0.6 — cautious 64×64 Auto White Balance
+
+- Main Auto now estimates RGB channel gains from a 64×64 spatial grid, alongside existing tone and detail Auto. Separate grouped Auto actions remain as v0.5.
+- A five-pixel cross average samples candidate neutral surfaces. The estimator rejects dark, clipped and high-chroma samples, requires neutral regions distributed across the photograph, trims colour-ratio outliers and caps gains to approximately ±6%.
+- If plausible neutral evidence is insufficient, Auto WB deliberately leaves colours unchanged. It does not claim to measure Kelvin, identify faces or classify a lighting source.
+- Auto WB gains are applied to the image inside the existing spatial 64×64 render path, with per-channel headroom protection and luminance neutralisation; identical settings are used for preview and export.
+- Manual Warmth and Tint operate after the Auto pass (v0.5 previously ignored both when Auto had activated).
+- Auto Strength affects calculated Auto WB as well as Auto tone. Group Auto for Noise + Sharpen or Clarity + Texture does not adjust WB.
+- Auto status shows either WB corrected or WB preserved so users can distinguish a justified correction from a no-op.
+- Existing Looks, JPEG export quality, modern picker, v0.5 Detail Engine and v0.4 Auto tone design are otherwise unchanged.
+
+### Suggested visual checks
+- Lavender flowers: colour and petal highlights must remain natural; neutral deficiency should produce conservative results.
+- Halloween woodland: natural skin/pumpkin hue, no magenta/blue bias.
+- Neutral indoor image under mild tungsten/fluorescent cast: some WB improvement without flattening the intended ambience.
+- Sunset or blue sky without neutrals: intentional colours must remain.
+- Manual Warmth/Tint after pressing Auto: sliders must visibly change preview and exported JPEG.
