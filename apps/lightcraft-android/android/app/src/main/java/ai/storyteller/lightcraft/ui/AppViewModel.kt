@@ -61,7 +61,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** A snackbar message, with an optional action. */
-class UiMessage(val text: String, val actionLabel: String? = null, val action: (() -> Unit)? = null)
+class UiMessage(val text: String, val actionLabel: String? = null, val action: (() -> Unit)? = null, val brief: Boolean = false)
 
 /**
  * The editor's main tools along the bottom, the reference app's row. Labelled, a tool is as wide as
@@ -620,8 +620,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun say(text: String?, actionLabel: String? = null, action: (() -> Unit)? = null) {
-        messages.trySend(UiMessage(text ?: "Something went wrong", actionLabel, action))
+    private fun say(text: String?, actionLabel: String? = null, action: (() -> Unit)? = null, brief: Boolean = false) {
+        messages.trySend(UiMessage(text ?: "Something went wrong", actionLabel, action, brief))
     }
 
     /**
@@ -2882,7 +2882,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun runAction(a: QuickAction) {
         val ed = editor ?: return
         when (a) {
-            QuickAction.AUTO -> inspectAutoPreview()
+            QuickAction.AUTO -> applySmartAuto()
             // Upright's automatic correction, cropped to leave no blank corners: one step
             QuickAction.FIX_ANGLE -> edit(after = { say("Angle fixed") }) { s ->
                 s.beginAdjustment("Fix Angle")
@@ -3064,13 +3064,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 say("Smart Auto • " + "%.2f".format(ev) + " EV" +
                     " • Vibrance " + vib.toInt() +
                     " • Saturation " + sat.toInt() +
-                    " • Curves D" + curveDarks.toInt() + "/L" + curveLights.toInt())
+                    " • Curves D" + curveDarks.toInt() + "/L" + curveLights.toInt(), brief = true)
             }.onFailure { say(it.message) }
         }
     }
 
     /** Conservative image-specific non-destructive pixel-noise and sharpening settings. */
-    fun runAutoDetail() = edit(after = {say("Auto Detail applied • inspect at 100%")}) {
+    fun runAutoDetail() = edit(after = {say("Auto Detail applied • inspect at 100%", brief = true)}) {
         it.execute("develop.autoDetail","{}")
     }
 
@@ -3093,10 +3093,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val texture = a?.optDouble("texture", 0.0) ?: 0.0
                 val clarity = a?.optDouble("clarity", 0.0) ?: 0.0
                 if (texture == 0.0 && clarity == 0.0) {
-                    say("Auto Effects • no additional texture or clarity recommended")
+                    say("Auto Effects • no additional texture or clarity recommended", brief = true)
                 } else {
                     say("Auto Effects • Texture " + texture.toInt() +
-                        " • Clarity " + clarity.toInt())
+                        " • Clarity " + clarity.toInt(), brief = true)
                 }
             }.onFailure { say(it.message) }
         }
@@ -3332,7 +3332,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         ed.pickingWb = false
         ed.targeting = null
         when (section) {
-            EditSection.AUTO -> inspectAutoPreview()
+            EditSection.AUTO -> applySmartAuto()
             EditSection.PROFILES -> {
                 ed.profileFrom = ed.state?.profile ?: "lc.color"
                 ed.section = section
