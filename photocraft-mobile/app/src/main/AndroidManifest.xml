@@ -3,8 +3,9 @@
     <application
         android:allowBackup="false"
         android:label="Dennis Craft Mobile"
-        android:icon="@android:drawable/ic_menu_gallery"
-        android:theme="@android:style/Theme.Material.NoActionBar"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:theme="@style/DennisCraftTheme"
         android:usesCleartextTraffic="false">
         <activity
             android:name=".MainActivity"

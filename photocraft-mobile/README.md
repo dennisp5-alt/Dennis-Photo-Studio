@@ -1,4 +1,4 @@
-# Dennis Craft Mobile v0.2 (Android)
+# Dennis Craft Mobile v0.3 (Android)
 
 A separate experimental phone-first offline photo editor for the Samsung Galaxy S23 Ultra, inspired by the mobile workflow demonstrated by the user. This is an Android Java proof-of-concept, NOT a port of PhotoCraft's Rust engine yet. It is independently named and has a distinct Android package com.dennis.craftmobile.
 
@@ -30,3 +30,16 @@ The production Dennis Photo Studio code is not modified. This app lives in its o
 ## Planned PhotoCraft integration
 
 Evaluate the existing arm64 Android shell from kanaaka/photocraft-android pinned to PhotoCraft 0.7 and replace the desktop egui shell with a mobile-first Kotlin/Java to Rust JNI command bridge. Audit source and licence, then implement native colour processing with real masks, layers and composite/export parity. PhotoCraft is MIT OR Apache-2.0, however ArtCraft trademarks and brand assets must not be reused in a modified product.
+
+
+## v0.3 visual + system picker
+- New adaptive launcher icon: cobalt/indigo aperture symbol on midnight-blue background, unique package branding.
+- Dark navy editor workspace, compact glyph toolbar, title, icon navigation (Looks / Adjust / Auto / Crop / More), improved label hierarchy.
+- Looks use genuine tiny processed previews instead of text-only tiles.
+- Native Android system Photo Picker on Android 13+ (including S23 Ultra / Android 16). Fallback to system content picker on earlier Android versions. Requires no photos/media or all-files permission.
+- Export opens a quality-selection dialog with JPEG 85/90/95/100 and Save / Share actions.
+- Existing Auto processing math, manual controls and full-resolution export path unchanged from v0.2.
+- Still intentionally NOT a port of the PhotoCraft Rust engine. No layers/heal/masks yet.
+
+### Runtime caveat
+Updated UI needs an on-device visual acceptance pass; GitHub Actions build success is not device validation.
