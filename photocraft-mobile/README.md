@@ -57,3 +57,18 @@ Updated UI needs an on-device visual acceptance pass; GitHub Actions build succe
 
 ### Visual regression checks
 Test against the uploaded flower and Halloween woodland pairs: no near-white petal blowout or washed-out skin. Also test a genuinely underexposed photo so the new highlight limits do not prevent useful correction. Real-device runtime testing remains necessary.
+
+
+## v0.5 — grouped detail controls with scene-based Auto
+
+Two groups added within Adjustments:
+- Noise + Sharpen: Luminance NR, Color NR, Sharpen
+- Clarity + Texture: Clarity, Texture, Dehaze
+
+Each group has Auto Group and three individual numeric 0–100 controls. Main Auto updates both groups using 64×64 spatial scene probes. The established v0.4 tonal Auto and its highlight safeguards are deliberately unchanged.
+
+Processing (DetailEngine.java): bounded-ring-buffer pixel filters combine guided 3×3 luminance and chroma smoothing, mild unsharp detail enhancement, restrained high-frequency texture, coarse local contrast clarity, and a low-amplitude contrast-based Dehaze approximation. The effects operate on the finished editable bitmap in place, keeping extra memory proportional to photo width rather than photo area. Effects apply to both previews and JPEG exports. Zero strength yields the original v0.4 processing path. Sharp detail and near-white highlights are gated to limit halos and clipping.
+
+Auto: 64×64 local scene probes estimate flat-patch luminance/chroma variation, structural detail and tonal spread. Conservative recommendations can legitimately be zero if noise or haze is not supported by evidence. Auto Strength on the Tone group still affects the v0.4 tonal Auto; detail group strengths are independently adjustable.
+
+Limitations: this is an image-processing prototype, not trained or validated scene intelligence. Real-device testing with ISO/noise, portraits, clouds and foliage is required before considering the algorithms production-quality. No PhotoCraft Rust port is claimed. Dehaze is contrast-based, not physical scattering inversion or depth estimation.
