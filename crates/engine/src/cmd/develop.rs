@@ -321,12 +321,11 @@ pub fn specs() -> Vec<CommandSpec> {
                 .map_err(|e|bad("develop.autoPreview",e))?;
             let info=s.source_info(id);
             let current=s.develop_of(id).unwrap_or_default();
-            let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report_unguarded(&src,&info,&current);
+            let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report_all_guards_off(&src,&info,&current);
             let tone=tone_audit.final_tone;
-            let manual_wb=current.wb.mode==WbMode::Custom;
-            let wb=if manual_wb {None} else {
-                Some(lightcraft_pipeline::auto::auto_wb_report(&src,&info))
-            };
+            // Test-only: explicitly invoking Auto also replaces manual WB.
+            let manual_wb=false;
+            let wb=Some(lightcraft_pipeline::auto::auto_wb_report_all_guards_off(&src,&info));
             let mut proposal=(*current).clone();
             proposal.light.exposure=tone.exposure;
             proposal.light.contrast=tone.contrast;
@@ -340,8 +339,7 @@ pub fn specs() -> Vec<CommandSpec> {
             proposal.curve.darks=tone.curve_darks;
             proposal.curve.lights=tone.curve_lights;
             proposal.curve.highlights=tone.curve_highlights;
-            if let Some(report)=wb.as_ref().filter(|r|
-                !r.camera_balance_retained && r.confidence>=0.14) {
+            if let Some(report)=wb.as_ref() {
                 proposal.wb.mode=WbMode::Auto;
                 proposal.wb.temp=report.temp;
                 proposal.wb.tint=report.tint;
@@ -394,9 +392,8 @@ pub fn specs() -> Vec<CommandSpec> {
             allowed.curve.darks=proposed.curve.darks;
             allowed.curve.lights=proposed.curve.lights;
             allowed.curve.highlights=proposed.curve.highlights;
-            if source.wb.mode!=WbMode::Custom {
-                allowed.wb=proposed.wb.clone();
-            }
+            // Explicit Auto Preview in this diagnostic may update any WB mode.
+            allowed.wb=proposed.wb.clone();
             if allowed!=proposed {
                 return Err(bad("develop.autoApplyPreview",
                     "Only Auto tone/curve/colour/WB values can be applied from preview"));
@@ -413,14 +410,11 @@ pub fn specs() -> Vec<CommandSpec> {
                 .map_err(|e|bad("develop.auto",e))?;
             let info=s.source_info(id);
             let d=s.develop_of(id).unwrap_or_default();
-            let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report_unguarded(&src,&info,&d);
+            let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report_all_guards_off(&src,&info,&d);
             let a=tone_audit.final_tone;
-            // A manually chosen Custom or picked white balance is intentional;
-            // Smart Auto must not silently override it.
-            let manual_wb=d.wb.mode==WbMode::Custom;
-            let wb=if manual_wb {None} else {
-                Some(lightcraft_pipeline::auto::auto_wb_report(&src,&info))
-            };
+            // All-guards-off diagnostic: Auto overrides even manual WB edits.
+            let manual_wb=false;
+            let wb=Some(lightcraft_pipeline::auto::auto_wb_report_all_guards_off(&src,&info));
             edit(s,"develop.auto","Smart Auto",|d|{
                 d.light.exposure=a.exposure;
                 d.light.contrast=a.contrast;
@@ -438,8 +432,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 d.curve.highlights=a.curve_highlights;
                 // Existing user RGB point-curve edits are deliberately
                 // retained; Auto only replaces its four parametric regions.
-                if let Some(report)=wb.filter(|r|
-                    !r.camera_balance_retained && r.confidence>=0.14) {
+                if let Some(report)=wb {
                     d.wb.mode=WbMode::Auto;
                     d.wb.temp=report.temp;
                     d.wb.tint=report.tint;
@@ -507,15 +500,13 @@ pub fn specs() -> Vec<CommandSpec> {
                 let (mut t, mut tint) = match mode {
                     WbMode::AsShot => (info.as_shot_temp, info.as_shot_tint),
                     WbMode::Auto => {
-                        // Higher-quality WB sampling. The estimator still
-                        // rejects unsupported neutrality; warm firelight is
-                        // not supposed to be neutralised by force.
+                        // TEST-ONLY: use calculated WB without warm-light,
+                        // colour, neutrality or confidence preservation vetoes.
                         let src = s.source_now(id, SourceLevel::Preview)
                             .map_err(|e| bad("develop.wb", e))?;
-                        // Scene Auto WB is separate from manual/eyedropper WB.
-                        // Classic remains usable internally for explicit
-                        // neutral-point sampling but not through the UI.
-                        let result = lightcraft_pipeline::auto::auto_wb_report(&src, &info);
+                        // The ordinary camera/neutral-preserving WB remains
+                        // available on the nonexperimental branches.
+                        let result = lightcraft_pipeline::auto::auto_wb_report_all_guards_off(&src, &info);
                         auto_report = Some(result);
                         (result.temp, result.tint)
                     }
