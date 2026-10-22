@@ -10,6 +10,8 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** The library grid, or the editor when a photo is open; snackbars for both. */
 @Composable
@@ -19,12 +21,21 @@ fun LightcraftRoot(vm: AppViewModel, onPickPhotos: () -> Unit, onPickFiles: () -
     val grid = rememberLazyListState()
     LaunchedEffect(vm) {
         for (m in vm.messages) {
+            // Detail/Texture/Auto confirmations are deliberately transient,
+            // without changing the time allowed for errors or Undo actions.
+            val quickDismiss = if (m.brief && m.actionLabel == null) launch {
+                delay(1300)
+                snackbar.currentSnackbarData?.takeIf {
+                    it.visuals.message == m.text
+                }?.dismiss()
+            } else null
             val result = snackbar.showSnackbar(
                 m.text,
                 actionLabel = m.actionLabel,
-                withDismissAction = m.actionLabel == null,
+                withDismissAction = m.actionLabel == null && !m.brief,
                 duration = if (m.actionLabel != null) SnackbarDuration.Long else SnackbarDuration.Short,
             )
+            quickDismiss?.cancel()
             if (result == SnackbarResult.ActionPerformed) m.action?.invoke()
         }
     }
