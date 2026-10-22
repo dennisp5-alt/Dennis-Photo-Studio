@@ -568,6 +568,31 @@ fn smart_auto_candidate_mode(
             }
         }
     }
+    // v0.6.16 diagnostic: the 128×128 grid must confirm a connected,
+    // neutral-white highlight subject rather than numerous small white
+    // pixels or a whole bright sky. Never drive global exposure from tiny
+    // independent cells. The existing 3×3/32×32/64×64 logic remains intact.
+    if no_guards && zonal.nano.neutral_white_subject {
+        // A naturally white subject is not evidence of whole-frame
+        // underexposure merely because its greenery/sky/background is dark.
+        // A negative EV proposal from the existing metering is preserved.
+        candidate.exposure=candidate.exposure.min(0.0);
+        if p995>1.95 {
+            // Use normal editable highlight controls; do not pretend to
+            // reconstruct areas already clipped in the camera's JPEG.
+            let strength=if zonal.nano.near_clip_coverage>0.01 {
+                16.0
+            }else{11.0};
+            candidate.highlights=candidate.highlights.min(
+                -(11.0+(p995-1.70).max(0.0)*strength)
+                .clamp(11.0,36.0).round());
+            if p995>2.10 && zonal.nano.near_clip_coverage>0.005 {
+                candidate.whites=candidate.whites.min(
+                    -((p995-1.85).max(0.0)*16.0)
+                    .clamp(0.0,23.0).round());
+            }
+        }
+    }
     // Propose an image-dependent edit before any output-quality vetoes.
     (candidate,false)
 
@@ -2488,6 +2513,77 @@ mod studio_v0611_scene_auto_integration {
         assert!(!special || candidate.exposure==0.0);
         assert_eq!(candidate.exposure,0.0);
         assert_eq!(candidate.curve_lights,0.0);
+    }
+}
+
+#[cfg(test)]
+mod studio_v0616_nano_highlight_test {
+    use super::*;
+    #[test]
+    fn v0616_bright_moon_rejects_positive_ev_and_reduces_highlights() {
+        let img=Rgb32f::from_fn(512,384,|x,y|{
+            let dx=x as i32-256;
+            let dy=y as i32-192;
+            if dx*dx+dy*dy<38*38 {
+                let t=((x*5+y*7)%11) as f32*0.002;
+                [0.95+t,0.95+t,0.95+t]
+            }else{[0.004,0.004,0.004]}
+        });
+        let z=crate::scene::analyse_linear(&img);
+        assert!(z.nano.neutral_white_subject,"moon missing: {:?}",z.nano);
+        let out=smart_auto_tone_report_all_guards_off(
+            &img,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(out.final_tone.exposure<=0.0,
+            "nano meter allowed Moon over-brightening: {:?}",out.final_tone);
+        assert!(out.final_tone.highlights<0.0);
+        assert_eq!(out.final_tone,out.proposed);
+    }
+
+    #[test]
+    fn v0616_white_petals_receive_highlight_protection_without_global_lift() {
+        let img=Rgb32f::from_fn(512,384,|x,y|{
+            let dx=(x as i32-256).abs();
+            let dy=(y as i32-192).abs();
+            let petal=(dx<26&&dy<145)||(dy<23&&dx<190)
+                ||(dx+dy<156&&dx>28&&dy>28);
+            if petal {[0.96,0.96,0.96]}
+            else {
+                let t=((x*5+y*3)%11) as f32*0.003;
+                [0.07+t,0.17+t,0.045+t]
+            }
+        });
+        let z=crate::scene::analyse_linear(&img);
+        assert!(z.nano.neutral_white_subject,"petals missing: {:?}",z.nano);
+        let out=smart_auto_tone_report_all_guards_off(
+            &img,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(out.final_tone.exposure<=0.0,
+            "nano meter allowed white flower over-brightening: {:?}",out.final_tone);
+        assert!(out.final_tone.highlights<0.0);
+    }
+
+    #[test]
+    fn v0616_dark_scene_with_a_warm_flame_uses_existing_firelight_policy() {
+        let img=Rgb32f::from_fn(512,384,|x,y|{
+            if (214..301).contains(&x)&&(105..254).contains(&y) {
+                [0.99,0.58,0.09]
+            }else{[0.004,0.004,0.004]}
+        });
+        let z=crate::scene::analyse_linear(&img);
+        assert!(!z.nano.neutral_white_subject);
+        let out=smart_auto_tone_report_all_guards_off(
+            &img,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(out.final_tone.exposure<=0.20,
+            "firelight policy lost: {:?}",out.final_tone);
+    }
+
+    #[test]
+    fn v0616_ordinary_bright_sky_does_not_trigger_nano_white_subject() {
+        let img=Rgb32f::from_fn(512,384,|x,y|{
+            if y<190 {[0.97,0.97,0.97]}
+            else {[0.10,0.18,0.08]}
+        });
+        let z=crate::scene::analyse_linear(&img);
+        assert!(!z.nano.neutral_white_subject);
     }
 }
 
