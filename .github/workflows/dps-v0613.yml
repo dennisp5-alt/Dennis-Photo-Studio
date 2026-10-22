@@ -1,0 +1,273 @@
+name: Dennis Photo Studio v0.6.13 — Direct Auto, Firelight, HEIC
+
+on:
+  push:
+    branches: [studio-v0.6.13-auto-direct-fire-heic]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dps-intelligent-smart-auto-v0613
+  cancel-in-progress: true
+
+jobs:
+  quality-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 115
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit intact UI and experimental unrestricted Auto routing
+        run: |
+          test -s LICENSE-MIT
+          test -s LICENSE-APACHE
+          test -f apps/lightcraft-android/android/app/src/main/res/drawable/dennis_studio_lens.xml
+          python3 - <<'PY'
+          from pathlib import Path
+          a=Path('crates/pipeline/src/auto.rs').read_text()
+          e=Path('crates/engine/src/cmd/develop.rs').read_text()
+          vm=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/AppViewModel.kt').read_text()
+          p=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/EditorScreen.kt').read_text()
+          edit=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/EditPanels.kt').read_text()
+          for needle in ('pub fn smart_auto_tone', 'pub fn auto_wb_report', 'pub fn auto_detail',
+                         'mod studio_v06_adaptive_tests', 'fn luminescent_subject_keeps_emission',
+                         'fn jpeg_white_highlights_do_not_veto_all_positive_exposure',
+                         'fn tinted_neutral_clusters_receive_a_reported_correction',
+                         'fn highly_saturated_flower_does_not_get_forced_white_balance',
+                         'pub decision:&' ):
+              assert needle in a, needle
+          for needle in ('cmd!("develop.auto", "Smart Auto"', 'SourceLevel::Preview)',
+                         'd.curve.shadows=a.curve_shadows','d.curve.darks=a.curve_darks',
+                         'lightcraft_pipeline::auto::auto_wb_report_all_guards_off(&src,&info)',
+                         'manual_wb', '"autoReport": auto_report',
+                         'SourceLevel::Full} else {SourceLevel::Preview}'):
+              assert needle in e, needle
+          for needle in ('mod studio_v061_auto_colour_and_curve_tests',
+                         'fn auto_colour_is_visible_on_subdued_landscape',
+                         'fn already_rich_flowers_are_not_overcooked',
+                         'fn auto_colour_and_curves_each_change_rendered_pixels',
+                         'pub curve_lights: f64', 'pub curve_highlights: f64'):
+              assert needle in a, needle
+          assert 'd.curve.lights=a.curve_lights' in e
+          assert 'd.curve.highlights=a.curve_highlights' in e
+          assert 'val vib = tone?.optDouble("vibrance"' in vm
+          assert 'val sat = tone?.optDouble("saturation"' in vm
+          for needle in ('mod studio_v062_adaptive_auto_effects_tests',
+                         'fn settings_respond_individually_to_subject_structure',
+                         'fn strong_pixel_noise_is_not_mistaken_for_texture',
+                         'fn photograph_preview_and_export_use_real_effect_pixels',
+                         'fine_density', 'middle_density'):
+              assert needle in a, needle
+          assert 'SourceLevel::Preview)' in e[e.index('cmd!("develop.autoEffects"'):]
+          assert 'adaptive-auto-effects' in e
+          assert 'val texture = a?.optDouble("texture"' in vm
+          assert 'val clarity = a?.optDouble("clarity"' in vm
+          curve=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/CurveTool.kt').read_text()
+          hist=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/HistogramView.kt').read_text()
+          local=Path('crates/pipeline/src/local.rs').read_text()
+          tests=Path('crates/pipeline/src/tests.rs').read_text()
+          assert 'ed.curveChannel = "parametric"' in vm
+          assert 'PathEffect.dashPathEffect' in curve
+          assert 'curve.parametric' in curve
+          assert 'Shadows ${curveValue("curve.shadows")}' in edit
+          for needle in ('RGB 0  ', 'RGB 255  ', 'histogram.red', 'histogram.green', 'histogram.blue'):
+              assert needle in hist, needle
+          for needle in ('fn colour_nr_reduces_chromatic_noise_without_changing_luminance',
+                         'fn colour_nr_preserves_distinct_real_colour_regions',
+                         'fn manual_luminance_and_colour_controls_are_independent'):
+              assert needle in local, needle
+          assert 'fn histogram_is_derived_from_the_current_rendered_pixels' in tests
+          for needle in ('fn preview_quality_guard',
+                         'fn finished_sunset_does_not_receive_v061_positive_baselines',
+                         'fn underexposure_still_gets_positive_exposure',
+                         'fn overexposure_gets_negative_exposure_without_forced_undersaturation',
+                         'fn low_contrast_but_structured_frame_still_gets_contrast',
+                         'fn weak_colour_is_not_confused_with_neutral_grey',
+                         'fn intentional_low_key_preserves_mood',
+                         'fn variable_complexions_keep_midtone_and_hair_relation',
+                         'fn pixel_guard_will_reject_new_highlight_clipping',
+                         'fn white_flower_on_dark_background_does_not_trigger_fire_recovery',
+                         'fn modest_global_underexposure_receives_a_useful_correction',
+                         'fn moon_in_black_sky_is_not_a_firelight_scene'):
+              assert needle in a, needle
+          for gone in ('structure_fraction<0.09','9.0+12.0*soft_fraction',
+                       '9.0+14.0*lift_strength'):
+              assert gone not in a, gone
+          assert 'warm_emitters as f64 / n > 0.002' in a
+          assert 'shadow_fraction>0.64 && median< -2.1 && bright_fraction<0.35' in a
+          assert '0.26*(-0.60-median)' in a
+          assert '0.30*(median-0.85)' in a
+          assert 'mod studio_v065_evidence_gate_regressions' in a
+          assert 'smart_auto_tone_report_all_guards_off(&src,&info,&' in e
+          assert 'auto_wb_report_all_guards_off(&src, &info)' in e
+          assert 'photographic_wb_preservation_gates_bypassed_test_only' in a
+          assert 'all_photographic_auto_guards_disabled_test_only' in a
+          assert 'cmd!("develop.autoPreview"' in e
+          assert '"sourceSettings":current' in e
+          assert '"previewSettings":proposal' in e
+          assert 'Restored Auto uses original editable engine controls' in e
+          assert '"model":model' in e
+          assert 'optionc_pilot_v1.json' in Path('crates/pipeline/src/optionc.rs').read_text()
+          assert 'pub mod optionc;' in Path('crates/pipeline/src/lib.rs').read_text()
+          assert 'fn native_proxy_model_is_deterministic_and_non_destructive' in Path('crates/pipeline/src/optionc.rs').read_text()
+          for check in (
+              'fn firelight_preserves_ambient_warmth_in_auto_wb',
+              'fn orange_lamplight_in_dark_room_remains_warm',
+              'fn ordinary_neutral_cast_is_still_correctable',
+              'fn blue_sky_dark_detailled_foreground_receives_local_recovery',
+              'fn intentional_warm_sunset_still_has_no_forced_curve_lift',
+          ):
+              assert check in a, check
+          for check in (
+              'fn balanced_textured_photo_gets_some_gentle_refinement',
+              'fn mildly_dim_normal_photo_does_not_require_major_defect',
+              'fn neutral_flat_subject_keeps_colour_neutral',
+              'fn finishing_is_repeatable_without_changing_develop_settings',
+          ):
+              assert check in a, check
+          assert 'let polish_structure=structure_fraction>0.010' in a
+          assert 'let ordinary_photo=!low_key && !high_key' in a
+          assert 'summary="Exposure $ev EV • Contrast $contrast' in vm
+          for check in (
+              'pub fn smart_auto_tone_report',
+              'struct AutoToneAuditReport',
+              'new_white_clip_fraction',
+              'new_black_clip_fraction',
+              'guard_render_failed',
+              'added_highlight_clipping',
+              'fn report_final_matches_one_tap_auto',
+              'fn report_records_proposal_and_vetoes_separately',
+              'fn unchanged_candidate_uses_full_existing_settings',
+              'report.reason="warm_lowlight_atmosphere_detected"',
+          ):
+              assert check in a,check
+          for check in (
+              'high_trust_neutral_fraction',
+              'high_trust_neutral_tiles',
+              'high_trust_bright_fraction',
+              'bright_cool_dominance',
+              'high_trust_neutrals_override_coloured_regions',
+              'fn cool_bright_reflections_get_lower_wb_confidence',
+              'fn near_neutral_label_not_outvoted_by_warmish_cloth',
+              'fn cast_neutral_patch_can_still_be_corrected',
+          ):
+              assert check in a, check
+          assert 'WB decision ' in vm
+          scene=Path('crates/pipeline/src/scene.rs').read_text()
+          for check in (
+              'pub struct ZonalSceneEvidence',
+              'pub fn analyse_linear',
+              'fn bright_surrounding_water_and_dark_textured_subject_separate',
+              'fn flat_black_field_and_small_light_do_not_trigger_subject_lift',
+              'fn truly_dark_but_textured_subject_with_bright_reference_is_distinct',
+          ):
+              assert check in scene,check
+          for check in (
+              'fn dark_subject_in_bright_reflections_gets_shadow_proposal',
+              'fn texture_and_white_reference_allow_restrained_dark_fabric_development',
+              'fn flat_low_key_night_scene_is_not_forced_into_daylight',
+              'let zonal=crate::scene::analyse_linear(&img);',
+              'pub zonal:crate::scene::ZonalSceneEvidence',
+          ):
+              assert check in a,check
+          assert 'val sceneSignal=when' in vm
+          assert 'let baseline=s.clone();' in a
+          assert 'cmd!("develop.autoApplyPreview"' in e
+          assert '"toneAudit":tone_audit' in e
+          assert 'val approved=ed.autoPreview ?: return' in vm
+          assert 'execute("develop.autoApplyPreview",params)' in vm
+          assert 'Show Auto diagnostics' in p
+          for needle in (
+              'mod studio_v0612_assertive_test',
+              'fn strong_underexposure_with_real_detail_now_proposes_meaningful_exposure',
+              'fn bright_water_with_dark_subject_can_propose_joint_adjustment',
+              'fn all_tone_controls_are_included_in_experimental_render_guard',
+              'recoverable_dark_subject',
+              'if new_whites>0.028',
+              'if new_blacks>0.028',
+          ):
+              assert needle in a, needle
+          assert 'report.decision="warm_light_preserved"' in a
+          assert 'let mut shadow_need=if low_key || protected_warm_colour' in a
+          import json
+          model=json.loads(Path('crates/pipeline/models/optionc_pilot_v1.json').read_text())
+          assert len(model['trees']) == 64
+          assert len(model['features']) == 22
+          assert 'Experimental Assertive Auto:' in vm
+          assert 'Warm ambient light preserved' in vm
+          assert 'AutoCandidatePreviewDialog' in p
+          assert 'Auto settings already match this photo.' in p
+          assert 'fun inspectAutoPreview()' in vm
+          assert 'fun applyAutoPreview()' in vm
+          assert 'luminance noise not detected' in a
+          assert 'colour noise not detected' in a
+          assert 'QuickAction.AUTO -> applySmartAuto()' in vm
+          assert 'EditSection.AUTO -> applySmartAuto()' in vm
+          assert 'Auto WB corrected using neutral-region agreement' in vm
+          assert 'fun applySmartAuto()' in vm
+          assert 'brief = true' in vm
+          assert 'lightcraft-codecs/heif' in Path('apps/lightcraft-android/android/app/build.gradle.kts').read_text()
+          assert 'fn fire_on_dark_background_keeps_flame_exposure_without_disabling_shadows' in a
+          assert 'runAutoDetail()' in vm and 'AutoAmountDialog' not in p
+          assert 'Classic Auto' not in p and 'AutoAmountDialog' not in vm
+          assert 'vm.runAutoDetail()' in edit and 'Current: Luminance NR ' in edit
+          assert 'ed.wbAutoStatus' in edit and 'Advanced' in edit
+          assert 'lightcraft.version=0.6.12-beta' in Path('apps/lightcraft-android/android/gradle.properties').read_text()
+          assert 'com.dennis.photostudio.assertive.v0612' in Path('apps/lightcraft-android/android/app/build.gradle.kts').read_text()
+          print('Source preservation and feature integrity: PASS')
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Android SDK manager
+        run: |
+          MANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -1)"
+          test -x "$MANAGER"
+          echo "$(dirname "$MANAGER")" >> "$GITHUB_PATH"
+      - name: Android SDK 37.0 and NDK 29
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --channel=3 "platforms;android-37.0" "ndk;29.0.14206865"
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
+          if [ ! -e "$ANDROID_HOME/platforms/android-37" ]; then
+            ln -s "$ANDROID_HOME/platforms/android-37.0" "$ANDROID_HOME/platforms/android-37"
+          fi
+      - name: Rust toolchain and target
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal --target aarch64-linux-android
+          rustup default 1.99.0
+          cargo +1.99.0 install cargo-ndk --version 4.1.2 --locked
+      - name: Cache native Rust build and dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          cache-on-failure: true
+      - name: Validate finished-photo, corrective-photo, colour and NR regressions
+        run: |
+          cargo +1.99.0 test -p lightcraft-pipeline --locked --lib
+          cargo +1.99.0 test -p lightcraft-develop --locked --lib
+          cargo +1.99.0 test -p lightcraft-codecs --features heif --locked --lib
+      - name: Type-check complete native engine before Android packaging
+        run: cargo +1.99.0 check -p lightcraft-engine --features lightcraft-codecs/heif --locked
+      - name: Assemble ARM64 APK
+        working-directory: apps/lightcraft-android/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace assembleDebug -Plightcraft.abis=arm64-v8a
+      - name: Verify APK and app identity
+        run: |
+          APK=apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          ls -lh "$APK"
+      - name: Upload test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dennis-Photo-Studio-v0.6.13-Direct-Auto-HEIC-ARM64
+          path: apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
