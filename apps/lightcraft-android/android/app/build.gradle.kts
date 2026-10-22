@@ -90,7 +90,7 @@ abstract class CargoNdkBuild : DefaultTask() {
                         "build", "--release", "-p", "lightcraft-android", "--lib",
                         // Enable the existing HEIC still decoder on Android.
                         // The original HEIC file remains the library source.
-                        "--features", "lightcraft-codecs/heif"),
+                        "--features", "heic"),
             )
         }
     }
