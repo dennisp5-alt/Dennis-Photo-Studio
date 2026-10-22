@@ -21,7 +21,7 @@ jobs:
       CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@v4
-      - name: Audit preserved v0.6.3 UI and evidence-gated Auto
+      - name: Audit intact UI and experimental unrestricted Auto routing
         run: |
           test -s LICENSE-MIT
           test -s LICENSE-APACHE
@@ -42,7 +42,7 @@ jobs:
               assert needle in a, needle
           for needle in ('cmd!("develop.auto", "Smart Auto"', 'SourceLevel::Preview)',
                          'd.curve.shadows=a.curve_shadows','d.curve.darks=a.curve_darks',
-                         'lightcraft_pipeline::auto::auto_wb_report(&src,&info)',
+                         'lightcraft_pipeline::auto::auto_wb_report_all_guards_off(&src,&info)',
                          'manual_wb', '"autoReport": auto_report',
                          'SourceLevel::Full} else {SourceLevel::Preview}'):
               assert needle in e, needle
@@ -102,6 +102,10 @@ jobs:
           assert '0.26*(-0.60-median)' in a
           assert '0.30*(median-0.85)' in a
           assert 'mod studio_v065_evidence_gate_regressions' in a
+          assert 'smart_auto_tone_report_all_guards_off(&src,&info,&' in e
+          assert 'auto_wb_report_all_guards_off(&src, &info)' in e
+          assert 'photographic_wb_preservation_gates_bypassed_test_only' in a
+          assert 'all_photographic_auto_guards_disabled_test_only' in a
           assert 'cmd!("develop.autoPreview"' in e
           assert '"sourceSettings":current' in e
           assert '"previewSettings":proposal' in e
