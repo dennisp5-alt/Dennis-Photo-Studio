@@ -210,7 +210,10 @@ jobs:
           assert 'Auto WB corrected using neutral-region agreement' in vm
           assert 'fun applySmartAuto()' in vm
           assert 'brief = true' in vm
-          assert 'lightcraft-codecs/heif' in Path('apps/lightcraft-android/android/app/build.gradle.kts').read_text()
+          manifest=Path('apps/lightcraft-android/Cargo.toml').read_text()
+          gradle=Path('apps/lightcraft-android/android/app/build.gradle.kts').read_text()
+          assert 'heic = ["lightcraft-codecs/heif"]' in manifest
+          assert '"--features", "heic"' in gradle
           assert 'fn fire_on_dark_background_keeps_flame_exposure_without_disabling_shadows' in a
           assert 'runAutoDetail()' in vm and 'AutoAmountDialog' not in p
           assert 'Classic Auto' not in p and 'AutoAmountDialog' not in vm
@@ -252,8 +255,10 @@ jobs:
           cargo +1.99.0 test -p lightcraft-pipeline --locked --lib
           cargo +1.99.0 test -p lightcraft-develop --locked --lib
           cargo +1.99.0 test -p lightcraft-codecs --features heif --locked --lib
-      - name: Type-check complete native engine before Android packaging
-        run: cargo +1.99.0 check -p lightcraft-engine --features lightcraft-codecs/heif --locked
+      - name: Type-check complete native engine and Android HEIC feature before packaging
+        run: |
+          cargo +1.99.0 check -p lightcraft-engine --features lightcraft-codecs/heif --locked
+          cargo +1.99.0 check -p lightcraft-android --features heic --locked
       - name: Assemble ARM64 APK
         working-directory: apps/lightcraft-android/android
         run: |
