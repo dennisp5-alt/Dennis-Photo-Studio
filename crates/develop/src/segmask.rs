@@ -172,6 +172,22 @@ mod tests {
     }
 
     #[test]
+    fn android_raw_deflate_mask_is_readable_without_re_inference() {
+        // Android's java.util.zip.Deflater(level=8, nowrap=true) emits this
+        // same RFC1951 raw stream. Data is 4x4 signed i8 logits, at 8x scale.
+        let android = SegMask {
+            side: 4,
+            data: "u/GBQUDjBwOHwIsvPBIfOBgA".into(),
+            rect: None,
+        };
+        let back = android.logits().unwrap();
+        let q = [-40, -16, 0, 16, 40, -8, 0, 8, 16, -24, -12, 12, 24, -16, 8, 0];
+        for (v, expected) in back.iter().zip(q) {
+            assert!((v - expected as f32 / 8.0).abs() < 0.0001);
+        }
+    }
+
+    #[test]
     fn damaged_data_is_none() {
         let mut m = SegMask::from_logits(8, &[1.0; 64]);
         m.side = 9;
