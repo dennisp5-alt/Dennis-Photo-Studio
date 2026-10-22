@@ -975,7 +975,7 @@ fun NewMaskSheet(vm: AppViewModel, op: String?, onDismiss: () -> Unit) {
             if (g == 0) {
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "Automatic selections are approximate unless the photo contains a matching semantic mask. Check the overlay and refine using Add/Subtract and Brush.",
+                    "Offline AI segments people and sky from image content. Check the overlay and refine boundaries using Add/Subtract and Brush.",
                     color = Lc.panelTextSoft, fontFamily = Inter, fontSize = 12.sp,
                     modifier = Modifier.padding(horizontal = 20.dp),
                 )
