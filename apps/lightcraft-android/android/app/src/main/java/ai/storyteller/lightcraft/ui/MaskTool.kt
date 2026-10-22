@@ -146,8 +146,12 @@ enum class MaskSection(val label: String, val icon: Glyph, val keys: List<String
     OPTICS("Optics", LcIcon.SectionOptics, listOf("moire", "defringe")),
 }
 
-/** The kinds of mask the phone makes (the AI ones need a model the phone doesn't have). */
+/** Non-destructive masks. Automatic selections use embedded semantic mattes when present;
+ * otherwise the engine supplies a best-effort photometric estimate. */
 val maskKinds = listOf(
+    Triple("subject", "Select Subject", LcIcon.Person),
+    Triple("sky", "Select Sky", LcIcon.Light),
+    Triple("background", "Select Background", LcIcon.SelectBox),
     Triple("brush", "Brush", LcIcon.Pencil),
     Triple("linear", "Linear Gradient", LcIcon.Segments),
     Triple("radial", "Radial Gradient", LcIcon.Radial),
@@ -164,6 +168,7 @@ fun maskIcon(kind: String): LcIcon = maskKinds.firstOrNull { it.first == kind }?
 @Composable
 fun MaskKindIcon(kind: String, modifier: Modifier, mono: Boolean = false) {
     when (kind) {
+        "subject", "sky", "background" -> LcIcon(maskIcon(kind), null, modifier = modifier, tint = if (mono) Color.White else Color(0xFFB8B8B8), size = 22.dp)
         "linear" -> Canvas(modifier) {
             val s = size.minDimension * 0.78f
             val tl = Offset((size.width - s) / 2, (size.height - s) / 2)
@@ -924,7 +929,8 @@ private fun MaskThumb(m: MaskInfo, photoW: Float, photoH: Float, frame: Color?, 
 
 /**
  * The new mask sheet, as the reference's: "Create new mask" over 47.7 dp rows every 55.5 dp in
- * groups 17.5 dp apart (its first group, Select Subject, Sky and Background, is AI and left out).
+ * groups 17.5 dp apart. Automatic selection falls back to approximate luminance/colour
+ * analysis when the source photo does not include a compatible embedded semantic mask.
  */
 @Composable
 fun NewMaskSheet(vm: AppViewModel, op: String?, onDismiss: () -> Unit) {
@@ -942,7 +948,7 @@ fun NewMaskSheet(vm: AppViewModel, op: String?, onDismiss: () -> Unit) {
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Lc.sectionChosen))
         Spacer(Modifier.height(16.dp))
-        listOf(maskKinds.take(3), maskKinds.drop(3)).forEachIndexed { g, group ->
+        listOf(maskKinds.take(3), maskKinds.drop(3).take(3), maskKinds.drop(6)).forEachIndexed { g, group ->
             if (g > 0) {
                 Spacer(Modifier.height(7.dp))
                 Box(Modifier.align(Alignment.CenterHorizontally).width(320.dp).height(2.dp).background(Lc.panelButtonBorder))
@@ -965,6 +971,14 @@ fun NewMaskSheet(vm: AppViewModel, op: String?, onDismiss: () -> Unit) {
                     Spacer(Modifier.width(20.dp))
                     Text(label, color = Lc.panelText, fontFamily = Inter, fontSize = 16.sp)
                 }
+            }
+            if (g == 0) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Automatic selections are approximate unless the photo contains a matching semantic mask. Check the overlay and refine using Add/Subtract and Brush.",
+                    color = Lc.panelTextSoft, fontFamily = Inter, fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                )
             }
         }
         Spacer(Modifier.height(24.dp))
