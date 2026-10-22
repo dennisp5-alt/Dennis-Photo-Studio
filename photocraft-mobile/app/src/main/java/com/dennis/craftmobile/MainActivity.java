@@ -52,12 +52,15 @@ public final class MainActivity extends Activity {
         String look = "Original";
         float[] autoZones;  // Immutable zone map measured on original preview.
         float autoStrength = 100f;
+        float luminanceNR, colorNR, sharpen, clarity, texture, dehaze;
         Edit copy() {
             Edit d = new Edit();
             d.exposure = exposure; d.contrast = contrast; d.highlights = highlights;
             d.shadows = shadows; d.saturation = saturation; d.warmth = warmth;
             d.tint = tint; d.ratio = ratio; d.rotation = rotation; d.look = look;
             d.autoZones = autoZones; d.autoStrength = autoStrength;
+            d.luminanceNR = luminanceNR; d.colorNR = colorNR; d.sharpen = sharpen;
+            d.clarity = clarity; d.texture = texture; d.dehaze = dehaze;
             return d;
         }
     }
@@ -76,6 +79,13 @@ public final class MainActivity extends Activity {
     private TextView openPlaceholder, status;
     private Mode mode = Mode.LOOKS;
     private String activeAdjustment = "Exposure";
+    private int adjustGroup = 0;  // 0 Tone, 1 Noise+Sharpen, 2 Presence
+    private static final String[] TONE_FIELDS =
+            {"Exposure","Contrast","Highlights","Shadows","Saturation","Warmth","Tint"};
+    private static final String[] DETAIL_FIELDS =
+            {"Luminance NR","Color NR","Sharpen"};
+    private static final String[] PRESENCE_FIELDS =
+            {"Clarity","Texture","Dehaze"};
     private int jpegQuality = 95;
 
     @Override public void onCreate(Bundle state) {
@@ -353,20 +363,23 @@ public final class MainActivity extends Activity {
 
     private void drawControls() {
         controls.removeAllViews();
+        controls.setLayoutParams(new LinearLayout.LayoutParams(-1,
+                dp(mode == Mode.ADJUST ? 224 : 189)));
         if (mode == Mode.LOOKS) {
             panelTitle("LOOKS", "Tap a style to apply");
             addHorizontalChoices(new String[]{"Original", "Natural", "Warm", "Cool", "Dramatic", "B&W"},
                     this::applyLook);
         } else if (mode == Mode.ADJUST) {
-            panelTitle("ADJUSTMENTS", "Fine tune your photo");
+            panelTitle("ADJUSTMENTS", "64×64 intelligent detail controls");
+            addDetailGroupStrip();
             HorizontalScrollView scroll = new HorizontalScrollView(this);
             scroll.setHorizontalScrollBarEnabled(false);
             LinearLayout options = new LinearLayout(this);
-            String[] fields = "Auto".equals(edit.look) ?
-                    new String[]{"Auto Strength", "Exposure", "Contrast", "Highlights",
-                            "Shadows", "Saturation", "Warmth", "Tint"} :
-                    new String[]{"Exposure", "Contrast", "Highlights", "Shadows",
-                            "Saturation", "Warmth", "Tint"};
+            String[] fields = adjustGroup == 1 ? DETAIL_FIELDS :
+                    adjustGroup == 2 ? PRESENCE_FIELDS :
+                    ("Auto".equals(edit.look) ? 
+                            new String[]{"Auto Strength","Exposure","Contrast","Highlights",
+                                    "Shadows","Saturation","Warmth","Tint"} : TONE_FIELDS);
             for (String field : fields) {
                 TextView v = label(field, 12, field.equals(activeAdjustment) ? ACCENT : Color.LTGRAY);
                 v.setPadding(dp(12), dp(7), dp(12), dp(7));
@@ -394,6 +407,82 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private void addDetailGroupStrip() {
+        HorizontalScrollView scroller = new HorizontalScrollView(this);
+        scroller.setHorizontalScrollBarEnabled(false);
+        LinearLayout bar = new LinearLayout(this);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(dp(8),0,dp(8),0);
+        scroller.addView(bar);
+        detailTab(bar,"Tone",0);
+        detailTab(bar,"Noise + Sharpen",1);
+        detailTab(bar,"Clarity + Texture",2);
+        TextView auto = label("✦ AUTO GROUP",11,Color.WHITE);
+        auto.setTypeface(android.graphics.Typeface.create("sans-serif-medium",0));
+        auto.setPadding(dp(12),0,dp(12),0);
+        auto.setBackground(background(ACCENT,9));
+        LinearLayout.LayoutParams param = new LinearLayout.LayoutParams(-2,dp(33));
+        param.leftMargin=dp(9);
+        bar.addView(auto,param);
+        auto.setOnClickListener(v -> autoForCurrentGroup());
+        controls.addView(scroller,new LinearLayout.LayoutParams(-1,dp(42)));
+    }
+    private void detailTab(LinearLayout bar,String title,int group) {
+        TextView tab=label(title,12,adjustGroup==group ? Color.WHITE :
+                Color.rgb(166,183,201));
+        tab.setPadding(dp(13),0,dp(13),0);
+        if(adjustGroup==group) tab.setBackground(background(Color.rgb(34,58,88),9));
+        bar.addView(tab,new LinearLayout.LayoutParams(-2,dp(34)));
+        tab.setOnClickListener(v->{
+            adjustGroup=group;
+            activeAdjustment=group==0 ? ("Auto".equals(edit.look) ? "Auto Strength" :
+                    "Exposure") : group==1 ? "Luminance NR" : "Clarity";
+            drawControls();
+        });
+    }
+    private void applyRecommendations(DetailEngine.Recommended r,int group) {
+        if(group==1) {
+            edit.luminanceNR=r.luminanceNoise;
+            edit.colorNR=r.colorNoise;
+            edit.sharpen=r.sharpening;
+        } else if(group==2) {
+            edit.clarity=r.clarity;
+            edit.texture=r.texture;
+            edit.dehaze=r.dehaze;
+        } else {
+            edit.luminanceNR=r.luminanceNoise;
+            edit.colorNR=r.colorNoise;
+            edit.sharpen=r.sharpening;
+            edit.clarity=r.clarity;
+            edit.texture=r.texture;
+            edit.dehaze=r.dehaze;
+        }
+    }
+    private void autoForCurrentGroup() {
+        if(adjustGroup==0) {autoTune();return;}
+        Bitmap original=previewSource;
+        if(original==null) {openImage();return;}
+        int group=adjustGroup;
+        int serial=generation.incrementAndGet();
+        status.setText("Analysing 64×64 detail zones…");
+        work.execute(()->{
+            try {
+                DetailEngine.Recommended recommended=DetailEngine.analyse(original);
+                ui.post(()->{
+                    if(serial!=generation.get() || original!=previewSource)return;
+                    checkpoint();
+                    applyRecommendations(recommended,group);
+                    render();drawControls();
+                    Toast.makeText(this,group==1 ? 
+                            "Auto Noise + Sharpen applied" : "Auto Clarity + Texture applied",
+                            Toast.LENGTH_SHORT).show();
+                });
+            } catch(RuntimeException | OutOfMemoryError ex) {
+                showError("Detail Auto failed: "+ex.getMessage());
+            }
+        });
+    }
+
     private void showSlider() {
         LinearLayout line = new LinearLayout(this);
         line.setPadding(dp(14), dp(2), dp(14), 0);
@@ -404,21 +493,22 @@ public final class MainActivity extends Activity {
         SeekBar slider = new SeekBar(this);
         slider.setMax(1000);
         boolean strengthSlider = activeAdjustment.equals("Auto Strength");
+        boolean positiveSlider = strengthSlider || adjustGroup != 0;
         float range = activeAdjustment.equals("Exposure") ? 2f : 100f;
         float original = getField(activeAdjustment);
-        slider.setProgress(strengthSlider ? Math.round(original * 10f) :
+        slider.setProgress(positiveSlider ? Math.round(original * 10f) :
                 Math.round((original / range + 1) * 500f));
-        value.setText(strengthSlider ? "Auto Strength: " + Math.round(original) + "%" :
+        value.setText(positiveSlider ? activeAdjustment + ": " + Math.round(original) + "%" :
                 activeAdjustment + ": " + String.format(Locale.US,
                         activeAdjustment.equals("Exposure") ? "%+.2f EV" : "%+.0f", original));
         Edit starting = edit.copy();
         slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
                 if (!fromUser || previewSource == null) return;
-                float result = strengthSlider ? progress / 10f :
+                float result = positiveSlider ? progress / 10f :
                         ((float) progress / 500 - 1) * range;
                 setField(activeAdjustment, result);
-                value.setText(strengthSlider ? "Auto Strength: " + Math.round(result) + "%" :
+                value.setText(positiveSlider ? activeAdjustment + ": " + Math.round(result) + "%" :
                         activeAdjustment + ": " + String.format(Locale.US,
                                 activeAdjustment.equals("Exposure") ? "%+.2f EV" : "%+.0f", result));
                 render();
@@ -439,6 +529,12 @@ public final class MainActivity extends Activity {
     private float getField(String which) {
         switch (which) {
             case "Auto Strength": return edit.autoStrength;
+            case "Luminance NR": return edit.luminanceNR;
+            case "Color NR": return edit.colorNR;
+            case "Sharpen": return edit.sharpen;
+            case "Clarity": return edit.clarity;
+            case "Texture": return edit.texture;
+            case "Dehaze": return edit.dehaze;
             case "Exposure": return edit.exposure;
             case "Contrast": return edit.contrast;
             case "Highlights": return edit.highlights;
@@ -451,6 +547,12 @@ public final class MainActivity extends Activity {
     private void setField(String which, float value) {
         switch (which) {
             case "Auto Strength": edit.autoStrength = clamp(value, 0f, 100f); break;
+            case "Luminance NR": edit.luminanceNR = clamp(value,0f,100f); break;
+            case "Color NR": edit.colorNR = clamp(value,0f,100f); break;
+            case "Sharpen": edit.sharpen = clamp(value,0f,100f); break;
+            case "Clarity": edit.clarity = clamp(value,0f,100f); break;
+            case "Texture": edit.texture = clamp(value,0f,100f); break;
+            case "Dehaze": edit.dehaze = clamp(value,0f,100f); break;
             case "Exposure": edit.exposure = value; break;
             case "Contrast": edit.contrast = value; break;
             case "Highlights": edit.highlights = value; break;
@@ -503,6 +605,7 @@ public final class MainActivity extends Activity {
         work.execute(() -> {
             try {
                 SpatialAuto64.Scene scene = SpatialAuto64.analyse(original);
+                DetailEngine.Recommended details = DetailEngine.analyse(original);
                 ui.post(() -> {
                     if (serial != generation.get() || previewSource != original) return;
                     checkpoint();
@@ -516,6 +619,9 @@ public final class MainActivity extends Activity {
                     edit.autoZones = scene.zones;
                     edit.autoStrength = 100f;
                     edit.look = "Auto";
+                    // Auto tone and both detail groups are all scene dependent.
+                    applyRecommendations(details,0);
+                    adjustGroup = 0;
                     activeAdjustment = "Auto Strength";
                     render();
                     drawControls();
@@ -623,6 +729,17 @@ public final class MainActivity extends Activity {
         return (int)(255 * clamp(value,0,1) + .5f);
     }
 
+    private static DetailEngine.Settings detailSettings(Edit e) {
+        DetailEngine.Settings d = new DetailEngine.Settings();
+        d.luminanceNoise=e.luminanceNR;
+        d.colorNoise=e.colorNR;
+        d.sharpening=e.sharpen;
+        d.clarity=e.clarity;
+        d.texture=e.texture;
+        d.dehaze=e.dehaze;
+        return d;
+    }
+
     private static Bitmap process(Bitmap src, Edit e) {
         int w = src.getWidth(), h = src.getHeight();
         Bitmap output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
@@ -703,13 +820,17 @@ public final class MainActivity extends Activity {
             rotated = Bitmap.createBitmap(output, 0, 0, w, h, m, true);
             if (rotated != output) output.recycle();
         }
-        if (e.ratio <= 0) return rotated;
+        if (e.ratio <= 0) {
+            DetailEngine.applyInPlace(rotated, detailSettings(e));
+            return rotated;
+        }
         int width = rotated.getWidth(), height = rotated.getHeight();
         int cw = width, ch = height;
         if (width / (float)height > e.ratio) cw = Math.max(1, Math.round(height*e.ratio));
         else ch = Math.max(1, Math.round(width/e.ratio));
         Bitmap cropped = Bitmap.createBitmap(rotated, (width-cw)/2, (height-ch)/2, cw, ch);
         if (cropped != rotated) rotated.recycle();
+        DetailEngine.applyInPlace(cropped, detailSettings(e));
         return cropped;
     }
 
@@ -776,11 +897,15 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.4")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.5")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
-                        "tone/colour adjustments, 64×64 Auto with clipped-highlights guard, centre crop, rotate, " +
+                        "tone/colour adjustments, 64×64 Auto, luminance/chroma NR, sharpening, " +
+                        "clarity, texture, contrast dehaze, centre crop, rotate, " +
                         "undo/redo, press-and-hold before view, export and share.\n\n" +
+                        "Auto analyses noise and detail from 64×64 local probes. Each detail group also has " +
+                        "its own Auto button and six manual sliders. Dehaze is a contrast-based " +
+                        "approximation, not a depth map. " +
                         "Limitations: no healing, local masks, layers or RAW workflow yet. " +
                         "PhotoCraft's Rust engine is NOT integrated in this version. " +
                         "Export is selectable JPEG 85/90/95/100 (not lossless), capped at 8192px / 50MP and does not " +
