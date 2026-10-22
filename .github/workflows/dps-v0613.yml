@@ -216,7 +216,7 @@ jobs:
           assert 'Classic Auto' not in p and 'AutoAmountDialog' not in vm
           assert 'vm.runAutoDetail()' in edit and 'Current: Luminance NR ' in edit
           assert 'ed.wbAutoStatus' in edit and 'Advanced' in edit
-          assert 'lightcraft.version=0.6.12-beta' in Path('apps/lightcraft-android/android/gradle.properties').read_text()
+          assert 'lightcraft.version=0.6.13-beta' in Path('apps/lightcraft-android/android/gradle.properties').read_text()
           assert 'com.dennis.photostudio.assertive.v0612' in Path('apps/lightcraft-android/android/app/build.gradle.kts').read_text()
           print('Source preservation and feature integrity: PASS')
           PY
