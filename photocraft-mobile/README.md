@@ -43,3 +43,17 @@ Evaluate the existing arm64 Android shell from kanaaka/photocraft-android pinned
 
 ### Runtime caveat
 Updated UI needs an on-device visual acceptance pass; GitHub Actions build success is not device validation.
+
+## v0.4: 64×64 highlight-protected Auto
+
+- 4,096 spatial zones sampled from the original preview using adaptive strides.
+- Per-zone luminance and bright RGB-channel occupancy; 3x3 smooth spatial weight map.
+- Global exposure limited by bright-region occupancy and scene high percentile.
+- Dark foliage lifted *locally*, with RGB-channel headroom gating bright skin, clouds and petals.
+- Same immutable scene zone data applied to preview and JPEG output (the analysis grid is mapped to output dimensions).
+- Auto Strength 0–100% lives in Adjustments after pressing Auto; 0% removes the automatic tonal effect.
+- Auto runs on a background worker; Look presets, normal manual adjustments, crop, picker and export remain on their v0.3 processing path.
+- No claims of subject segmentation, semantic masks or integrated PhotoCraft Rust engine.
+
+### Visual regression checks
+Test against the uploaded flower and Halloween woodland pairs: no near-white petal blowout or washed-out skin. Also test a genuinely underexposed photo so the new highlight limits do not prevent useful correction. Real-device runtime testing remains necessary.
