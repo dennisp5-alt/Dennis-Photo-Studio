@@ -78,6 +78,14 @@ pub fn auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> AutoTo
 /// The model estimates parameters that the real render pipeline understands.
 /// It uses NO Adobe assets/models or claimed semantic/object recognition.
 fn smart_auto_candidate(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> (AutoTone,bool) {
+    smart_auto_candidate_mode(src,info,s,false)
+}
+
+/// All-guards-off test uses the same Auto measurements, but disables
+/// photographic scene/veto rules. Never used by the production function.
+fn smart_auto_candidate_mode(
+    src:&Rgb32f, info:&SourceInfo, s:&DevelopSettings, no_guards:bool
+) -> (AutoTone,bool) {
     let mut img=lightcraft_raster::resample::fit(
         src,512,512,lightcraft_raster::resample::Filter::Box);
     let base=DevelopSettings { wb:s.wb, ..DevelopSettings::default() };
@@ -171,7 +179,7 @@ fn smart_auto_candidate(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) ->
     // Do not apply the large fire/charcoal lift to ordinary bright subjects
     // merely because their background is dark. Preserve the earlier fire
     // behaviour only with supporting warm-emitter pixels.
-    if intentional_light && warm_emitters as f64 / n > 0.002 {
+    if !no_guards && intentional_light && warm_emitters as f64 / n > 0.002 {
         let visible_wood=recoverable_fraction>0.012;
         return (AutoTone {
             exposure:0.0,contrast:0.0,highlights:0.0,
@@ -189,33 +197,33 @@ fn smart_auto_candidate(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) ->
     // v0.6.4: structure measures *subject evidence*, never exposure
     // correctness. Fine texture by itself is not an exposure defect.
     // The two tails and meaningful midtones must agree before a correction.
-    let high_key=median>0.75 && bright_fraction>0.22;
-    let low_key=(median < -2.5 && bright_fraction<0.015)
+    let high_key=!no_guards && median>0.75 && bright_fraction>0.22;
+    let low_key=!no_guards && ((median < -2.5 && bright_fraction<0.015)
         || (shadow_fraction>0.64 && median< -2.1 && bright_fraction<0.35)
         // A well-lit subject in a purposely dark setting should not be
         // normalized to grey merely because the background owns the median.
         || (median< -1.6 && p95> -1.1 && p95<0.55 && p95-median>1.3
-            && bright_fraction<0.10);
-    let is_shadow_deficit=!low_key && median< -0.65
-        && (subject_ev< -0.75 || median< -1.25);
-    let is_bright_deficit=median>0.85 && subject_ev>0.45
-        && (bright_fraction>0.12 || p95>2.0);
+            && bright_fraction<0.10));
+    let is_shadow_deficit=(no_guards && median< -0.05) || (!low_key && median< -0.65
+        && (subject_ev< -0.75 || median< -1.25));
+    let is_bright_deficit=(no_guards && median>0.05) || (median>0.85 && subject_ev>0.45
+        && (bright_fraction>0.12 || p95>2.0));
     let exposure=if is_shadow_deficit {
         let need=(0.26*(-0.60-median).max(0.0)
-            +0.30*(-0.80-subject_ev).max(0.0)).clamp(0.0,0.46);
-        if need>=0.065 {need}else{0.0}
+            +0.30*(-0.80-subject_ev).max(0.0)).clamp(0.0,if no_guards {2.0} else {0.46});
+        if no_guards || need>=0.065 {need}else{0.0}
     }else if is_bright_deficit {
         let need=(0.30*(median-0.85).max(0.0)
-            +0.25*(subject_ev-0.45).max(0.0)).clamp(0.0,0.35);
-        if need>=0.065 {-need}else{0.0}
+            +0.25*(subject_ev-0.45).max(0.0)).clamp(0.0,if no_guards {2.0} else {0.35});
+        if no_guards || need>=0.065 {-need}else{0.0}
     }else{0.0};
-    let exposure=if exposure>0.0 && p995>2.25 {
+    let exposure=if !no_guards && exposure>0.0 && p995>2.25 {
         exposure.min(0.18)
     }else{exposure};
     let exposure=(exposure*100.0).round()/100.0;
 
     let dynamic_range=p95-p05;
-    let protected_warm_colour=colour_eligible>100
+    let protected_warm_colour=!no_guards && colour_eligible>100
         && colour_mass/colour_eligible as f64>0.20
         && rich_colour as f64/colour_eligible as f64>0.09;
     // Shadow recovery requires *three* signals: deeply compressed dark
@@ -285,8 +293,8 @@ fn smart_auto_candidate(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) ->
     // A bright label on detailed dark fabric can justify a still smaller
     // shadows-only correction despite a globally low-key histogram.
     // Flat night backgrounds have no detailed shadow evidence.
-    let allow_zonal=warm_emitters as f64/n<0.002
-        && !protected_warm_colour && !backlit_daylight_scene;
+    let allow_zonal=no_guards || (warm_emitters as f64/n<0.002
+        && !protected_warm_colour && !backlit_daylight_scene);
     let zonal_shadow=if allow_zonal
         && (zonal.bright_surround_dark_detail
             || zonal.dark_texture_with_bright_reference) {
@@ -343,11 +351,16 @@ fn smart_auto_candidate(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) ->
     let skin_fraction=skin_like_colour as f64/eligible;
     let mean_sat=colour_mass/eligible;
     let has_colour=colour_fraction>0.22 && colour_eligible as f64>n*0.10;
-    let weak_colour=has_colour && mean_sat<0.17
-        && soft_fraction>0.14 && rich_fraction<0.08
-        && skin_fraction<0.26;
+    let weak_colour=if no_guards {
+        colour_eligible>0 && colour_fraction>0.05 && mean_sat<0.30
+    }else{
+        has_colour && mean_sat<0.17
+            && soft_fraction>0.14 && rich_fraction<0.08
+            && skin_fraction<0.26
+    };
     let chroma_need=if weak_colour {
-        ((0.17-mean_sat)/0.13).clamp(0.0,1.0)
+        (((if no_guards {0.30} else {0.17})-mean_sat)
+            /(if no_guards {0.23} else {0.13})).clamp(0.0,1.0)
     }else{0.0};
     let mut vibrance=if chroma_need>0.22 {
         (chroma_need*19.0).clamp(0.0,19.0).round()
@@ -358,7 +371,7 @@ fn smart_auto_candidate(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) ->
     // Genuine channel clipping *plus* unusually strong colour is
     // evidence for a mild negative correction; vivid colours alone are not.
     let clipped_fraction=clipped_colour as f64/eligible;
-    if has_colour && rich_fraction>0.40 && mean_sat>0.63
+    if !no_guards && has_colour && rich_fraction>0.40 && mean_sat>0.63
         && clipped_fraction>0.065 {
         vibrance=-((clipped_fraction-0.065)*27.0).clamp(0.0,9.0).round();
         saturation=-((clipped_fraction-0.065)*12.0).clamp(0.0,5.0).round();
@@ -369,7 +382,7 @@ fn smart_auto_candidate(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) ->
     // A bright protected sky makes positive global exposure inappropriate,
     // even if most of the frame is a dark foreground. Repair the ground
     // with Shadows/Curve instead; keep a small exposure margin only.
-    let exposure=if backlit_daylight_scene && exposure>0.0 {
+    let exposure=if !no_guards && backlit_daylight_scene && exposure>0.0 {
         exposure.min(0.12)
     }else{exposure};
     // v0.6.8: Lightcraft-style finishing. The defect-driven v0.6.5
@@ -406,7 +419,7 @@ fn smart_auto_candidate(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) ->
     // Keep the existing scene-derived contrast correction, but avoid
     // unnecessary heavy contrast on already normally exposed photographs.
     let contrast=if ordinary_photo &&
-        contrast>8.0 && exposure.abs()<=0.06 && !backlit_daylight_scene {
+        !no_guards && contrast>8.0 && exposure.abs()<=0.06 && !backlit_daylight_scene {
         8.0
     }else{contrast};
         // Subtle upper-midtones only on cool/neutral moderate-key scenes.
@@ -444,11 +457,16 @@ fn smart_auto_candidate(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) ->
     // Only the genuine whole-frame deficit path may request strong global
     // exposure in this experiment; low-key subjects remain eligible for
     // separately justified *local* shadow development.
-    let recoverable_dark_subject=recoverable_fraction>0.17
-        && structure_fraction>0.013 && subject_ev< -0.70
-        && median< -0.58 && p95<0.72
-        && warm_emitters as f64/n<0.002
-        && !protected_warm_colour && !high_key && !low_key;
+    let recoverable_dark_subject=if no_guards {
+        recoverable_fraction>0.035 && structure_fraction>0.002
+            && median< -0.20
+    }else{
+        recoverable_fraction>0.17
+            && structure_fraction>0.013 && subject_ev< -0.70
+            && median< -0.58 && p95<0.72
+            && warm_emitters as f64/n<0.002
+            && !protected_warm_colour && !high_key && !low_key
+    };
     if recoverable_dark_subject {
         let need=(0.24+0.29*(-0.7-subject_ev).max(0.0)
             +0.13*(-0.7-median).max(0.0)).clamp(0.24,1.20);
@@ -459,20 +477,20 @@ fn smart_auto_candidate(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) ->
     // A photograph with bright reflective surroundings and recoverable
     // dark subject structure needs joint highlight AND shadow development.
     // Treat these as evidence from zones, not object recognition.
-    if zonal.bright_surround_dark_detail && warm_emitters as f64/n<0.002 {
+    if zonal.bright_surround_dark_detail && (no_guards || warm_emitters as f64/n<0.002) {
         candidate.shadows=candidate.shadows.max(18.0);
         candidate.curve_darks=candidate.curve_darks.max(8.0);
-        candidate.exposure=candidate.exposure.min(0.12);
+        if !no_guards {candidate.exposure=candidate.exposure.min(0.12);}
     }
     if zonal.dark_texture_with_bright_reference
-        && warm_emitters as f64/n<0.002 && p95<1.85 {
+        && (no_guards || (warm_emitters as f64/n<0.002 && p95<1.85)) {
         candidate.shadows=candidate.shadows.max(12.0);
         candidate.curve_darks=candidate.curve_darks.max(7.0);
     }
     // Permit highlight compression on bright non-emissive images, even
     // when a coarse high-key label previously forced this control to zero.
     if p995>1.70 && bright_fraction>0.16
-        && warm_emitters as f64/n<0.002 && !protected_warm_colour {
+        && (no_guards || (warm_emitters as f64/n<0.002 && !protected_warm_colour)) {
         let h=-(8.0+12.0*(p995-1.7).max(0.0))
             .clamp(8.0,24.0).round();
         candidate.highlights=candidate.highlights.min(h);
@@ -488,10 +506,10 @@ fn smart_auto_candidate(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) ->
         candidate.contrast=candidate.contrast.max(4.0);
     }
     // Keep adjustments editable and bounded for an experimental comparison.
-    candidate.exposure=candidate.exposure.clamp(-1.2,1.2);
-    candidate.shadows=candidate.shadows.clamp(-35.0,35.0);
-    candidate.highlights=candidate.highlights.clamp(-35.0,20.0);
-    candidate.curve_darks=candidate.curve_darks.clamp(-24.0,24.0);
+    candidate.exposure=candidate.exposure.clamp(if no_guards {-4.0}else{-1.2},if no_guards {4.0}else{1.2});
+    candidate.shadows=candidate.shadows.clamp(if no_guards {-100.0}else{-35.0},if no_guards {100.0}else{35.0});
+    candidate.highlights=candidate.highlights.clamp(if no_guards {-100.0}else{-35.0},if no_guards {100.0}else{20.0});
+    candidate.curve_darks=candidate.curve_darks.clamp(if no_guards {-100.0}else{-24.0},if no_guards {100.0}else{24.0});
     // Propose an image-dependent edit before any output-quality vetoes.
     (candidate,false)
 
@@ -546,6 +564,18 @@ pub fn smart_auto_tone_report(src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings)
 pub fn smart_auto_tone_report_unguarded(src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings)
     -> AutoToneAuditReport {
     smart_auto_tone_report_mode(src,info,s,false)
+}
+
+/// v0.6.12d: no photographic Auto Tone guard or candidate veto.
+pub fn smart_auto_tone_report_all_guards_off(
+    src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings
+) -> AutoToneAuditReport {
+    let mut audit=smart_auto_tone_report_mode(src,info,s,false);
+    let (proposal,_)=smart_auto_candidate_mode(src,info,s,true);
+    audit.proposed=proposal;
+    audit.final_tone=proposal;
+    audit.guard_reasons=vec!["all_photographic_auto_guards_disabled_test_only"];
+    audit
 }
 
 fn smart_auto_tone_report_mode(
@@ -2377,6 +2407,38 @@ mod studio_v0611_scene_auto_integration {
         assert!(!special || candidate.exposure==0.0);
         assert_eq!(candidate.exposure,0.0);
         assert_eq!(candidate.curve_lights,0.0);
+    }
+}
+
+#[cfg(test)]
+mod studio_v0612d_fully_unrestricted_auto {
+    use super::*;
+    #[test]
+    fn all_guards_off_reports_exact_applied_proposal() {
+        let photo=Rgb32f::from_fn(192,128,|x,y|{
+            let v=0.020+((x*19+y*11)%31) as f32*0.0005;
+            [v*1.05,v,v*0.9]
+        });
+        let s=DevelopSettings::default();
+        let report=smart_auto_tone_report_all_guards_off(
+            &photo,&SourceInfo::default(),&s);
+        assert_eq!(report.proposed,report.final_tone);
+        assert_eq!(report.guard_reasons,vec!["all_photographic_auto_guards_disabled_test_only"]);
+        assert!(report.final_tone.exposure>0.1,
+            "dark photo still vetoed: {:?}",report.final_tone);
+    }
+
+    #[test]
+    fn low_key_scene_no_longer_blocks_exposure() {
+        let photo=Rgb32f::from_fn(192,128,|x,y|{
+            if x>70 && x<122 && y>25 && y<105 {[0.10,0.065,0.045]}
+            else {[0.003,0.003,0.003]}
+        });
+        let s=DevelopSettings::default();
+        let report=smart_auto_tone_report_all_guards_off(
+            &photo,&SourceInfo::default(),&s);
+        assert!(report.final_tone.exposure>0.0,
+            "mood protection remains: {:?}",report.final_tone);
     }
 }
 
