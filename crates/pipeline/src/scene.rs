@@ -20,10 +20,110 @@ pub struct ZoneEvidence {
     pub samples:usize,
 }
 
+
+/// Summary of the 32×32 fine-grid analysis, not a mask or 1,024 edits.
+/// Every cell is analysed in the same linear working space as the 3×3 grid.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+pub struct FineSceneEvidence {
+    pub grid_side:usize,
+    pub populated_zones:usize,
+    pub luminous_zones:usize,
+    pub textured_shadow_zones:usize,
+    pub empty_dark_zones:usize,
+    pub luminous_coverage:f64,
+    pub shadow_detail_coverage:f64,
+    /// Tiny bright source set against broad darkness: diagnostic only.
+    pub concentrated_lights:bool,
+    /// Fine dark texture amid extensive brighter scenery, including subjects
+    /// diluted in a large 3×3 zone. Authorises modest Shadows/Curve evidence,
+    /// never an unconditional exposure reduction.
+    pub mixed_light_shadow_detail:bool,
+    pub proposed_shadow_recovery:f64,
+    pub proposed_darks_curve:f64,
+}
+
+const FINE_SIDE:usize=32;
+const FINE_ZONES:usize=FINE_SIDE*FINE_SIDE;
+
+#[derive(Clone, Copy, Default)]
+struct FineCell {
+    count:u32,
+    bright:u32,
+    recoverable:u32,
+    dark_texture:u32,
+    empty_black:u32,
+}
+
+/// A fixed-size, single-pass grid: O(pixels + 1,024) with no extra pixels,
+/// heap-allocated zone arrays, semantic model, or per-zone render. We retain
+/// aggregate evidence only; edits remain global and non-destructive.
+fn analyse_fine_linear(img:&Rgb32f,lum:&[f32])->FineSceneEvidence {
+    let mut cells=[FineCell::default();FINE_ZONES];
+    for y in 0..img.height {
+        for x in 0..img.width {
+            let index=y*img.width+x;
+            let cell=(y*FINE_SIDE/img.height).min(FINE_SIDE-1)*FINE_SIDE
+                +(x*FINE_SIDE/img.width).min(FINE_SIDE-1);
+            let l=lum[index];
+            let c=&mut cells[cell];
+            c.count+=1;
+            if l>0.48 {c.bright+=1;}
+            if (0.035..0.28).contains(&l) {c.recoverable+=1;}
+            if l<0.012 {c.empty_black+=1;}
+            // Real mid-shadow structure, not black sky or near-zero noise.
+            if x>0 && y>0 && (0.035..0.24).contains(&l) {
+                let a=lum[index-1];
+                let b=lum[index-img.width];
+                let edge=((l-a).abs()+(l-b).abs())/(0.035+l+a+b);
+                if edge>0.058 {c.dark_texture+=1;}
+            }
+        }
+    }
+    let mut result=FineSceneEvidence {grid_side:FINE_SIDE,..Default::default()};
+    for c in cells {
+        if c.count==0 {continue;}
+        result.populated_zones+=1;
+        let n=c.count as f64;
+        // Require meaningful within-tile coverage; a lone bright pixel or
+        // noisy edge never becomes an independently informative zone.
+        if c.bright as f64/n>0.35 {result.luminous_zones+=1;}
+        if c.recoverable as f64/n>0.22
+            && c.dark_texture>=2
+            && c.dark_texture as f64/n>0.012 {
+            result.textured_shadow_zones+=1;
+        }
+        if c.empty_black as f64/n>0.85 {result.empty_dark_zones+=1;}
+    }
+    let n=result.populated_zones.max(1) as f64;
+    result.luminous_coverage=result.luminous_zones as f64/n;
+    result.shadow_detail_coverage=result.textured_shadow_zones as f64/n;
+    // The luminous reference must cover multiple independent fine tiles.
+    // A small flame/isolated lamp amid otherwise black sky does not license
+    // whole-frame exposure; this flag is observational, not a veto.
+    result.concentrated_lights=result.luminous_zones>=2
+        && result.luminous_coverage<0.08
+        && result.empty_dark_zones as f64/n>0.55;
+    // At least 15% bright cells, and real *other* cells with shadow texture.
+    // This distinguishes small dark subjects lost inside large bright zones
+    // from a photo whose global histogram is simply low-key.
+    result.mixed_light_shadow_detail=result.luminous_coverage>0.15
+        && result.textured_shadow_zones>=3
+        && result.shadow_detail_coverage>0.002
+        && result.shadow_detail_coverage<0.40;
+    if result.mixed_light_shadow_detail {
+        result.proposed_shadow_recovery=(7.0+
+            32.0*result.shadow_detail_coverage.min(0.20)).clamp(7.0,13.0).round();
+        result.proposed_darks_curve=(3.0+
+            18.0*result.shadow_detail_coverage.min(0.20)).clamp(3.0,7.0).round();
+    }
+    result
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
 pub struct ZonalSceneEvidence {
     /// Row-major 3x3 zones (top-left to bottom-right).
     pub zones:[ZoneEvidence;9],
+    pub fine:FineSceneEvidence,
     pub luminous_zones:usize,
     pub shadow_detail_zones:usize,
     pub tonal_separation:f64,
@@ -139,7 +239,8 @@ pub fn analyse_linear(img:&Rgb32f)->ZonalSceneEvidence {
         (strength*0.5).clamp(2.0,6.0)
     }else{0.0};
     ZonalSceneEvidence {
-        zones,luminous_zones,shadow_detail_zones,tonal_separation,
+        zones,fine:analyse_fine_linear(img,&lum),
+        luminous_zones,shadow_detail_zones,tonal_separation,
         bright_surround_dark_detail,dark_texture_with_bright_reference,
         proposed_shadow_recovery:strength.round(),
         proposed_darks_curve:darks.round(),
@@ -149,6 +250,47 @@ pub fn analyse_linear(img:&Rgb32f)->ZonalSceneEvidence {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fine_grid_finds_small_dark_subject_diluted_in_a_three_by_three_tile() {
+        let img=Rgb32f::from_fn(256,192,|x,y|{
+            if (124..147).contains(&x) && (88..115).contains(&y) {
+                let detail=((x*17+y*23)%13) as f32*0.004;
+                [0.055+detail,0.067+detail,0.052+detail]
+            } else {[0.62,0.65,0.67]}
+        });
+        let z=analyse_linear(&img);
+        assert_eq!(z.fine.grid_side,32);
+        assert_eq!(z.fine.populated_zones,1024);
+        assert!(z.fine.luminous_zones>100);
+        assert!(z.fine.textured_shadow_zones>=3,"fine-grid detail missed: {:?}",z.fine);
+        assert!(z.fine.mixed_light_shadow_detail,"small dark subject missed: {:?}",z.fine);
+        assert!(z.fine.proposed_shadow_recovery>=7.0);
+    }
+
+    #[test]
+    fn fine_grid_never_forces_a_black_background_into_a_shadow_subject() {
+        let img=Rgb32f::from_fn(256,192,|x,y|{
+            if (120..138).contains(&x)&&(68..110).contains(&y) {
+                [0.95,0.55,0.10]
+            }else{[0.003,0.003,0.003]}
+        });
+        let z=analyse_linear(&img);
+        assert!(z.fine.concentrated_lights,"small light missed: {:?}",z.fine);
+        assert!(!z.fine.mixed_light_shadow_detail);
+        assert_eq!(z.fine.proposed_shadow_recovery,0.0);
+        assert_eq!(z.fine.proposed_darks_curve,0.0);
+    }
+
+    #[test]
+    fn fine_grid_small_or_empty_images_are_safe() {
+        let tiny=Rgb32f::filled(27,27,[0.12,0.12,0.12]);
+        let z=analyse_linear(&tiny);
+        assert_eq!(z.fine.grid_side,32);
+        assert_eq!(z.fine.populated_zones,27*27);
+        assert!(!z.fine.mixed_light_shadow_detail);
+        assert_eq!(analyse_linear(&Rgb32f::filled(0,0,[0.0,0.0,0.0])).fine.populated_zones,0);
+    }
+
     #[test]
     fn bright_surrounding_water_and_dark_textured_subject_separate() {
         let img=Rgb32f::from_fn(270,270,|x,y|{
