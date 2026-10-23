@@ -103,37 +103,52 @@ internal object SemanticMasker {
             val y = i / side
             if (x in side / 4 until 3 * side / 4 && y in side / 5 until 4 * side / 5) centreCounts[label]++
         }
+        // Preserve the successful v0.6.18 background label decision verbatim.
+        // Only the *subject* selector adds explicit animal/person prioritisation.
         val label = when (kind) {
             "sky" -> SKY
             else -> {
-                if (counts[PERSON] >= side * side / 250) PERSON
+                val legacy = if (counts[PERSON] >= side * side / 250) PERSON
                 else {
-                    // Non-people subjects: choose a salient central semantic category.
-                    // Broad sky, floor, wall, road and architecture are background, not subjects.
+                    // Non-people subjects: exclude expansive scene/background categories.
                     val excluded = setOf(0, 1, 2, 3, 5, 6, 8, 9, 11, 13, 21, 26, 29, 46, 52, 54)
                     centreCounts.indices.filter { it !in excluded && counts[it] < side * side * 0.80 }
                         .maxByOrNull { centreCounts[it] }?.takeIf { centreCounts[it] > side * side / 180 }
                         ?: error("No clearly selectable subject was found")
                 }
+                if (kind == "subject")
+                    SemanticMaskRefinement.selectSubject(counts, centreCounts, side, legacy)
+                else legacy
             }
         }
         require(counts[label] >= side * side / 500) {
             if (kind == "sky") "No identifiable sky was found" else "No identifiable subject was found"
         }
 
-        // The model's per-class score margin is a signed logit. Preserving the
-        // margin (not hard ArgMax edges) allows the Rust renderer to interpolate
-        // a feathered boundary at original photo resolution.
-        val mask = ByteArray(side * side)
+        // Keep the model's soft per-class score margin, not hard pixel labels.
+        // The previous background path intentionally retains its 128px results.
+        val margins = FloatArray(side * side)
         for (y in 0 until side) for (x in 0 until side) {
             val i = y * side + x
             val chosen = scores[label][y][x]
             var other = Float.NEGATIVE_INFINITY
             for (c in scores.indices) if (c != label) other = max(other, scores[c][y][x])
-            var logit = (chosen - other).coerceIn(-12.0f, 12.0f)
-            if (kind == "background") logit = -logit
-            // Rust SegMask decodes signed bytes as logits with an 8x scale.
-            mask[i] = (logit * 8.0f).toInt().coerceIn(-127, 127).toByte()
+            margins[i] = (chosen - other).coerceIn(-12.0f, 12.0f)
+        }
+        val outSide: Int
+        val mask: ByteArray
+        if (kind == "background") {
+            outSide = side
+            mask = ByteArray(side * side) { i ->
+                // Exact legacy behaviour: invert selected subject's margin.
+                (-margins[i] * 8.0f).toInt().coerceIn(-127, 127).toByte()
+            }
+        } else {
+            outSide = SemanticMaskRefinement.REFINED_SIDE
+            val evidence = if (kind == "sky")
+                SemanticMaskRefinement.retainSkyRegions(margins, side)
+            else margins
+            mask = SemanticMaskRefinement.refine(evidence, side, pixels, INPUT, outSide)
         }
         val deflater = Deflater(8, true) // raw DEFLATE, matching miniz_oxide::compress_to_vec
         val packed = try {
@@ -149,7 +164,7 @@ internal object SemanticMasker {
             buffer.copyOf(used)
         } finally { deflater.end() }
         return JSONObject()
-            .put("side", side)
+            .put("side", outSide)
             .put("data", Base64.encodeToString(packed, Base64.NO_WRAP))
     }
 }
