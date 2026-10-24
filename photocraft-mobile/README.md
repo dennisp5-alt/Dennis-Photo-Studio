@@ -105,3 +105,16 @@ This update changes scheduling/loading only, not the actual v0.6 tone, Auto WB, 
 - Job completion callbacks are checked for stale selection/render requests and discarded when the user has since opened another photograph.
 
 Boundaries: The cost of applying full-resolution advanced filtering and JPEG compression remains proportional to the original image size and available phone memory. This is not a replacement of the rendering algorithms. Test real-device performance, compare preview/final appearance and test multiple rapid photo selections before considering stable.
+
+
+## v0.6.2 — reduced processing overhead and swipe-selected gallery photos
+
+- Modern system picker supports up to 24 user-selected images per session, on Android 13+ via MediaStore.ACTION_PICK_IMAGES + EXTRA_PICK_IMAGES_MAX; Android 10–12 uses ACTION_GET_CONTENT with multiple selection. The app does not request general gallery access.
+- Swipe left or right across the image to switch between selected files, or tap the top-right photo counter to advance. Swiping has boundaries and cannot navigate photos the user has not selected. Each selected photo retains its Edit parameters while the picker session is active; original files are never overwritten. Undo/redo history is reset on switching.
+- Decoder target for the editor preview is 1600px / 2.56MP instead of 2000px / 4MP, and the temporary live slider preview is 960px (previously 1100px). JPEG exports remain up to the same 8192px and 50MP cap: no downsampling change to export.
+- When an original has no edits, the app displays the decoded source directly instead of running the full processing pipeline.
+- DetailEngine now caches original-row luminance in a bounded rolling buffer. Repeated RGB-to-luma conversions in the 3x3 and large-radius filter taps are avoided without changing the filter settings or neighborhood sampling kernels.
+- Previous bitmap allocations are detached and recycled after outstanding preview work, limiting memory retention during multi-image navigation.
+- Visual validation on a real S23 Ultra is still needed for performance gains and for finger-swipe detection on the gallery.
+
+The existing v0.6.1 rendering architecture, v0.6 Auto WB, the v0.5 grouped filters, v0.4 Auto tonal parameters and all full-resolution export settings remain untouched.
