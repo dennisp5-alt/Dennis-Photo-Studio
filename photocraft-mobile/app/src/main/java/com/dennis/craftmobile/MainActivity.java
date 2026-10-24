@@ -731,91 +731,148 @@ public final class MainActivity extends Activity {
     }
 
     private void openImage() {
-        // Android 13+ has the system photo picker built in; no storage permissions.
         Intent pick;
         if (Build.VERSION.SDK_INT >= 33) {
             pick = new Intent(MediaStore.ACTION_PICK_IMAGES);
             pick.setType("image/*");
+            pick.putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX,
+                    Math.min(24,MediaStore.getPickImagesMaxLimit()));
         } else {
-            // Compatible fallback when the platform Photo Picker is unavailable.
             pick = new Intent(Intent.ACTION_GET_CONTENT);
             pick.addCategory(Intent.CATEGORY_OPENABLE);
             pick.setType("image/*");
+            pick.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);
         }
         pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         try {
-            startActivityForResult(pick, OPEN_IMAGE);
-        } catch (android.content.ActivityNotFoundException ex) {
-            Intent legacy = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            startActivityForResult(pick,OPEN_IMAGE);
+        } catch(android.content.ActivityNotFoundException ex) {
+            Intent legacy=new Intent(Intent.ACTION_OPEN_DOCUMENT);
             legacy.addCategory(Intent.CATEGORY_OPENABLE);
             legacy.setType("image/*");
-            startActivityForResult(legacy, OPEN_IMAGE);
+            legacy.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);
+            startActivityForResult(legacy,OPEN_IMAGE);
         }
     }
-    @Override protected void onActivityResult(int code, int result, Intent data) {
-        super.onActivityResult(code, result, data);
-        if (code != OPEN_IMAGE || result != RESULT_OK || data == null ||
-                data.getData() == null) return;
-        Uri uri = data.getData();
-        try { getContentResolver().takePersistableUriPermission(uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
-        int serial = generation.incrementAndGet();
-        // Clear the OLD image immediately so "Opening" never appears on top of
-        // the previous photograph. Previous rendering can still finish safely.
-        if (pendingSliderRender != null) {
+
+    private void updatePhotoCounter() {
+        if(photoSelection.size()>1 && photoIndex>=0) {
+            photoCounter.setVisibility(View.VISIBLE);
+            photoCounter.setText("‹  "+(photoIndex+1)+" / "+photoSelection.size()+"  ›");
+            photoCounter.setContentDescription("Photo "+(photoIndex+1)+" of "+
+                    photoSelection.size()+". Tap to show next.");
+        } else photoCounter.setVisibility(View.GONE);
+    }
+
+    private void changePhoto(int direction) {
+        if(photoSelection.size()<2 || photoIndex<0)return;
+        int next=photoIndex+direction;
+        if(next<0 || next>=photoSelection.size()) {
+            Toast.makeText(this,next<0?"First selected photo":"Last selected photo",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if(input!=null)editsByPhoto.put(input.toString(),edit.copy());
+        photoIndex=next;
+        loadChosenPhoto(photoSelection.get(photoIndex));
+    }
+
+    private void releaseOldBitmaps(Bitmap full,Bitmap fast,Bitmap rendered) {
+        if(full==null && fast==null && rendered==null)return;
+        // Cleanup occurs after the currently running preview task is finished.
+        previewWork.execute(()->{
+            if(rendered!=null && rendered!=full && rendered!=fast &&
+                    !rendered.isRecycled()) rendered.recycle();
+            if(fast!=null && fast!=full && !fast.isRecycled())fast.recycle();
+            if(full!=null && !full.isRecycled())full.recycle();
+        });
+    }
+
+    private void loadChosenPhoto(Uri uri) {
+        int serial=generation.incrementAndGet();
+        if(pendingSliderRender!=null) {
             ui.removeCallbacks(pendingSliderRender);
-            pendingSliderRender = null;
+            pendingSliderRender=null;
         }
         previewWork.getQueue().clear();
-        input = null; previewSource = null; fastPreviewSource = null;
-        renderedPreview = null;
+        openingWork.getQueue().clear();
+        Bitmap old=previewSource,oldFast=fastPreviewSource,oldRender=renderedPreview;
+        input=null;previewSource=null;fastPreviewSource=null;renderedPreview=null;
         photo.setImageDrawable(null);
+        releaseOldBitmaps(old,oldFast,oldRender);
         openPlaceholder.setText("OPENING PHOTO…\n\nPreparing preview");
         openPlaceholder.setVisibility(View.VISIBLE);
-        status.setText("Opening · decoding selected photo…");
-        openingWork.execute(() -> {
-            Bitmap bitmap = null, smaller = null;
+        updatePhotoCounter();
+        status.setText("Opening photo "+(photoIndex+1)+" / "+photoSelection.size()+"…");
+        openingWork.execute(()->{
+            Bitmap full=null,small=null;
             try {
-                bitmap = decode(uri, 2000, 4_000_000);
-                if (serial != generation.get()) {
-                    bitmap.recycle();
-                    return;
+                full=decode(uri,1600,2_560_000);
+                if(serial!=generation.get()) {
+                    full.recycle();return;
                 }
-                smaller = fastPreview(bitmap);
-                final Bitmap full = bitmap, fast = smaller;
-                ui.post(() -> {
-                    if (serial != generation.get()) {
-                        if (fast != full) fast.recycle();
-                        full.recycle();
-                        return;
+                small=fastPreview(full);
+                final Bitmap decoded=full,thumbnail=small;
+                ui.post(()->{
+                    if(serial!=generation.get()) {
+                        if(thumbnail!=decoded)thumbnail.recycle();
+                        decoded.recycle();return;
                     }
-                    input = uri;
-                    previewSource = full;
-                    fastPreviewSource = fast;
-                    edit = new Edit(); undo.clear(); redo.clear();
-                    // Display the NEW original at once. Any render follows
-                    // asynchronously; the old image never lingers on screen.
-                    photo.setImageBitmap(full);
+                    input=uri;
+                    previewSource=decoded;
+                    fastPreviewSource=thumbnail;
+                    Edit previous=editsByPhoto.get(uri.toString());
+                    edit=previous==null?new Edit():previous.copy();
+                    undo.clear();redo.clear();
+                    if(adjustGroup==0 && !"Auto".equals(edit.look) &&
+                            "Auto Strength".equals(activeAdjustment))
+                        activeAdjustment="Exposure";
+                    photo.setImageBitmap(decoded);
                     openPlaceholder.setVisibility(View.GONE);
-                    status.setText("Photo opened · preparing edited preview…");
+                    status.setText("Photo ready · "+(photoIndex+1)+" / "+
+                            photoSelection.size());
+                    updatePhotoCounter();
                     render();
                     drawControls();
                 });
-            } catch (Exception | OutOfMemoryError ex) {
-                final String reason = ex.getMessage();
-                if (bitmap != null) {
-                    if (smaller != null && smaller != bitmap) smaller.recycle();
-                    bitmap.recycle();
-                }
-                ui.post(() -> {
-                    if (serial != generation.get()) return;
+            } catch(Exception | OutOfMemoryError ex) {
+                if(small!=null && small!=full && !small.isRecycled())small.recycle();
+                if(full!=null && !full.isRecycled())full.recycle();
+                final String reason=ex.getMessage();
+                ui.post(()->{
+                    if(serial!=generation.get())return;
                     openPlaceholder.setText("COULD NOT OPEN PHOTO\n\nTap to try again");
-                    status.setText("Cannot open: " + reason);
-                    Toast.makeText(this, "Cannot open photo: " + reason,
-                            Toast.LENGTH_LONG).show();
+                    status.setText("Cannot open photo: "+reason);
+                    Toast.makeText(this,"Cannot open: "+reason,Toast.LENGTH_LONG).show();
                 });
             }
         });
+    }
+
+    @Override protected void onActivityResult(int code,int result,Intent data) {
+        super.onActivityResult(code,result,data);
+        if(code!=OPEN_IMAGE || result!=RESULT_OK || data==null)return;
+        ArrayList<Uri> selected=new ArrayList<>();
+        ClipData clip=data.getClipData();
+        if(clip!=null) {
+            for(int i=0;i<clip.getItemCount() && selected.size()<24;i++) {
+                Uri uri=clip.getItemAt(i).getUri();
+                if(uri!=null && !selected.contains(uri))selected.add(uri);
+            }
+        }
+        if(data.getData()!=null && !selected.contains(data.getData()))
+            selected.add(0,data.getData());
+        if(selected.isEmpty())return;
+        for(Uri uri:selected) {
+            try {getContentResolver().takePersistableUriPermission(uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION);}
+            catch(Exception ignored) {}
+        }
+        photoSelection.clear();
+        photoSelection.addAll(selected);
+        editsByPhoto.clear();
+        photoIndex=0;
+        loadChosenPhoto(photoSelection.get(0));
     }
 
     private Bitmap decode(Uri uri, int dimension, long pixelLimit) throws Exception {
