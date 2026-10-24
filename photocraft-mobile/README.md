@@ -198,3 +198,17 @@ The 128×128 and 256×256 experiments are intentionally excluded.
 - Results saved separately to Pictures/Dennis Craft Mobile/Restore Lab as new JPEGs without altering the originals.
 - Build downloads pinned open-source pretrained model binaries, bundles them into the offline APK; no internet required after installation.
 - Inference compatibility, output quality and processing speed require S23 Ultra device testing.
+
+## v0.7.1 — experimental 2× upscale visibility and resolution correction
+
+Based on v0.7.0 frozen checkpoint. No modifications to four-grid Auto, white balance, standard 50MP export, previously validated denoise/model assets, denoise/sharpen DSP or pixel-format handling.
+
+The previous v0.7.0 2× Upscale was off by default in the Restore dialog, and its 512px input/1024px output limit meant an apparent "upscale" could actually be smaller than the incoming photo. The More menu now features a direct standalone "AI Upscale 2×" option with explicit resolution disclosure and a confirmation button. The combined Restore dialog still has a distinct selectable AI Upscale option.
+
+Model-based 2× now operates on working photos up to 1600px on the long edge AND up to 2MP, producing up to 8MP output. The final output is exactly 2× the working width and height, not necessarily the original file's width/height if a larger original was reduced. This is intentionally disclosed. Do not market it as 2× of any arbitrary original; full 12MP→48MP export remains a future tiled/streaming enhancement.
+
+The success dialog reports the actual working input and output sizes and allows the restored JPEG to open in an Android viewer. It saves separately in Pictures/Dennis Craft Mobile/Restore Lab.
+
+Upscale inference now downsamples 4x ESRGAN output to 2x with averaged 2×2 model pixels instead of picking a single 4x pixel for each output pixel. This reduces pixel selection aliasing.
+
+CPU inference at the higher resolution can take considerably longer; there has been no S23U device benchmark. The 22MB model-backed APK continues to operate offline.

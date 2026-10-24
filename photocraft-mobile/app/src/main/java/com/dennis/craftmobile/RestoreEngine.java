@@ -25,7 +25,9 @@ final class RestoreEngine {
     interface Progress { void step(String what); }
 
     private static final int MAX_DENOISE_EDGE = 1536;
-    private static final int MAX_UPSCALE_EDGE = 512;
+    // Initial true 2x pilot: up to 2 MP working source / 8 MP output.
+    // Larger originals are reduced before processing; UI discloses this.
+    private static final int MAX_UPSCALE_EDGE = 1600;
 
     private static void update(Progress callback, String message) {
         if(callback != null)callback.step(message);
@@ -137,7 +139,7 @@ final class RestoreEngine {
             final int border=overlap/2;
             final int stride=patch-overlap;
             int targetW=width*targetFactor,targetH=height*targetFactor;
-            if((long)targetW*targetH>3_000_000L)
+            if((long)targetW*targetH>8_100_000L)
                 throw new IllegalArgumentException("Restore output exceeds safe pixel budget");
             int[] pixels=new int[width*height];
             source.getPixels(pixels,0,width,0,0,width,height);
@@ -170,13 +172,27 @@ final class RestoreEngine {
                         for(int xx=0;xx<regionW*targetFactor;xx++){
                             int inputX=border+xx/targetFactor;
                             int netX=superResolution?inputX*4+(xx%2)*2+1:inputX;
-                            float[] rgb=result[0][netY][netX];
-                            float unit=superResolution?1f/255f:1f;
+                            // Downsample 4x ESRGAN to 2x using a true 2x2
+                            // area average, avoiding the old one-pixel decimation.
+                            float rr,gg,bb;
+                            if(superResolution) {
+                                int top=netY-1,left=netX-1;
+                                float[] a=result[0][top][left];
+                                float[] b=result[0][top][left+1];
+                                float[] c=result[0][top+1][left];
+                                float[] d=result[0][top+1][left+1];
+                                rr=(a[0]+b[0]+c[0]+d[0])*.25f/255f;
+                                gg=(a[1]+b[1]+c[1]+d[1])*.25f/255f;
+                                bb=(a[2]+b[2]+c[2]+d[2])*.25f/255f;
+                            } else {
+                                float[] rgb=result[0][netY][netX];
+                                rr=rgb[0];gg=rgb[1];bb=rgb[2];
+                            }
                             int sourcePixel=pixels[
                                 bound(y+yy/targetFactor,height)*width+
                                 bound(x+xx/targetFactor,width)];
                             int out=Color.argb(Color.alpha(sourcePixel),
-                                quant(rgb[0]*unit),quant(rgb[1]*unit),quant(rgb[2]*unit));
+                                quant(rr),quant(gg),quant(bb));
                             output[(y*targetFactor+yy)*targetW+x*targetFactor+xx]=out;
                         }
                     }
