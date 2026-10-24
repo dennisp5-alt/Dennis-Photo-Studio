@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="432" android:viewportHeight="432">
+    <!-- Iris badge uses simple opaque paths for fast rendering on all supported Android versions. -->
+    <path android:fillColor="#12223E" android:strokeColor="#263E6A" android:strokeWidth="7"
+        android:pathData="M216,79 A137,137 0 1,1 216,353 A137,137 0 1,1 216,79 Z"/>
+    <path android:fillColor="#162A4D" android:strokeColor="#68C9FF" android:strokeWidth="4"
+        android:pathData="M216,91 A125,125 0 1,1 216,341 A125,125 0 1,1 216,91 Z"/>
+    <path android:fillColor="#39BAF7" android:pathData="M185.2,101.1 L289.3,122.2 L254.8,172.9 L207.9,158.6 Z"/>
+    <path android:fillColor="#239EFA" android:pathData="M300.1,131.9 L333.8,232.6 L272.7,228.1 L261.7,180.3 Z"/>
+    <path android:fillColor="#337CEB" android:pathData="M330.9,246.8 L260.6,326.3 L233.9,271.2 L269.8,237.7 Z"/>
+    <path android:fillColor="#5965E6" android:pathData="M246.8,330.9 L142.7,309.8 L177.2,259.1 L224.1,273.4 Z"/>
+    <path android:fillColor="#754DD9" android:pathData="M131.9,300.1 L98.2,199.4 L159.3,203.9 L170.3,251.7 Z"/>
+    <path android:fillColor="#4A91ED" android:pathData="M101.1,185.2 L171.4,105.7 L198.1,160.8 L162.2,194.3 Z"/>
+    <path android:fillColor="#0D1930" android:strokeColor="#78CAFD" android:strokeWidth="4"
+        android:pathData="M216,159 A57,57 0 1,1 216,273 A57,57 0 1,1 216,159 Z"/>
+    <path android:fillColor="#1F365E" android:pathData="M216,197 A19,19 0 1,1 216,235 A19,19 0 1,1 216,197 Z"/>
+    <path android:fillColor="#B9E5FF" android:pathData="M208,199 A9,9 0 1,1 208,217 A9,9 0 1,1 208,199 Z"/>
+</vector>

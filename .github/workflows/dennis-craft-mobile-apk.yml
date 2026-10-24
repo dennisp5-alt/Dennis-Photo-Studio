@@ -1,0 +1,35 @@
+name: Dennis Craft Mobile APK
+on:
+  push:
+    branches:
+      - experiment/dennis-craft-mobile-v0.1
+      - experiment/dennis-craft-mobile-v0.2
+      - experiment/dennis-craft-mobile-v0.3
+      - experiment/dennis-craft-mobile-v0.4
+      - experiment/dennis-craft-mobile-v0.5
+      - experiment/dennis-craft-mobile-v0.6
+    paths:
+      - 'photocraft-mobile/**'
+      - '.github/workflows/dennis-craft-mobile-apk.yml'
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Assemble debug APK
+        run: gradle -p photocraft-mobile --no-daemon assembleDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dennis-craft-mobile-v0.6-debug-apk
+          path: photocraft-mobile/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
