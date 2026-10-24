@@ -102,6 +102,14 @@ final class DetailEngine {
         int cx=Math.min(width-1,Math.max(0,x));
         return rings[cy%rows][cx];
     }
+    private static void cacheLuma(int[] pixels, float[] destination) {
+        for (int i=0;i<pixels.length;i++) destination[i]=luma(pixels[i]);
+    }
+    private static float sampleLuma(float[][] rows,int count,int y,int height,int x,int width) {
+        return rows[Math.min(height-1,Math.max(0,y))%count]
+                [Math.min(width-1,Math.max(0,x))];
+    }
+
     static void applyInPlace(Bitmap bitmap, Settings e) {
         applyInPlace(bitmap, e, () -> false);
     }
@@ -114,8 +122,13 @@ final class DetailEngine {
         final int bigRad=rad*3, count=bigRad*2+1;
         // Rolling original rows: writing back must never contaminate neighbour data.
         int[][] ring=new int[count][w];
+        // Luminance is sampled up to 18 times per output pixel. Cache each
+        // original row ONCE to avoid repeated RGB extraction at every tap,
+        // preserving the exact same kernel weights and filter strengths.
+        float[][] luminanceRows=new float[count][w];
         for (int row=0;row<bigRad && row<h;row++) {
             bitmap.getPixels(ring[row%count],0,w,0,row,w,1);
+            cacheLuma(ring[row%count],luminanceRows[row%count]);
         }
         int[] out=new int[w];
         float lumNR=clamp(e.luminanceNoise,0f,100f)/100f*.52f;
@@ -132,12 +145,15 @@ final class DetailEngine {
                 throw new CancellationException();
             }
             int next=y+bigRad;
-            if (next<h) bitmap.getPixels(ring[next%count],0,w,0,next,w,1);
+            if (next<h) {
+                bitmap.getPixels(ring[next%count],0,w,0,next,w,1);
+                cacheLuma(ring[next%count],luminanceRows[next%count]);
+            }
             for (int x=0;x<w;x++) {
                 int p=sample(ring,count,y,h,x,w);
                 float a=Color.alpha(p)/255f;
                 float r=Color.red(p)/255f,g=Color.green(p)/255f,b=Color.blue(p)/255f;
-                float originalLum=.2126f*r+.7152f*g+.0722f*b;
+                float originalLum=sampleLuma(luminanceRows,count,y,h,x,w);
                 float maxRgb=Math.max(r,Math.max(g,b));
                 // Avoid amplifying near-clipped petals, clouds, white clothing.
                 float brightGate=1f-smooth(.74f,.98f,maxRgb);
@@ -147,7 +163,7 @@ final class DetailEngine {
                     float sumW=0,sumLum=0,sumR=0,sumG=0,sumB=0;
                     for(int dy:off)for(int dx:off) {
                         int pix=sample(ring,count,y+dy*rad,h,x+dx*rad,w);
-                        float nl=luma(pix);
+                        float nl=sampleLuma(luminanceRows,count,y+dy*rad,h,x+dx*rad,w);
                         float distance=Math.abs(nl-originalLum);
                         float spatialW=(dx==0?2f:1f)*(dy==0?2f:1f);
                         float edgeW=clamp(1f-distance/.14f,.08f,1f);
@@ -182,8 +198,7 @@ final class DetailEngine {
                 if(useLarge) {
                     float sum=0f;
                     for(int dy:off)for(int dx:off) {
-                        int pix=sample(ring,count,y+dy*bigRad,h,x+dx*bigRad,w);
-                        sum+=luma(pix);
+                        sum+=sampleLuma(luminanceRows,count,y+dy*bigRad,h,x+dx*bigRad,w);
                     }
                     float largeBlur=sum/9f;
                     float broad=originalLum-largeBlur;
