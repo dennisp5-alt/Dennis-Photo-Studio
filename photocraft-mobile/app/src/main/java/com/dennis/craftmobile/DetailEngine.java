@@ -2,6 +2,8 @@ package com.dennis.craftmobile;
 
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import java.util.function.BooleanSupplier;
+import java.util.concurrent.CancellationException;
 
 /**
  * Edge-sensitive detail tools with bounded working memory.
@@ -101,6 +103,10 @@ final class DetailEngine {
         return rings[cy%rows][cx];
     }
     static void applyInPlace(Bitmap bitmap, Settings e) {
+        applyInPlace(bitmap, e, () -> false);
+    }
+
+    static void applyInPlace(Bitmap bitmap, Settings e, BooleanSupplier cancelled) {
         if (e==null || !e.enabled()) return;
         int w=bitmap.getWidth(),h=bitmap.getHeight();
         if (w<3||h<3) return;
@@ -122,6 +128,9 @@ final class DetailEngine {
         boolean useLarge=clarity>0;
         int[] off={-1,0,1};
         for (int y=0;y<h;y++) {
+            if ((y & 7) == 0 && cancelled.getAsBoolean()) {
+                throw new CancellationException();
+            }
             int next=y+bigRad;
             if (next<h) bitmap.getPixels(ring[next%count],0,w,0,next,w,1);
             for (int x=0;x<w;x++) {
