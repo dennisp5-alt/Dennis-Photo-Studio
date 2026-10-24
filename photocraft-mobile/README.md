@@ -172,3 +172,13 @@ Real-device photography comparisons (including exported JPEG vs preview) are req
 - The status line reports 4x4 protection when activated.
 - Existing colour, WB, detail DSP, swiping, preview and JPEG export remain untouched.
 - Test on the phone before considering promotion; scene classification is heuristic. The 128x128 proposal is intentionally deferred.
+
+## v0.6.6 Experimental 128×128 Fine Auto
+
+Built from v0.6.5 frozen checkpoint (checkpoint/dennis-craft-v0.6.5-before-128-experiment). Experimental branch only, not approved production.
+
+Real 128x128 (16,384 fine bins) luminance and highlight samples collected in the SAME original 64x64 sampling pass. 128 sample bins derive small local shadow-lift variations relative to their parent 64 zones; variation bounded +/-12%, smoothed, and blended at 50% against approved 64 zone weights. Preview and full resolution export map the fine weights at their respective dimensions.
+
+The existing 4x4/8x8/16x16/64x64 scene judgement and exposure limits, Auto WB, noise/sharpen/texture/clarity/dehaze, picker/swipe UI and JPEG export quality/resolution are unchanged.
+
+Expect somewhat more image-render processing and memory usage. Compare skin, flowers, dark fire scenes and export speed with v0.6.5 before adoption. Revert by installing/restoring v0.6.5. This release is explicitly a quality experiment, not a speed fix.

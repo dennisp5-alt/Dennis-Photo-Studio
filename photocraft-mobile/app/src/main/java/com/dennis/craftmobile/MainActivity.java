@@ -60,7 +60,8 @@ public final class MainActivity extends Activity {
         float ratio = 0f;
         int rotation = 0;
         String look = "Original";
-        float[] autoZones;  // Immutable zone map measured on original preview.
+        float[] autoZones;  // Original 64x64 weights.
+        float[] autoFineZones; // Experimental 128x128 weights.
         float autoStrength = 100f;
         boolean autoLowKey; // 16x16 scene judgement, no semantic portrait mask.
         String autoAtmosphere = ""; // 8x8 conservative atmosphere decision.
@@ -73,7 +74,9 @@ public final class MainActivity extends Activity {
             d.exposure = exposure; d.contrast = contrast; d.highlights = highlights;
             d.shadows = shadows; d.saturation = saturation; d.warmth = warmth;
             d.tint = tint; d.ratio = ratio; d.rotation = rotation; d.look = look;
-            d.autoZones = autoZones; d.autoStrength = autoStrength;
+            d.autoZones = autoZones;
+            d.autoFineZones = autoFineZones;
+            d.autoStrength = autoStrength;
             d.autoLowKey = autoLowKey;
             d.autoAtmosphere = autoAtmosphere;
             d.autoMacroProtected = autoMacroProtected;
@@ -669,7 +672,7 @@ public final class MainActivity extends Activity {
             return;
         }
         int serial = generation.incrementAndGet();
-        status.setText("AUTO  •  64×64 tone, detail and white balance…");
+        status.setText("AUTO  •  128×128 experimental fine-grid analysis…");
         previewWork.getQueue().clear();
         previewWork.execute(() -> {
             try {
@@ -691,6 +694,7 @@ public final class MainActivity extends Activity {
                     edit.wbBlue = whiteBalance.blue;
                     edit.wbConfidence = whiteBalance.confidence;
                     edit.autoZones = scene.zones;
+                    edit.autoFineZones = scene.fineZones;
                     edit.autoLowKey = scene.protectedLowKey;
                     edit.autoAtmosphere = scene.atmosphereDescription;
                     edit.autoMacroProtected = scene.protectedMacroAtmosphere;
@@ -703,7 +707,7 @@ public final class MainActivity extends Activity {
                     render();
                     drawControls();
                     Toast.makeText(this, String.format(Locale.US,
-                            "Four-Level Auto: %+.2f EV · %s · WB %s",
+                            "128×128 Experimental Auto: %+.2f EV · %s · WB %s",
                             scene.exposure,
                             scene.protectedMacroAtmosphere ? "overall dark atmosphere protected" :
                                     scene.protectedAtmosphere ? scene.atmosphereDescription + " protected" :
@@ -937,7 +941,7 @@ public final class MainActivity extends Activity {
                     }
                     if ("Auto".equals(snapshot.look) && snapshot.autoZones != null) {
                         status.setText(String.format(Locale.US,
-                                "AUTO 4-LAYER  •  %+.2f EV%s  •  WB %s",
+                                "AUTO 128×128 TEST  •  %+.2f EV%s  •  WB %s",
                                 snapshot.exposure,
                                 snapshot.autoMacroProtected ? " · 4×4 atmosphere protected" :
                                         !snapshot.autoAtmosphere.isEmpty() ?
@@ -999,6 +1003,10 @@ public final class MainActivity extends Activity {
                 e.autoZones.length == SpatialAuto64.SIZE * SpatialAuto64.SIZE;
         int[] zoneX = null;
         float[] fractionX = null, rowZones = null;
+        boolean fine128 = spatial && e.autoFineZones != null &&
+                e.autoFineZones.length == SpatialFine128.CELLS;
+        int[] fineX = null;
+        float[] fineFractions = null, fineRow = null;
         float strength = clamp(e.autoStrength / 100f, 0f, 1f);
         float autoGain = ((float)Math.pow(2, e.exposure) - 1f) * strength;
         float autoShadow = e.shadows / 100f * .24f * strength;
@@ -1008,6 +1016,11 @@ public final class MainActivity extends Activity {
             zoneX = SpatialAuto64.xIndices(w);
             fractionX = SpatialAuto64.xFractions(w);
             rowZones = new float[SpatialAuto64.SIZE];
+            if (fine128) {
+                fineX = SpatialFine128.xIndices(w);
+                fineFractions = SpatialFine128.xFractions(w);
+                fineRow = new float[SpatialFine128.SIZE];
+            }
         }
         for (int y=0; y<h; y++) {
             if ((y & 7) == 0 && cancelled.getAsBoolean()) {
@@ -1015,6 +1028,7 @@ public final class MainActivity extends Activity {
                 throw new CancellationException();
             }
             if (spatial) SpatialAuto64.interpolateRow(e.autoZones, y, h, rowZones);
+            if (fine128) SpatialFine128.interpolateRow(e.autoFineZones,y,h,fineRow);
             src.getPixels(pixels, 0, w, 0, y, w, 1);
             for (int x=0; x<w; x++) {
                 int pixel = pixels[x];
@@ -1028,6 +1042,13 @@ public final class MainActivity extends Activity {
                     int zi = zoneX[x];
                     float zone = rowZones[zi]*(1f-xf) +
                             rowZones[Math.min(SpatialAuto64.SIZE-1,zi+1)]*xf;
+                    if(fine128) {
+                        int fineIdx=fineX[x];
+                        float frac=fineFractions[x];
+                        float fineZone=fineRow[fineIdx]*(1f-frac)+
+                                fineRow[Math.min(SpatialFine128.SIZE-1,fineIdx+1)]*frac;
+                        zone=.5f*zone+.5f*fineZone;
+                    }
                     float protection = 1f - SpatialAuto64.smoothstep(.64f,.94f,maxChannel);
                     float darkness = 1f - SpatialAuto64.smoothstep(.12f,.68f,lum);
                     float highlights = SpatialAuto64.smoothstep(.61f,.94f,lum);
@@ -1223,10 +1244,10 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.5")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.6 EXPERIMENT")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
-                        "tone/colour adjustments, 64×64 + 16×16 + 8×8 + 4×4 four-level Auto, Auto WB, " +
+                        "tone/colour adjustments, 128×128 experiment with preserved four-level Auto, Auto WB, " +
                         "luminance/chroma NR, sharpening, " +
                         "clarity, texture, contrast dehaze, centre crop, rotate, " +
                         "undo/redo, press-and-hold before view, export and share.\n\n" +
