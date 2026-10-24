@@ -1,1 +1,0 @@
-# Dennis-Photo-Studio

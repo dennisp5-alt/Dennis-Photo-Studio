@@ -36,7 +36,13 @@ import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 
 public final class MainActivity extends Activity {
     private static final int OPEN_IMAGE = 701;
@@ -70,13 +76,20 @@ public final class MainActivity extends Activity {
     }
 
     private Uri input;
-    private Bitmap previewSource, renderedPreview;
+    private Bitmap previewSource, fastPreviewSource, renderedPreview;
     private Edit edit = new Edit();
     private final ArrayDeque<Edit> undo = new ArrayDeque<>();
     private final ArrayDeque<Edit> redo = new ArrayDeque<>();
-    private final ExecutorService work = Executors.newSingleThreadExecutor();
+    // Keep photo opening and saving independent of the preview renderer.
+    // Repeated slider changes replace queued preview work rather than piling up.
+    private final ThreadPoolExecutor previewWork = new ThreadPoolExecutor(
+            1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
+    private final ExecutorService openingWork = Executors.newSingleThreadExecutor();
+    private final ExecutorService savingWork = Executors.newSingleThreadExecutor();
+    private final AtomicBoolean saving = new AtomicBoolean(false);
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final AtomicInteger generation = new AtomicInteger();
+    private Runnable pendingSliderRender;
     private LinearLayout controls, tabs;
     private FrameLayout canvas;
     private ImageView photo;
@@ -469,7 +482,8 @@ public final class MainActivity extends Activity {
         int group=adjustGroup;
         int serial=generation.incrementAndGet();
         status.setText("Analysing 64×64 detail zones…");
-        work.execute(()->{
+        previewWork.getQueue().clear();
+        previewWork.execute(()->{
             try {
                 DetailEngine.Recommended recommended=DetailEngine.analyse(original);
                 ui.post(()->{
@@ -515,10 +529,17 @@ public final class MainActivity extends Activity {
                 value.setText(positiveSlider ? activeAdjustment + ": " + Math.round(result) + "%" :
                         activeAdjustment + ": " + String.format(Locale.US,
                                 activeAdjustment.equals("Exposure") ? "%+.2f EV" : "%+.0f", result));
-                render();
+                scheduleSliderPreview();
             }
             @Override public void onStartTrackingTouch(SeekBar bar) {}
             @Override public void onStopTrackingTouch(SeekBar bar) {
+                // Always finish at the original preview resolution, not the
+                // temporary fast slider preview.
+                if (pendingSliderRender != null) {
+                    ui.removeCallbacks(pendingSliderRender);
+                    pendingSliderRender = null;
+                }
+                render();
                 if (previewSource != null && getField(activeAdjustment) != original) {
                     undo.addLast(starting);
                     if (undo.size() > 35) undo.removeFirst();
@@ -606,7 +627,8 @@ public final class MainActivity extends Activity {
         }
         int serial = generation.incrementAndGet();
         status.setText("AUTO  •  64×64 tone, detail and white balance…");
-        work.execute(() -> {
+        previewWork.getQueue().clear();
+        previewWork.execute(() -> {
             try {
                 SpatialAuto64.Scene scene = SpatialAuto64.analyse(original);
                 DetailEngine.Recommended details = DetailEngine.analyse(original);
@@ -651,6 +673,26 @@ public final class MainActivity extends Activity {
         return 128;
     }
 
+    // Coalesce drag updates and use a lower-resolution view only while sliding.
+    // Finger release always performs a full-resolution preview render.
+    private void scheduleSliderPreview() {
+        if (pendingSliderRender != null) ui.removeCallbacks(pendingSliderRender);
+        pendingSliderRender = () -> {
+            pendingSliderRender = null;
+            render(true);
+        };
+        ui.postDelayed(pendingSliderRender, 90L);
+    }
+
+    private static Bitmap fastPreview(Bitmap full) {
+        int w=full.getWidth(), h=full.getHeight();
+        int longest=Math.max(w,h);
+        if (longest <= 1100) return full;
+        float scale=1100f/longest;
+        return Bitmap.createScaledBitmap(full, Math.max(1,Math.round(w*scale)),
+                Math.max(1,Math.round(h*scale)), true);
+    }
+
     private void openImage() {
         // Android 13+ has the system photo picker built in; no storage permissions.
         Intent pick;
@@ -680,19 +722,62 @@ public final class MainActivity extends Activity {
         Uri uri = data.getData();
         try { getContentResolver().takePersistableUriPermission(uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
-        status.setText("Opening…");
         int serial = generation.incrementAndGet();
-        work.execute(() -> {
+        // Clear the OLD image immediately so "Opening" never appears on top of
+        // the previous photograph. Previous rendering can still finish safely.
+        if (pendingSliderRender != null) {
+            ui.removeCallbacks(pendingSliderRender);
+            pendingSliderRender = null;
+        }
+        previewWork.getQueue().clear();
+        input = null; previewSource = null; fastPreviewSource = null;
+        renderedPreview = null;
+        photo.setImageDrawable(null);
+        openPlaceholder.setText("OPENING PHOTO…\n\nPreparing preview");
+        openPlaceholder.setVisibility(View.VISIBLE);
+        status.setText("Opening · decoding selected photo…");
+        openingWork.execute(() -> {
+            Bitmap bitmap = null, smaller = null;
             try {
-                Bitmap resultBitmap = decode(uri, 2000, 4_000_000);
+                bitmap = decode(uri, 2000, 4_000_000);
+                if (serial != generation.get()) {
+                    bitmap.recycle();
+                    return;
+                }
+                smaller = fastPreview(bitmap);
+                final Bitmap full = bitmap, fast = smaller;
+                ui.post(() -> {
+                    if (serial != generation.get()) {
+                        if (fast != full) fast.recycle();
+                        full.recycle();
+                        return;
+                    }
+                    input = uri;
+                    previewSource = full;
+                    fastPreviewSource = fast;
+                    edit = new Edit(); undo.clear(); redo.clear();
+                    // Display the NEW original at once. Any render follows
+                    // asynchronously; the old image never lingers on screen.
+                    photo.setImageBitmap(full);
+                    openPlaceholder.setVisibility(View.GONE);
+                    status.setText("Photo opened · preparing edited preview…");
+                    render();
+                    drawControls();
+                });
+            } catch (Exception | OutOfMemoryError ex) {
+                final String reason = ex.getMessage();
+                if (bitmap != null) {
+                    if (smaller != null && smaller != bitmap) smaller.recycle();
+                    bitmap.recycle();
+                }
                 ui.post(() -> {
                     if (serial != generation.get()) return;
-                    input = uri; previewSource = resultBitmap;
-                    edit = new Edit(); undo.clear(); redo.clear();
-                    openPlaceholder.setVisibility(View.GONE);
-                    render(); drawControls();
+                    openPlaceholder.setText("COULD NOT OPEN PHOTO\n\nTap to try again");
+                    status.setText("Cannot open: " + reason);
+                    Toast.makeText(this, "Cannot open photo: " + reason,
+                            Toast.LENGTH_LONG).show();
                 });
-            } catch (Exception | OutOfMemoryError ex) { showError("Cannot open this image: " + ex.getMessage()); }
+            }
         });
     }
 
@@ -708,19 +793,35 @@ public final class MainActivity extends Activity {
         });
     }
 
-    private void render() {
-        Bitmap source = previewSource;
-        if (source == null) return;
+    private void render() { render(false); }
+
+    private void render(boolean quick) {
+        Bitmap original = previewSource;
+        if (original == null) return;
+        Bitmap source = quick && fastPreviewSource != null ? fastPreviewSource : original;
         Edit snapshot = edit.copy();
         int serial = generation.incrementAndGet();
-        status.setText("Rendering…");
-        work.execute(() -> {
-            if (serial != generation.get()) return;
+        // Only the newest requested preview has any value. This is the critical
+        // fix for slider changes flooding the former single-worker queue.
+        previewWork.getQueue().clear();
+        status.setText(quick ? "Previewing adjustment…" : "Rendering photo…");
+        previewWork.execute(() -> {
+            if (serial != generation.get() || Thread.currentThread().isInterrupted()) return;
             try {
-                Bitmap output = process(source, snapshot);
+                Bitmap output = process(source, snapshot, () ->
+                        serial != generation.get() || Thread.currentThread().isInterrupted());
                 ui.post(() -> {
-                    if (serial != generation.get()) return;
-                    renderedPreview = output; photo.setImageBitmap(output);
+                    if (serial != generation.get() || original != previewSource) {
+                        output.recycle();
+                        return;
+                    }
+                    Bitmap previous = renderedPreview;
+                    renderedPreview = output;
+                    photo.setImageBitmap(output);
+                    if (previous != null && previous != previewSource &&
+                            previous != fastPreviewSource && previous != output) {
+                        previous.recycle();
+                    }
                     if ("Auto".equals(snapshot.look) && snapshot.autoZones != null) {
                         status.setText(String.format(Locale.US,
                                 "64×64 AUTO  •  %+.2f EV  •  %.0f%%  •  WB %s",
@@ -730,7 +831,17 @@ public final class MainActivity extends Activity {
                         status.setText("Live preview · JPEG export Q" + jpegQuality);
                     }
                 });
-            } catch (OutOfMemoryError ex) { showError("Not enough memory for preview"); }
+            } catch (CancellationException ignored) {
+                // Expected when newer adjustment supersedes a slow old render.
+            } catch (OutOfMemoryError ex) {
+                ui.post(() -> {
+                    if (serial == generation.get()) showError("Not enough memory for preview");
+                });
+            } catch (RuntimeException ex) {
+                ui.post(() -> {
+                    if (serial == generation.get()) showError("Preview failed: " + ex.getMessage());
+                });
+            }
         });
     }
 
@@ -753,6 +864,10 @@ public final class MainActivity extends Activity {
     }
 
     private static Bitmap process(Bitmap src, Edit e) {
+        return process(src, e, () -> false);
+    }
+
+    private static Bitmap process(Bitmap src, Edit e, BooleanSupplier cancelled) {
         int w = src.getWidth(), h = src.getHeight();
         Bitmap output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         int[] pixels = new int[w];
@@ -778,6 +893,10 @@ public final class MainActivity extends Activity {
             rowZones = new float[SpatialAuto64.SIZE];
         }
         for (int y=0; y<h; y++) {
+            if ((y & 7) == 0 && cancelled.getAsBoolean()) {
+                output.recycle();
+                throw new CancellationException();
+            }
             if (spatial) SpatialAuto64.interpolateRow(e.autoZones, y, h, rowZones);
             src.getPixels(pixels, 0, w, 0, y, w, 1);
             for (int x=0; x<w; x++) {
@@ -859,7 +978,12 @@ public final class MainActivity extends Activity {
             if (rotated != output) output.recycle();
         }
         if (e.ratio <= 0) {
-            DetailEngine.applyInPlace(rotated, detailSettings(e));
+            try {
+                DetailEngine.applyInPlace(rotated, detailSettings(e), cancelled);
+            } catch (CancellationException ex) {
+                rotated.recycle();
+                throw ex;
+            }
             return rotated;
         }
         int width = rotated.getWidth(), height = rotated.getHeight();
@@ -868,7 +992,12 @@ public final class MainActivity extends Activity {
         else ch = Math.max(1, Math.round(width/e.ratio));
         Bitmap cropped = Bitmap.createBitmap(rotated, (width-cw)/2, (height-ch)/2, cw, ch);
         if (cropped != rotated) rotated.recycle();
-        DetailEngine.applyInPlace(cropped, detailSettings(e));
+        try {
+            DetailEngine.applyInPlace(cropped, detailSettings(e), cancelled);
+        } catch (CancellationException ex) {
+            cropped.recycle();
+            throw ex;
+        }
         return cropped;
     }
 
@@ -935,7 +1064,7 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.1")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
                         "tone/colour adjustments, 64×64 Auto WB, luminance/chroma NR, sharpening, " +
@@ -956,6 +1085,9 @@ public final class MainActivity extends Activity {
             Toast.makeText(this, message, Toast.LENGTH_LONG).show(); });
     }
     @Override protected void onDestroy() {
-        generation.incrementAndGet(); work.shutdownNow(); super.onDestroy();
+        generation.incrementAndGet();
+        if (pendingSliderRender != null) ui.removeCallbacks(pendingSliderRender);
+        previewWork.shutdownNow(); openingWork.shutdownNow(); savingWork.shutdownNow();
+        super.onDestroy();
     }
 }
