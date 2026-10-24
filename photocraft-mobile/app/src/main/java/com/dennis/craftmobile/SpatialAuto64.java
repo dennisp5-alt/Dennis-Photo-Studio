@@ -15,14 +15,21 @@ final class SpatialAuto64 {
         final float[] zones;
         final float exposure, contrast, highlights, shadows;
         final float brightCoverage;
+        final boolean protectedLowKey;
+        final boolean genuinelyDark;
+        final int exposedZones, darkZones;
         Scene(float[] zones, float exposure, float contrast, float highlights,
-              float shadows, float brightCoverage) {
+              float shadows, float brightCoverage, SceneJudgement16.Decision judgement) {
             this.zones = zones;
             this.exposure = exposure;
             this.contrast = contrast;
             this.highlights = highlights;
             this.shadows = shadows;
             this.brightCoverage = brightCoverage;
+            this.protectedLowKey = judgement.protectedLowKey;
+            this.genuinelyDark = judgement.trulyDark;
+            this.exposedZones = judgement.exposedZones;
+            this.darkZones = judgement.darkZones;
         }
     }
 
@@ -65,10 +72,15 @@ final class SpatialAuto64 {
         float maxEV = highlight > .84f || coverage > .10f ? .025f :
                       highlight > .71f || coverage > .025f ? .085f :
                       highlight > .62f ? .18f : .45f;
+        // Decide WHETHER to lift exposure before deciding HOW MUCH. This is a
+        // second, 16x16 scene-judgement layer built from the same measurements.
+        SceneJudgement16.Decision judgement = SceneJudgement16.assess(
+                sum, count, histogram, samples, coverage, maxEV);
         float ideal = (float)(Math.log(.36f/Math.max(.09f, median/255f)) /
                 Math.log(2f));
-        float exposure = clamp(ideal, -.16f, maxEV);
-        float shadows = p5 < 40 ? 15f : p5 < 70 ? 11f : 6f;
+        float exposure = clamp(ideal, -.16f, judgement.exposureCeiling);
+        float shadows = (p5 < 40 ? 15f : p5 < 70 ? 11f : 6f) *
+                judgement.shadowScale;
         float highlights = highlight > .83f ? -13f :
                            highlight > .71f ? -8f : 0f;
         float contrast = clamp((.60f - (p95-p5)/255f)*11f, -4f, 4f);
@@ -98,7 +110,7 @@ final class SpatialAuto64 {
                 smooth[y*SIZE+x] = weighted / weightTotal;
             }
         }
-        return new Scene(smooth,exposure,contrast,highlights,shadows,coverage);
+        return new Scene(smooth,exposure,contrast,highlights,shadows,coverage,judgement);
     }
 
     private static int percentile(int[] h, int total, float fraction) {
