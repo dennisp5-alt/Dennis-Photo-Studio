@@ -1001,17 +1001,43 @@ public final class MainActivity extends Activity {
         return cropped;
     }
 
+    private static boolean noEdits(Edit e) {
+        return e.rotation == 0 && e.ratio == 0f && e.autoZones == null &&
+                e.exposure == 0f && e.contrast == 0f && e.highlights == 0f &&
+                e.shadows == 0f && e.saturation == 0f && e.warmth == 0f &&
+                e.tint == 0f && e.wbConfidence == 0f &&
+                !detailSettings(e).enabled();
+    }
+
+    private void exportStatus(Uri source, String message) {
+        ui.post(() -> {
+            // An export of the previous file should not overwrite the status
+            // of a newly chosen photograph.
+            if (source.equals(input)) status.setText(message);
+        });
+    }
+
     private void save(boolean share) {
         if (input == null) { openImage(); return; }
-        Uri toLoad = input; Edit snapshot = edit.copy(); final int quality = jpegQuality;
-        status.setText("Exporting image…");
-        work.execute(() -> {
+        if (!saving.compareAndSet(false, true)) {
+            Toast.makeText(this, "A photo is already being saved", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final Uri toLoad = input;
+        final Edit snapshot = edit.copy();
+        final int quality = jpegQuality;
+        status.setText("Saving · reading original photo…");
+        savingWork.execute(() -> {
             Uri saved = null;
+            Bitmap original = null, result = null;
             try {
-                // 8192 pixels / 50 MP guard limits memory spikes on very large camera files.
-                Bitmap original = decode(toLoad, 8192, 50_000_000);
-                Bitmap result = process(original, snapshot);
-                String name = "DCS_" + new SimpleDateFormat("yyyyMMdd_HHmmss",
+                // Full-resolution export is intentionally preserved. It runs
+                // independently of preview work to avoid locking up photo opening.
+                original = decode(toLoad, 8192, 50_000_000);
+                exportStatus(toLoad, "Saving · processing full-resolution image…");
+                result = noEdits(snapshot) ? original : process(original, snapshot);
+                exportStatus(toLoad, "Saving · encoding JPEG Q" + quality + "…");
+                String name = "DCS_" + new SimpleDateFormat("yyyyMMdd_HHmmss_SSS",
                         Locale.US).format(new Date()) + ".jpg";
                 ContentValues values = new ContentValues();
                 values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
@@ -1022,28 +1048,44 @@ public final class MainActivity extends Activity {
                         MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
                 if (saved == null) throw new IllegalStateException("MediaStore create failed");
                 try (OutputStream stream = getContentResolver().openOutputStream(saved)) {
-                    if (stream == null || !result.compress(Bitmap.CompressFormat.JPEG, quality, stream))
-                        throw new IllegalStateException("JPEG export failed");
+                    if (stream == null ||
+                            !result.compress(Bitmap.CompressFormat.JPEG, quality, stream)) {
+                        throw new IllegalStateException("JPEG encoding failed");
+                    }
                 }
-                values.clear(); values.put(MediaStore.Images.Media.IS_PENDING, 0);
+                values.clear();
+                values.put(MediaStore.Images.Media.IS_PENDING, 0);
                 getContentResolver().update(saved, values, null, null);
-                if (result != original) result.recycle();
-                original.recycle();
                 Uri finished = saved;
                 ui.post(() -> {
-                    status.setText("Saved JPEG Q" + quality + " to Pictures/Dennis Craft Mobile");
-                    Toast.makeText(this, "Exported JPEG Q" + quality, Toast.LENGTH_LONG).show();
-                    if (share) {
-                        Intent intent = new Intent(Intent.ACTION_SEND);
-                        intent.setType("image/jpeg");
-                        intent.putExtra(Intent.EXTRA_STREAM, finished);
-                        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                        startActivity(Intent.createChooser(intent, "Share photo"));
+                    if (toLoad.equals(input)) {
+                        status.setText("Saved JPEG Q" + quality +
+                                " to Pictures/Dennis Craft Mobile");
+                    }
+                    Toast.makeText(this, "Exported JPEG Q" + quality,
+                            Toast.LENGTH_LONG).show();
+                    if (share && !isFinishing()) {
+                        Intent shareIntent = new Intent(Intent.ACTION_SEND);
+                        shareIntent.setType("image/jpeg");
+                        shareIntent.putExtra(Intent.EXTRA_STREAM, finished);
+                        shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        startActivity(Intent.createChooser(shareIntent, "Share photo"));
                     }
                 });
             } catch (Exception | OutOfMemoryError ex) {
                 if (saved != null) getContentResolver().delete(saved, null, null);
-                showError("Export failed: " + ex.getMessage());
+                final String reason = ex.getMessage();
+                ui.post(() -> {
+                    if (toLoad.equals(input)) status.setText("Export failed: " + reason);
+                    Toast.makeText(this, "Export failed: " + reason,
+                            Toast.LENGTH_LONG).show();
+                });
+            } finally {
+                if (result != null && result != original && !result.isRecycled()) {
+                    result.recycle();
+                }
+                if (original != null && !original.isRecycled()) original.recycle();
+                saving.set(false);
             }
         });
     }
