@@ -160,3 +160,15 @@ Offline algorithm checks based on user-provided examples:
 4. Artificially darkened portrait and ordinary daylight shots: do not trigger warm-light gate; v0.6.3 decision preserved.
 
 Real-device photography comparisons (including exported JPEG vs preview) are required before replacing approved build. When in doubt, the 8×8 layer does nothing.
+
+
+## v0.6.5 — experimental four-level scene safeguard
+
+- Based on unmodified v0.6.4 checkpoint/dennis-craft-v0.6.4-approved-20261025, commit 564a7b5d6c3cadcdb98858c5afe6a5b176039fa2.
+- 64x64 local measurements, 16x16 exposure judgement and 8x8 atmosphere decisions remain in place.
+- NEW 4x4 (16-cell) intent assessment pools the same 4096 local samples with no additional bitmap scan.
+- Only where the previous 8x8 judgement already identified warm/night atmosphere AND 4x4 finds both broad darkness and illuminated regions, cap positive global exposure at +0.015 EV and shadow scale at 0.14. Otherwise v0.6.4 recommendations remain unchanged.
+- The 4x4 layer only limits exposure and shadow lift; it never increases exposure or changes white balance.
+- The status line reports 4x4 protection when activated.
+- Existing colour, WB, detail DSP, swiping, preview and JPEG export remain untouched.
+- Test on the phone before considering promotion; scene classification is heuristic. The 128x128 proposal is intentionally deferred.

@@ -20,9 +20,10 @@ final class SpatialAuto64 {
         final int exposedZones, darkZones;
         final boolean protectedAtmosphere;
         final String atmosphereDescription;
+        final boolean protectedMacroAtmosphere;
         Scene(float[] zones, float exposure, float contrast, float highlights,
               float shadows, float brightCoverage, SceneJudgement16.Decision judgement,
-              SceneAtmosphere8.Decision atmosphere) {
+              SceneAtmosphere8.Decision atmosphere, SceneIntent4.Decision intent) {
             this.zones = zones;
             this.exposure = exposure;
             this.contrast = contrast;
@@ -35,6 +36,7 @@ final class SpatialAuto64 {
             this.darkZones = judgement.darkZones;
             this.protectedAtmosphere = atmosphere.protectedAtmosphere;
             this.atmosphereDescription = atmosphere.description;
+            this.protectedMacroAtmosphere = intent.preserved;
         }
     }
 
@@ -90,11 +92,13 @@ final class SpatialAuto64 {
         SceneAtmosphere8.Decision atmosphere = SceneAtmosphere8.assess(
                 sum, count, histogram, samples, warmGlow, coverage,
                 judgement.exposureCeiling, judgement.shadowScale);
+        SceneIntent4.Decision intent = SceneIntent4.assess(
+                sum, count, histogram, samples, atmosphere);
         float ideal = (float)(Math.log(.36f/Math.max(.09f, median/255f)) /
                 Math.log(2f));
-        float exposure = clamp(ideal, -.16f, atmosphere.exposureCeiling);
+        float exposure = clamp(ideal, -.16f, intent.exposureCeiling);
         float shadows = (p5 < 40 ? 15f : p5 < 70 ? 11f : 6f) *
-                atmosphere.shadowScale;
+                intent.shadowScale;
         float highlights = highlight > .83f ? -13f :
                            highlight > .71f ? -8f : 0f;
         float contrast = clamp((.60f - (p95-p5)/255f)*11f, -4f, 4f);
@@ -125,7 +129,7 @@ final class SpatialAuto64 {
             }
         }
         return new Scene(smooth,exposure,contrast,highlights,shadows,coverage,
-                judgement,atmosphere);
+                judgement,atmosphere,intent);
     }
 
     private static int percentile(int[] h, int total, float fraction) {
