@@ -3,6 +3,7 @@ package com.dennis.craftmobile;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ContentValues;
+import android.content.ClipData;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -16,6 +17,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
 import android.view.Gravity;
+import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -32,6 +34,8 @@ import android.widget.Toast;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
@@ -84,7 +88,8 @@ public final class MainActivity extends Activity {
     // Repeated slider changes replace queued preview work rather than piling up.
     private final ThreadPoolExecutor previewWork = new ThreadPoolExecutor(
             1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
-    private final ExecutorService openingWork = Executors.newSingleThreadExecutor();
+    private final ThreadPoolExecutor openingWork = new ThreadPoolExecutor(
+            1,1,0L,TimeUnit.MILLISECONDS,new LinkedBlockingQueue<>());
     private final ExecutorService savingWork = Executors.newSingleThreadExecutor();
     private final AtomicBoolean saving = new AtomicBoolean(false);
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -93,7 +98,11 @@ public final class MainActivity extends Activity {
     private LinearLayout controls, tabs;
     private FrameLayout canvas;
     private ImageView photo;
-    private TextView openPlaceholder, status;
+    private TextView openPlaceholder, status, photoCounter;
+    // Only user-granted picker URIs. Edits are session-local, original files untouched.
+    private final ArrayList<Uri> photoSelection = new ArrayList<>();
+    private final HashMap<String,Edit> editsByPhoto = new HashMap<>();
+    private int photoIndex = -1;
     private Mode mode = Mode.LOOKS;
     private String activeAdjustment = "Exposure";
     private int adjustGroup = 0;  // 0 Tone, 1 Noise+Sharpen, 2 Presence
@@ -198,6 +207,34 @@ public final class MainActivity extends Activity {
         openPlaceholder = label("◉\n\nDENNIS CRAFT MOBILE\n\nProfessional photo editing, offline.\n\n＋  TAP TO OPEN PHOTO", 18, Color.rgb(212, 229, 245));
         openPlaceholder.setOnClickListener(v -> openImage());
         canvas.addView(openPlaceholder, new FrameLayout.LayoutParams(-1, -1));
+        GestureDetector swipeDetector = new GestureDetector(this,
+                new GestureDetector.SimpleOnGestureListener() {
+                    @Override public boolean onDown(MotionEvent e) { return true; }
+                    @Override public boolean onFling(MotionEvent start, MotionEvent end,
+                            float velocityX, float velocityY) {
+                        if (start==null || end==null || photoSelection.size()<2) return false;
+                        float dx=end.getX()-start.getX(),dy=end.getY()-start.getY();
+                        if(Math.abs(dx)<dp(80) || Math.abs(dx)<Math.abs(dy)*1.4f ||
+                                Math.abs(velocityX)<190f) return false;
+                        changePhoto(dx<0 ? 1 : -1);
+                        return true;
+                    }
+                });
+        photo.setOnTouchListener((v,event) -> {
+            swipeDetector.onTouchEvent(event);
+            return true;
+        });
+        photoCounter = label("",11,Color.WHITE);
+        photoCounter.setPadding(dp(12),dp(6),dp(12),dp(6));
+        photoCounter.setBackground(background(Color.rgb(25,40,59),10));
+        FrameLayout.LayoutParams position=new FrameLayout.LayoutParams(
+                -2,dp(34),Gravity.TOP|Gravity.RIGHT);
+        position.setMargins(0,dp(10),dp(12),0);
+        canvas.addView(photoCounter,position);
+        photoCounter.setVisibility(View.GONE);
+        photoCounter.setOnClickListener(v -> {
+            if(photoSelection.size()>1) changePhoto(1);
+        });
 
         status = label("OFFLINE  •  ORIGINAL PRESERVED  •  JPEG Q95", 10, Color.rgb(148, 173, 198));
         status.setBackgroundColor(Color.rgb(12, 21, 32));
@@ -687,8 +724,8 @@ public final class MainActivity extends Activity {
     private static Bitmap fastPreview(Bitmap full) {
         int w=full.getWidth(), h=full.getHeight();
         int longest=Math.max(w,h);
-        if (longest <= 1100) return full;
-        float scale=1100f/longest;
+        if (longest <= 960) return full;
+        float scale=960f/longest;
         return Bitmap.createScaledBitmap(full, Math.max(1,Math.round(w*scale)),
                 Math.max(1,Math.round(h*scale)), true);
     }
@@ -801,9 +838,16 @@ public final class MainActivity extends Activity {
         Bitmap source = quick && fastPreviewSource != null ? fastPreviewSource : original;
         Edit snapshot = edit.copy();
         int serial = generation.incrementAndGet();
-        // Only the newest requested preview has any value. This is the critical
-        // fix for slider changes flooding the former single-worker queue.
         previewWork.getQueue().clear();
+        if (noEdits(snapshot)) {
+            Bitmap previous=renderedPreview;
+            renderedPreview=null;
+            photo.setImageBitmap(original);
+            if(previous!=null && previous!=original && previous!=fastPreviewSource)
+                releaseOldBitmaps(null,null,previous);
+            status.setText("Original · ready to edit");
+            return;
+        }
         status.setText(quick ? "Previewing adjustment…" : "Rendering photo…");
         previewWork.execute(() -> {
             if (serial != generation.get() || Thread.currentThread().isInterrupted()) return;
@@ -1106,7 +1150,7 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.1")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.2")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
                         "tone/colour adjustments, 64×64 Auto WB, luminance/chroma NR, sharpening, " +
