@@ -118,3 +118,23 @@ Boundaries: The cost of applying full-resolution advanced filtering and JPEG com
 - Visual validation on a real S23 Ultra is still needed for performance gains and for finger-swipe detection on the gallery.
 
 The existing v0.6.1 rendering architecture, v0.6 Auto WB, the v0.5 grouped filters, v0.4 Auto tonal parameters and all full-resolution export settings remain untouched.
+
+
+## v0.6.3 — experimental multi-scale scene-aware Auto
+
+- Built strictly on preserved v0.6.2 checkpoint commit 9d4838b2757f1fc196d6906a06dc591d02a3a323. Original fallback branch checkpoint/dennis-craft-v0.6.2-approved-20261024 remains untouched.
+- Retains all 4,096 fine analysis zones, local highlight protection and scene-aware shadow processing.
+- Pools the existing 64x64 sampled statistics into an independent count-weighted 16x16 scene map (256 coarse cells; no second bitmap scan).
+- Coarse map tests *spatially clustered* adequately exposed regions, surrounding darkness, scene brightness percentiles and bright-pixel coverage. A dark background alongside adequately exposed bright regions is treated as intentional low-key lighting rather than an order to brighten everything. No face, ancestry, skin, or subject recognition is claimed.
+- The exposure ceiling becomes +0.07 EV in clearly detected low-key scenes instead of the previous possible +0.45 EV; shadow lift is also reduced to 55% of the previous recommendation. Borderline dark-background scenes can receive more modest caps. Truly dark scenes with no adequately exposed regions keep the old up-to-+0.45 EV correction ability.
+- The bottom Auto status identifies when low-key protection was selected. Undo/redo restores the scene-decision flag with the remaining edits.
+- Crucially, existing tone-rendering math, white-balance decision algorithm, contrast/sharpen/noise/texture/dehaze algorithms, photo-picker/swipe controls, JPEG export resolution and code signing are unchanged.
+- Expected result is not a clinically calibrated or semantically correct exposure detector; it is a heuristic. Validate on device before promoting.
+
+Approximate offline regression checks from supplied image/screenshot pixels:
+- Low-key portrait screenshot crop: old +0.45 EV -> new +0.07 EV.
+- Woodland original: old +0.085 EV -> unchanged +0.085 EV.
+- Flower original: old +0.025 EV -> unchanged +0.025 EV.
+- Artificially darkened woodland / portrait / flowers: preserve ability to reach +0.45 EV.
+
+Caution: these are algorithm-level calculations from test inputs, not Android full-resolution render benchmarks or exact original camera source measurements.

@@ -62,6 +62,7 @@ public final class MainActivity extends Activity {
         String look = "Original";
         float[] autoZones;  // Immutable zone map measured on original preview.
         float autoStrength = 100f;
+        boolean autoLowKey; // 16x16 scene judgement, no semantic portrait mask.
         float luminanceNR, colorNR, sharpen, clarity, texture, dehaze;
         // Colour gains estimated only when spatial neutral evidence is convincing.
         float wbRed = 1f, wbGreen = 1f, wbBlue = 1f, wbConfidence;
@@ -71,6 +72,7 @@ public final class MainActivity extends Activity {
             d.shadows = shadows; d.saturation = saturation; d.warmth = warmth;
             d.tint = tint; d.ratio = ratio; d.rotation = rotation; d.look = look;
             d.autoZones = autoZones; d.autoStrength = autoStrength;
+            d.autoLowKey = autoLowKey;
             d.luminanceNR = luminanceNR; d.colorNR = colorNR; d.sharpen = sharpen;
             d.clarity = clarity; d.texture = texture; d.dehaze = dehaze;
             d.wbRed = wbRed; d.wbGreen = wbGreen; d.wbBlue = wbBlue;
@@ -685,6 +687,7 @@ public final class MainActivity extends Activity {
                     edit.wbBlue = whiteBalance.blue;
                     edit.wbConfidence = whiteBalance.confidence;
                     edit.autoZones = scene.zones;
+                    edit.autoLowKey = scene.protectedLowKey;
                     edit.autoStrength = 100f;
                     edit.look = "Auto";
                     // Auto tone and both detail groups are all scene dependent.
@@ -694,9 +697,10 @@ public final class MainActivity extends Activity {
                     render();
                     drawControls();
                     Toast.makeText(this, String.format(Locale.US,
-                            "64×64 Auto: %+.2f EV · WB %s",
-                            scene.exposure, whiteBalance.confidence > 0f ?
-                                    "corrected" : "preserved"),
+                            "64×64 + 16×16 Auto: %+.2f EV · %s · WB %s",
+                            scene.exposure,
+                            scene.protectedLowKey ? "low-key scene protected" : "scene analysed",
+                            whiteBalance.confidence > 0f ? "corrected" : "preserved"),
                             Toast.LENGTH_LONG).show();
                 });
             } catch (RuntimeException | OutOfMemoryError failure) {
@@ -925,8 +929,9 @@ public final class MainActivity extends Activity {
                     }
                     if ("Auto".equals(snapshot.look) && snapshot.autoZones != null) {
                         status.setText(String.format(Locale.US,
-                                "64×64 AUTO  •  %+.2f EV  •  %.0f%%  •  WB %s",
-                                snapshot.exposure, snapshot.autoStrength,
+                                "AUTO 64×64 + 16×16  •  %+.2f EV%s  •  WB %s",
+                                snapshot.exposure,
+                                snapshot.autoLowKey ? " · Low-key protected" : "",
                                 snapshot.wbConfidence > 0f ? "corrected" : "preserved"));
                     } else {
                         status.setText("Live preview · JPEG export Q" + jpegQuality);
@@ -1207,10 +1212,11 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.2")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.3")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
-                        "tone/colour adjustments, 64×64 Auto WB, luminance/chroma NR, sharpening, " +
+                        "tone/colour adjustments, 64×64 + 16×16 scene-aware Auto, Auto WB, " +
+                        "luminance/chroma NR, sharpening, " +
                         "clarity, texture, contrast dehaze, centre crop, rotate, " +
                         "undo/redo, press-and-hold before view, export and share.\n\n" +
                         "Auto WB uses cautious neutral samples, avoids colourful subjects and skips uncertain scenes. Auto analyses noise and detail from 64×64 local probes. Each detail group also has " +
