@@ -212,3 +212,17 @@ The success dialog reports the actual working input and output sizes and allows 
 Upscale inference now downsamples 4x ESRGAN output to 2x with averaged 2×2 model pixels instead of picking a single 4x pixel for each output pixel. This reduces pixel selection aliasing.
 
 CPU inference at the higher resolution can take considerably longer; there has been no S23U device benchmark. The 22MB model-backed APK continues to operate offline.
+
+
+## v0.7.2 Advanced Restoration — EXPERIMENTAL (non-generative)
+
+Starting point is preserved v0.7.1 source at checkpoint/dennis-craft-v0.7.1-before-advanced-restoration; independent branch experiment/dennis-craft-mobile-v0.7.2-advanced-restoration.
+
+Three independently adjustable tools in More → Advanced Restoration:
+1. Deblur (0–50, default 24): conservative 3x3 Gaussian high-pass sharpness recovery weighted by true local edges, capped +/-11 luminance and +/-16% ratio; does NOT genuinely reverse complex lens or motion blur and is NOT a generative neural model.
+2. JPEG Repair (0–65, default 36): neighbourhood-weighted ringing/chroma smoothing and conditional 8x8 boundary emphasis. Strong contrast/detail/eyelashes/text protected. This does not replicate Topaz's neural JPEG artefact removal.
+3. Face Detail (0–45, default OFF): bundled ML Kit offline face-location model, optional subtle non-generative noise cleanup inside a feathered face region. Avoids landmark areas near eyes, lips and nose. Doesn't reconstruct, hallucinate or morph features. Faces smaller than 100px are skipped and number enhanced is shown.
+
+All tools use an *independent* 2048-longest / 3-megapixel temporary export, preserving the source. Save to Pictures/Dennis Craft Mobile/Restore Lab with an Advanced filename. Existing denoise models, 2× maximum upscale, four-grid Auto and full-resolution conventional JPEG export stay unchanged.
+
+No face matching, identity inference or external image upload. ML Kit dependency is the bundled on-device face-detection variant; not the downloadable Google Play Services variant. Proper testing on S23 Ultra is needed before promoting the experiment.

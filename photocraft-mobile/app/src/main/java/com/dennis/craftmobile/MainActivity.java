@@ -126,6 +126,8 @@ public final class MainActivity extends Activity {
     private boolean restoreDenoise = true;
     private boolean restoreSharpen = true;
     private boolean restoreUpscale = false;
+    // Experimental advanced tools; optional face processing defaults OFF.
+    private int advancedDeblur=24, advancedJpegRepair=36, advancedFace=0;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -1221,24 +1223,174 @@ public final class MainActivity extends Activity {
     }
 
     private void more() {
-        String[] options = {"AI Upscale 2× · Restore Lab", "Restore Lab · Denoise / Sharpen",
+        String[] options = {"Advanced Restoration · Deblur / JPEG / Face",
+                "AI Upscale 2× · Restore Lab", "Restore Lab · Denoise / Sharpen",
                 "Modern photo picker", "Export / share", "JPEG quality",
                 "Reset edits", "About / limitations"};
         new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile")
                 .setItems(options, (dialog, which) -> {
-                    if (which==0) directUpscaleDialog();
-                    if (which==1) restoreDialog();
-                    if (which==2) openImage();
-                    if (which==3) exportDialog();
-                    if (which==4) chooseQuality();
-                    if (which==5 && previewSource != null) {
+                    if (which==0) advancedRestoreDialog();
+                    if (which==1) directUpscaleDialog();
+                    if (which==2) restoreDialog();
+                    if (which==3) openImage();
+                    if (which==4) exportDialog();
+                    if (which==5) chooseQuality();
+                    if (which==6 && previewSource != null) {
                         checkpoint(); edit = new Edit(); render(); drawControls();
                     }
-                    if (which==6) about();
+                    if (which==7) about();
                 }).show();
     }
 
     /** An opt-in restore pipeline, independent of our trusted normal editor. */
+
+    /**
+     * Isolated Advanced Restoration — conventional deblur/JPEG repair and
+     * ML Kit face-aware NON-generative detail cleanup. Existing 2x maximum
+     * upscale, four-grid Auto and ordinary photo export stay unchanged.
+     */
+    private void advancedRestoreDialog() {
+        if(input==null) { openImage(); return; }
+        final int[] choice={advancedDeblur,advancedJpegRepair,advancedFace};
+        LinearLayout content=new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(16),dp(9),dp(16),dp(5));
+        TextView info=label("Zero means OFF. Face Detail is optional and defaults off. "+
+                "No invented facial features or identity changes. "+
+                "This experimental export is limited to 2048px / 3MP.",12,Color.LTGRAY);
+        info.setGravity(Gravity.LEFT);
+        content.addView(info,new LinearLayout.LayoutParams(-1,dp(78)));
+        advancedStrength(content,"Deblur · natural edge recovery",50,choice[0],v->choice[0]=v);
+        advancedStrength(content,"JPEG Repair · blocks and ringing",65,choice[1],v->choice[1]=v);
+        advancedStrength(content,"Face Detail · conservative, optional",45,choice[2],v->choice[2]=v);
+        android.widget.ScrollView scroller=new android.widget.ScrollView(this);
+        scroller.addView(content);
+        new AlertDialog.Builder(this)
+                .setTitle("ADVANCED RESTORATION · TEST")
+                .setView(scroller)
+                .setNegativeButton("Cancel",null)
+                .setPositiveButton("Restore & save",(dialog,which)->{
+                    advancedDeblur=choice[0];
+                    advancedJpegRepair=choice[1];
+                    advancedFace=choice[2];
+                    AdvancedRestoreEngine.Options o=new AdvancedRestoreEngine.Options();
+                    o.deblur=choice[0];o.jpegRepair=choice[1];o.face=choice[2];
+                    saveAdvancedRestore(o);
+                }).show();
+    }
+
+    private void advancedStrength(LinearLayout panel,String name,int max,int start,
+                                   java.util.function.IntConsumer onChange) {
+        LinearLayout group=new LinearLayout(this);
+        group.setOrientation(LinearLayout.VERTICAL);
+        group.setPadding(0,dp(8),0,dp(4));
+        TextView title=label(name+": "+start+(start==0?" (OFF)":" / "+max),
+                13,Color.WHITE);
+        title.setGravity(Gravity.LEFT);
+        group.addView(title,new LinearLayout.LayoutParams(-1,dp(25)));
+        SeekBar slider=new SeekBar(this);
+        slider.setMax(max);
+        slider.setProgress(start);
+        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+            @Override public void onProgressChanged(SeekBar bar,int value,boolean fromUser){
+                if(!fromUser)return;
+                onChange.accept(value);
+                title.setText(name+": "+value+(value==0?" (OFF)":" / "+max));
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar){}
+            @Override public void onStopTrackingTouch(SeekBar bar){}
+        });
+        group.addView(slider,new LinearLayout.LayoutParams(-1,dp(40)));
+        panel.addView(group);
+    }
+
+    private void saveAdvancedRestore(AdvancedRestoreEngine.Options settings) {
+        if(input==null) { openImage();return; }
+        if(settings==null||!settings.enabled()) {
+            Toast.makeText(this,"Set at least one strength above zero",Toast.LENGTH_LONG).show();
+            return;
+        }
+        if(!saving.compareAndSet(false,true)) {
+            Toast.makeText(this,"Another export is running",Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final Uri uri=input;
+        final Edit snapshot=edit.copy();
+        final int quality=jpegQuality;
+        status.setText("Advanced Restoration · loading original…");
+        savingWork.execute(()->{
+            Bitmap original=null,adjusted=null,restored=null;
+            Uri inserted=null;
+            try {
+                original=decode(uri,2048,3_000_000);
+                if(original==null)throw new IllegalStateException("Photo could not be decoded");
+                exportStatus(uri,"Advanced Restoration · preparing current edits…");
+                adjusted=noEdits(snapshot)?original:process(original,snapshot);
+                AdvancedRestoreEngine.Result result=AdvancedRestoreEngine.process(
+                        adjusted,settings,message->exportStatus(uri,message));
+                restored=result.bitmap;
+                exportStatus(uri,"Advanced Restoration · saving JPEG…");
+                String file="DCR_ADVANCED_"+new SimpleDateFormat("yyyyMMdd_HHmmss_SSS",
+                        Locale.US).format(new Date())+".jpg";
+                ContentValues values=new ContentValues();
+                values.put(MediaStore.Images.Media.DISPLAY_NAME,file);
+                values.put(MediaStore.Images.Media.MIME_TYPE,"image/jpeg");
+                values.put(MediaStore.Images.Media.RELATIVE_PATH,
+                        "Pictures/Dennis Craft Mobile/Restore Lab");
+                values.put(MediaStore.Images.Media.IS_PENDING,1);
+                inserted=getContentResolver().insert(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values);
+                if(inserted==null)throw new IllegalStateException("Cannot create restored photo");
+                try(OutputStream out=getContentResolver().openOutputStream(inserted)) {
+                    if(out==null||!restored.compress(Bitmap.CompressFormat.JPEG,quality,out))
+                        throw new IllegalStateException("Cannot encode restored JPEG");
+                }
+                values.clear();values.put(MediaStore.Images.Media.IS_PENDING,0);
+                getContentResolver().update(inserted,values,null,null);
+                int w=restored.getWidth(),h=restored.getHeight();
+                int detected=result.facesLocated,enhanced=result.facesEnhanced;
+                Uri saved=inserted;
+                ui.post(()->{
+                    if(uri.equals(input))status.setText("Advanced Restoration saved "+w+" × "+h);
+                    new AlertDialog.Builder(this)
+                            .setTitle("Advanced Restoration saved")
+                            .setMessage(w+" × "+h+" · JPEG Q"+quality+
+                                    "\nDeblur: "+settings.deblur+
+                                    " · JPEG Repair: "+settings.jpegRepair+
+                                    "\nFace Detail: "+settings.face+
+                                    " ("+enhanced+"/"+detected+" detected faces refined)"+
+                                    "\n\nSaved to Pictures/Dennis Craft Mobile/Restore Lab."+
+                                    "\nOriginal photograph untouched.")
+                            .setNegativeButton("Close",null)
+                            .setPositiveButton("View result",(d,index)->{
+                                Intent show=new Intent(Intent.ACTION_VIEW);
+                                show.setDataAndType(saved,"image/jpeg");
+                                show.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                try{startActivity(show);}
+                                catch(android.content.ActivityNotFoundException error){
+                                    Toast.makeText(this,"Use your Gallery to view result",
+                                            Toast.LENGTH_LONG).show();
+                                }
+                            }).show();
+                });
+            } catch(Exception|OutOfMemoryError ex) {
+                if(inserted!=null)getContentResolver().delete(inserted,null,null);
+                String reason=ex.getMessage()!=null?ex.getMessage():ex.getClass().getSimpleName();
+                ui.post(()->{
+                    if(uri.equals(input))status.setText("Advanced Restore failed · "+reason);
+                    Toast.makeText(this,"Advanced Restore failed: "+reason,
+                            Toast.LENGTH_LONG).show();
+                });
+            } finally {
+                if(restored!=null&&restored!=adjusted&&restored!=original&&!restored.isRecycled())
+                    restored.recycle();
+                if(adjusted!=null&&adjusted!=original&&!adjusted.isRecycled())adjusted.recycle();
+                if(original!=null&&!original.isRecycled())original.recycle();
+                saving.set(false);
+            }
+        });
+    }
+
     private void directUpscaleDialog() {
         if(input==null) {
             Toast.makeText(this,"Choose a photo first",Toast.LENGTH_SHORT).show();
@@ -1384,8 +1536,12 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.7.1 RESTORE LAB 2× FIX")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.7.2 ADVANCED RESTORE")
                 .setMessage("Offline native Android editing prototype.\n\n" +
+                        "New Advanced Restoration: conventional Deblur, stronger JPEG Repair, " +
+                        "and optional offline ML Kit face-aware non-generative detail refinement. " +
+                        "Separate strengths, face mode defaults OFF, 2048px/3MP safety cap. " +
+                        "Maximum AI upscale stays 2×. " +
                         "Experimental Restore Lab: offline AI Denoise (NAFNet RGB) and offline " +
                         "2× AI Upscale (ESRGAN), plus conventional edge-conscious Sharpen. " +
                         "Neural restoration uses capped dimensions for phone memory safety. " +
