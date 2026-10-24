@@ -138,3 +138,25 @@ Approximate offline regression checks from supplied image/screenshot pixels:
 - Artificially darkened woodland / portrait / flowers: preserve ability to reach +0.45 EV.
 
 Caution: these are algorithm-level calculations from test inputs, not Android full-resolution render benchmarks or exact original camera source measurements.
+
+
+## v0.6.4 — experimental three-level Auto with coarse atmosphere protection
+
+Source: unmodified approved checkpoint/dennis-craft-v0.6.3-approved-20261024, commit 66f2013fd012f07c01f07b2ac148c7c39abe6bf2. Work occurs only on experiment/dennis-craft-mobile-v0.6.4-atmosphere-auto.
+
+- 64×64: keep existing luminance/colour analysis, regional shadow weights, WB and image-rendering formula.
+- 16×16: keep existing clustered-region / low-key exposure decision.
+- 8×8: NEW 64 coarse cells, pooled from the existing 4,096 64×64 measurements (weighted by sample count, no bitmap rescan). A conservative atmosphere gate recognises dark overall scenes with strong orange/yellow highlights or sparse nighttime highlights by combining coarse dark-cell coverage, scene luminance percentiles and bright/warm pixel coverage.
+- When atmospheric evidence is strong, reduce *only* the maximum global exposure and shadow strength. Warm-glow scenes limit positive exposure to +0.025 EV and shadow strength to 22% of the existing base recommendation; isolated bright nighttime lights gate at +0.045 EV and 32%. This can only restrain, not increase or undo existing 16×16 protection.
+- All other scenes retain exactly the v0.6.3 analysis decisions, including genuinely underexposed photos without confident warm-light/atmosphere evidence.
+- UI status and Auto toast show “Warm atmosphere protected” or “Night lights protected” when applicable.
+- No semantic identification of fire, portraits or skin. The warm-light heuristic cannot accurately classify every photographic scene.
+- White-balance estimator, all pixel-processing routines, detail DSP, saving, selected-photo swiping, preview memory/performance settings and JPEG output format/quality are unchanged.
+
+Offline algorithm checks based on user-provided examples:
+1. Dark fire with small flame: v0.6.3 +0.45 EV → v0.6.4 +0.025 EV, warmer flame retained, reduced shadow lift.
+2. Brighter fire with logs and intense flame: positive global EV already capped at +0.025 EV; shadow recommendation reduced.
+3. Indoor portraits: no warm-light false positive; v0.6.3 decision preserved.
+4. Artificially darkened portrait and ordinary daylight shots: do not trigger warm-light gate; v0.6.3 decision preserved.
+
+Real-device photography comparisons (including exported JPEG vs preview) are required before replacing approved build. When in doubt, the 8×8 layer does nothing.

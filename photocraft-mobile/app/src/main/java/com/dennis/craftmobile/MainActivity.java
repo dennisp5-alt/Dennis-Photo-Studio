@@ -933,7 +933,7 @@ public final class MainActivity extends Activity {
                     }
                     if ("Auto".equals(snapshot.look) && snapshot.autoZones != null) {
                         status.setText(String.format(Locale.US,
-                                "AUTO 64×16×8  •  %+.2f EV%s  •  WB %s",
+                                "AUTO 3-LAYER  •  %+.2f EV%s  •  WB %s",
                                 snapshot.exposure,
                                 !snapshot.autoAtmosphere.isEmpty() ?
                                         " · " + snapshot.autoAtmosphere + " protected" :
