@@ -123,6 +123,9 @@ public final class MainActivity extends Activity {
     private static final String[] PRESENCE_FIELDS =
             {"Clarity","Texture","Dehaze"};
     private int jpegQuality = 95;
+    private boolean restoreDenoise = true;
+    private boolean restoreSharpen = true;
+    private boolean restoreUpscale = false;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -1218,24 +1221,133 @@ public final class MainActivity extends Activity {
     }
 
     private void more() {
-        String[] options = {"Modern photo picker", "Export / share", "JPEG quality", "Reset edits",
-                "About / limitations"};
+        String[] options = {"Restore Lab · Offline AI", "Modern photo picker",
+                "Export / share", "JPEG quality", "Reset edits", "About / limitations"};
         new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile")
                 .setItems(options, (dialog, which) -> {
-                    if (which==0) openImage();
-                    if (which==1) exportDialog();
-                    if (which==2) chooseQuality();
-                    if (which==3 && previewSource != null) {
+                    if (which==0) restoreDialog();
+                    if (which==1) openImage();
+                    if (which==2) exportDialog();
+                    if (which==3) chooseQuality();
+                    if (which==4 && previewSource != null) {
                         checkpoint(); edit = new Edit(); render(); drawControls();
                     }
-                    if (which==4) about();
+                    if (which==5) about();
                 }).show();
     }
 
+    /** An opt-in restore pipeline, independent of our trusted normal editor. */
+    private void restoreDialog() {
+        if(input == null) {
+            Toast.makeText(this,"Choose a photo first",Toast.LENGTH_SHORT).show();
+            openImage();
+            return;
+        }
+        final String[] tools={
+                "AI Denoise · NAFNet RGB (offline)",
+                "Detail-aware Sharpen · conventional",
+                "AI Upscale 2× · ESRGAN (offline)"
+        };
+        final boolean[] selected={restoreDenoise,restoreSharpen,restoreUpscale};
+        new AlertDialog.Builder(this)
+                .setTitle("RESTORE LAB · EXPERIMENT")
+                .setMessage("Denoise and Upscale use licensed neural models packaged offline. " +
+                        "Sharpen uses the existing edge-aware filter, not AI.\n\n" +
+                        "To protect phone memory, this first experimental version " +
+                        "limits denoise/sharpen processing to 1536px on the longest side. " +
+                        "2× AI upscale accepts up to 512px and outputs up to 1024px. " +
+                        "Normal exports and original photographs remain unchanged.")
+                .setMultiChoiceItems(tools,selected,(dialog,index,checked)->
+                        selected[index]=checked)
+                .setNegativeButton("Cancel",null)
+                .setPositiveButton("Restore & save",(dialog,index)->{
+                    restoreDenoise=selected[0];
+                    restoreSharpen=selected[1];
+                    restoreUpscale=selected[2];
+                    saveRestored(selected[0],selected[1],selected[2]);
+                })
+                .show();
+    }
+
+    private void saveRestored(boolean denoise,boolean sharpen,boolean upscale) {
+        if(input==null) {openImage();return;}
+        if(!denoise && !sharpen && !upscale) {
+            Toast.makeText(this,"Select at least one tool",Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if(!saving.compareAndSet(false,true)) {
+            Toast.makeText(this,"An export is already running",Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final Uri uri=input;
+        final Edit snapshot=edit.copy();
+        final int quality=jpegQuality;
+        status.setText("Restore Lab · loading…");
+        savingWork.execute(()->{
+            Bitmap original=null,adjusted=null,restored=null;
+            Uri inserted=null;
+            try {
+                original=decode(uri,upscale?512:1536,3_000_000);
+                if(original==null)throw new IllegalStateException("Could not decode photo");
+                exportStatus(uri,"Restore Lab · preparing current edits…");
+                adjusted=noEdits(snapshot)?original:process(original,snapshot);
+                restored=RestoreEngine.run(this,adjusted,denoise,sharpen,upscale,
+                        message->exportStatus(uri,message));
+                exportStatus(uri,"Restore Lab · encoding JPEG Q"+quality+"…");
+                String file="DCR_RESTORE_"+new SimpleDateFormat("yyyyMMdd_HHmmss_SSS",
+                        Locale.US).format(new Date())+".jpg";
+                ContentValues values=new ContentValues();
+                values.put(MediaStore.Images.Media.DISPLAY_NAME,file);
+                values.put(MediaStore.Images.Media.MIME_TYPE,"image/jpeg");
+                values.put(MediaStore.Images.Media.RELATIVE_PATH,
+                        "Pictures/Dennis Craft Mobile/Restore Lab");
+                values.put(MediaStore.Images.Media.IS_PENDING,1);
+                inserted=getContentResolver().insert(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values);
+                if(inserted==null)throw new IllegalStateException("Cannot create restored file");
+                try(OutputStream stream=getContentResolver().openOutputStream(inserted)) {
+                    if(stream==null ||
+                            !restored.compress(Bitmap.CompressFormat.JPEG,quality,stream)) {
+                        throw new IllegalStateException("Restore JPEG compression failed");
+                    }
+                }
+                values.clear();
+                values.put(MediaStore.Images.Media.IS_PENDING,0);
+                getContentResolver().update(inserted,values,null,null);
+                final int outW=restored.getWidth(),outH=restored.getHeight();
+                ui.post(()->{
+                    if(uri.equals(input))status.setText("Restore Lab · saved "+
+                            outW+" × "+outH+" JPEG Q"+quality);
+                    Toast.makeText(this,"Restored photo saved to Pictures/Dennis Craft Mobile/Restore Lab",
+                            Toast.LENGTH_LONG).show();
+                });
+            } catch(Exception | OutOfMemoryError error) {
+                if(inserted!=null)getContentResolver().delete(inserted,null,null);
+                String message=error.getMessage()==null ?
+                        error.getClass().getSimpleName() : error.getMessage();
+                ui.post(()->{
+                    if(uri.equals(input))status.setText("Restore failed · "+message);
+                    Toast.makeText(this,"Restore failed: "+message,Toast.LENGTH_LONG).show();
+                });
+            } finally {
+                if(restored!=null && restored!=adjusted && restored!=original &&
+                        !restored.isRecycled()) restored.recycle();
+                if(adjusted!=null && adjusted!=original &&
+                        !adjusted.isRecycled())adjusted.recycle();
+                if(original!=null && !original.isRecycled())original.recycle();
+                saving.set(false);
+            }
+        });
+    }
+
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.8 SCENE INTELLIGENCE")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.7.0 RESTORE LAB")
                 .setMessage("Offline native Android editing prototype.\n\n" +
-                        "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
+                        "Experimental Restore Lab: offline AI Denoise (NAFNet RGB) and offline " +
+                        "2× AI Upscale (ESRGAN), plus conventional edge-conscious Sharpen. " +
+                        "Neural restoration uses capped dimensions for phone memory safety. " +
+                        "Standard full-resolution editing/export is unchanged. " +
+                        "Modern Android photo picker, JPEG/HEIC, styled looks, " +
                         "tone/colour adjustments, four-level Auto + structural region and deep-black safeguards, Auto WB, " +
                         "luminance/chroma NR, sharpening, " +
                         "clarity, texture, contrast dehaze, centre crop, rotate, " +

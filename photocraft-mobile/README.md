@@ -188,3 +188,13 @@ The 128×128 and 256×256 experiments are intentionally excluded.
 - Status line identifies structural / near-black protection when detected. Since no semantic model is used, it does NOT claim to recognise people's identity or skin tone.
 - Prototype for A/B checking and benchmarking against v0.6.5, not automatic promotion to production. New protections can be tuned or removed independently.
 
+
+## v0.7.0 — Offline Restore Lab experimental APK
+
+- Based on preserved v0.6.8 four-grid checkpoint, excludes both the 128×128 and 256×256 experiments.
+- More → Restore Lab offers genuine bundled TFLite AI Denoise (Raspberry Pi NAFNet RGB Small) and model-backed AI 2× Upscale (float16 ESRGAN 4× network resampled to 2×). Also includes **conventional** detail-aware sharpening, clearly labelled not AI.
+- Only runs when explicitly requested. Original images and existing full-size 50MP JPEG export are unchanged.
+- First experimental restore limits long edge to 1536px denoise/sharpen and 512px source for AI Upscale; output 2× up to 1024px. This is a proof of real neural inference and a memory-safety limit, not final Topaz-style full-resolution enhancement.
+- Results saved separately to Pictures/Dennis Craft Mobile/Restore Lab as new JPEGs without altering the originals.
+- Build downloads pinned open-source pretrained model binaries, bundles them into the offline APK; no internet required after installation.
+- Inference compatibility, output quality and processing speed require S23 Ultra device testing.

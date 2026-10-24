@@ -14,6 +14,7 @@ on:
       - experiment/dennis-craft-mobile-v0.6.4-atmosphere-auto
       - experiment/dennis-craft-mobile-v0.6.5-four-level-auto
       - experiment/dennis-craft-mobile-v0.6.8-scene-intelligence
+      - experiment/dennis-craft-mobile-v0.7.0-restore-lab
     paths:
       - 'photocraft-mobile/**'
       - '.github/workflows/dennis-craft-mobile-apk.yml'
@@ -31,11 +32,32 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
+      - name: Prepare offline licensed model files
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSETS="photocraft-mobile/app/src/main/assets"
+          mkdir -p "$ASSETS"
+          curl --fail --location --silent --show-error --retry 3 --connect-timeout 20 \
+            "https://raw.githubusercontent.com/raspberrypi/AI_denoise/0e102180f57e9215381e40f97a76c5350d29d99c/networks/nafnet_rgb_small.tflite" \
+            --output "$ASSETS/nafnet_rgb_small.tflite"
+          test "$(wc -c < "$ASSETS/nafnet_rgb_small.tflite")" -gt 1500000
+
+          curl --fail --location --silent --show-error --retry 3 --connect-timeout 20 \
+            "https://github.com/margaretmz/esrgan-e2e-tflite-tutorial/releases/download/v0.1.0/esrgan_fp16.tar.gz" \
+            --output /tmp/esrgan_fp16.tar.gz
+          mkdir -p /tmp/esrgan-extract
+          tar -xzf /tmp/esrgan_fp16.tar.gz -C /tmp/esrgan-extract
+          MODEL=$(find /tmp/esrgan-extract -type f -name '*.tflite' | head -n 1)
+          test -n "$MODEL"
+          cp "$MODEL" "$ASSETS/esrgan_fp16.tflite"
+          test "$(wc -c < "$ASSETS/esrgan_fp16.tflite")" -gt 100000
+          ls -lh "$ASSETS"/*.tflite
       - name: Assemble debug APK
         run: gradle -p photocraft-mobile --no-daemon assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: dennis-craft-mobile-v0.6.8-scene-intelligence-debug-apk
+          name: dennis-craft-mobile-v0.7.0-restore-lab-debug-apk
           path: photocraft-mobile/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14

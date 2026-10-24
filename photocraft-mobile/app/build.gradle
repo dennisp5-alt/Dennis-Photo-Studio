@@ -8,8 +8,8 @@ android {
         applicationId 'com.dennis.craftmobile'
         minSdk 29
         targetSdk 35
-        versionCode 14
-        versionName '0.6.8-scene-test'
+        versionCode 15
+        versionName '0.7.0-restore-experiment'
     }
     buildTypes {
         release { minifyEnabled false }
@@ -18,4 +18,8 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+}
+
+dependencies {
+    implementation 'org.tensorflow:tensorflow-lite:2.17.0'
 }
