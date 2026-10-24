@@ -18,8 +18,11 @@ final class SpatialAuto64 {
         final boolean protectedLowKey;
         final boolean genuinelyDark;
         final int exposedZones, darkZones;
+        final boolean protectedAtmosphere;
+        final String atmosphereDescription;
         Scene(float[] zones, float exposure, float contrast, float highlights,
-              float shadows, float brightCoverage, SceneJudgement16.Decision judgement) {
+              float shadows, float brightCoverage, SceneJudgement16.Decision judgement,
+              SceneAtmosphere8.Decision atmosphere) {
             this.zones = zones;
             this.exposure = exposure;
             this.contrast = contrast;
@@ -30,6 +33,8 @@ final class SpatialAuto64 {
             this.genuinelyDark = judgement.trulyDark;
             this.exposedZones = judgement.exposedZones;
             this.darkZones = judgement.darkZones;
+            this.protectedAtmosphere = atmosphere.protectedAtmosphere;
+            this.atmosphereDescription = atmosphere.description;
         }
     }
 
@@ -40,7 +45,7 @@ final class SpatialAuto64 {
         final int[] row = new int[w], histogram = new int[256];
         final float[] sum = new float[CELLS];
         final int[] count = new int[CELLS], brightCount = new int[CELLS];
-        int bright = 0, samples = 0;
+        int bright = 0, warmGlow = 0, samples = 0;
 
         for (int y = 0; y < h; y += stride) {
             source.getPixels(row, 0, w, 0, y, w, 1);
@@ -59,6 +64,12 @@ final class SpatialAuto64 {
                     brightCount[idx]++;
                     bright++;
                 }
+                // Strong orange/yellow light is distinct from ordinary warm
+                // complexion or red fabric; this is not a fire detector.
+                if (r >= 140 && g >= 55 && r >= g*1.28f &&
+                        g >= b*1.50f && g-b >= 28 && lum >= 65) {
+                    warmGlow++;
+                }
                 samples++;
             }
         }
@@ -76,11 +87,14 @@ final class SpatialAuto64 {
         // second, 16x16 scene-judgement layer built from the same measurements.
         SceneJudgement16.Decision judgement = SceneJudgement16.assess(
                 sum, count, histogram, samples, coverage, maxEV);
+        SceneAtmosphere8.Decision atmosphere = SceneAtmosphere8.assess(
+                sum, count, histogram, samples, warmGlow, coverage,
+                judgement.exposureCeiling, judgement.shadowScale);
         float ideal = (float)(Math.log(.36f/Math.max(.09f, median/255f)) /
                 Math.log(2f));
-        float exposure = clamp(ideal, -.16f, judgement.exposureCeiling);
+        float exposure = clamp(ideal, -.16f, atmosphere.exposureCeiling);
         float shadows = (p5 < 40 ? 15f : p5 < 70 ? 11f : 6f) *
-                judgement.shadowScale;
+                atmosphere.shadowScale;
         float highlights = highlight > .83f ? -13f :
                            highlight > .71f ? -8f : 0f;
         float contrast = clamp((.60f - (p95-p5)/255f)*11f, -4f, 4f);
@@ -110,7 +124,8 @@ final class SpatialAuto64 {
                 smooth[y*SIZE+x] = weighted / weightTotal;
             }
         }
-        return new Scene(smooth,exposure,contrast,highlights,shadows,coverage,judgement);
+        return new Scene(smooth,exposure,contrast,highlights,shadows,coverage,
+                judgement,atmosphere);
     }
 
     private static int percentile(int[] h, int total, float fraction) {
