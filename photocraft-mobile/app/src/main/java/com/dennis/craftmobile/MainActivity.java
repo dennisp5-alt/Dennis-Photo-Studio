@@ -62,6 +62,7 @@ public final class MainActivity extends Activity {
         String look = "Original";
         float[] autoZones;  // Original 64x64 weights.
         float[] autoFineZones; // Experimental 128x128 weights.
+        float[] autoUltraZones; // Experimental 256x256 micro-weight map.
         float autoStrength = 100f;
         boolean autoLowKey; // 16x16 scene judgement, no semantic portrait mask.
         String autoAtmosphere = ""; // 8x8 conservative atmosphere decision.
@@ -76,6 +77,7 @@ public final class MainActivity extends Activity {
             d.tint = tint; d.ratio = ratio; d.rotation = rotation; d.look = look;
             d.autoZones = autoZones;
             d.autoFineZones = autoFineZones;
+            d.autoUltraZones = autoUltraZones;
             d.autoStrength = autoStrength;
             d.autoLowKey = autoLowKey;
             d.autoAtmosphere = autoAtmosphere;
@@ -672,7 +674,7 @@ public final class MainActivity extends Activity {
             return;
         }
         int serial = generation.incrementAndGet();
-        status.setText("AUTO  •  128×128 experimental fine-grid analysis…");
+        status.setText("AUTO  •  256×256 extreme experimental analysis…");
         previewWork.getQueue().clear();
         previewWork.execute(() -> {
             try {
@@ -695,6 +697,7 @@ public final class MainActivity extends Activity {
                     edit.wbConfidence = whiteBalance.confidence;
                     edit.autoZones = scene.zones;
                     edit.autoFineZones = scene.fineZones;
+                    edit.autoUltraZones = scene.ultraZones;
                     edit.autoLowKey = scene.protectedLowKey;
                     edit.autoAtmosphere = scene.atmosphereDescription;
                     edit.autoMacroProtected = scene.protectedMacroAtmosphere;
@@ -707,7 +710,7 @@ public final class MainActivity extends Activity {
                     render();
                     drawControls();
                     Toast.makeText(this, String.format(Locale.US,
-                            "128×128 Experimental Auto: %+.2f EV · %s · WB %s",
+                            "256×256 Experimental Auto: %+.2f EV · %s · WB %s",
                             scene.exposure,
                             scene.protectedMacroAtmosphere ? "overall dark atmosphere protected" :
                                     scene.protectedAtmosphere ? scene.atmosphereDescription + " protected" :
@@ -941,7 +944,7 @@ public final class MainActivity extends Activity {
                     }
                     if ("Auto".equals(snapshot.look) && snapshot.autoZones != null) {
                         status.setText(String.format(Locale.US,
-                                "AUTO 128×128 TEST  •  %+.2f EV%s  •  WB %s",
+                                "AUTO 256×256 TEST  •  %+.2f EV%s  •  WB %s",
                                 snapshot.exposure,
                                 snapshot.autoMacroProtected ? " · 4×4 atmosphere protected" :
                                         !snapshot.autoAtmosphere.isEmpty() ?
@@ -1007,6 +1010,10 @@ public final class MainActivity extends Activity {
                 e.autoFineZones.length == SpatialFine128.CELLS;
         int[] fineX = null;
         float[] fineFractions = null, fineRow = null;
+        boolean ultra256=fine128 && e.autoUltraZones!=null &&
+                e.autoUltraZones.length==SpatialFine256.CELLS;
+        int[] ultraX=null;
+        float[] ultraFractions=null, ultraRow=null;
         float strength = clamp(e.autoStrength / 100f, 0f, 1f);
         float autoGain = ((float)Math.pow(2, e.exposure) - 1f) * strength;
         float autoShadow = e.shadows / 100f * .24f * strength;
@@ -1021,6 +1028,11 @@ public final class MainActivity extends Activity {
                 fineFractions = SpatialFine128.xFractions(w);
                 fineRow = new float[SpatialFine128.SIZE];
             }
+            if(ultra256) {
+                ultraX=SpatialFine256.xIndices(w);
+                ultraFractions=SpatialFine256.xFractions(w);
+                ultraRow=new float[SpatialFine256.SIZE];
+            }
         }
         for (int y=0; y<h; y++) {
             if ((y & 7) == 0 && cancelled.getAsBoolean()) {
@@ -1029,6 +1041,7 @@ public final class MainActivity extends Activity {
             }
             if (spatial) SpatialAuto64.interpolateRow(e.autoZones, y, h, rowZones);
             if (fine128) SpatialFine128.interpolateRow(e.autoFineZones,y,h,fineRow);
+            if (ultra256) SpatialFine256.interpolateRow(e.autoUltraZones,y,h,ultraRow);
             src.getPixels(pixels, 0, w, 0, y, w, 1);
             for (int x=0; x<w; x++) {
                 int pixel = pixels[x];
@@ -1048,6 +1061,15 @@ public final class MainActivity extends Activity {
                         float fineZone=fineRow[fineIdx]*(1f-frac)+
                                 fineRow[Math.min(SpatialFine128.SIZE-1,fineIdx+1)]*frac;
                         zone=.5f*zone+.5f*fineZone;
+                        if(ultra256) {
+                            int ultraIndex=ultraX[x];
+                            float uf=ultraFractions[x];
+                            float micro=ultraRow[ultraIndex]*(1f-uf)+
+                                    ultraRow[Math.min(SpatialFine256.SIZE-1,ultraIndex+1)]*uf;
+                            // The new extreme-resolution grid is intentionally
+                            // only 25% of the final shadow guidance.
+                            zone=.75f*zone+.25f*micro;
+                        }
                     }
                     float protection = 1f - SpatialAuto64.smoothstep(.64f,.94f,maxChannel);
                     float darkness = 1f - SpatialAuto64.smoothstep(.12f,.68f,lum);
@@ -1244,10 +1266,10 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.6 EXPERIMENT")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.7 256×256 EXPERIMENT")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
-                        "tone/colour adjustments, 128×128 experiment with preserved four-level Auto, Auto WB, " +
+                        "tone/colour adjustments, 256×256 experimental micro-detail with preserved 128×128 and four-level Auto, Auto WB, " +
                         "luminance/chroma NR, sharpening, " +
                         "clarity, texture, contrast dehaze, centre crop, rotate, " +
                         "undo/redo, press-and-hold before view, export and share.\n\n" +

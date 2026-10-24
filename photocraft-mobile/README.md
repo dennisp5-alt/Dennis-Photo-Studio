@@ -182,3 +182,17 @@ Real 128x128 (16,384 fine bins) luminance and highlight samples collected in the
 The existing 4x4/8x8/16x16/64x64 scene judgement and exposure limits, Auto WB, noise/sharpen/texture/clarity/dehaze, picker/swipe UI and JPEG export quality/resolution are unchanged.
 
 Expect somewhat more image-render processing and memory usage. Compare skin, flowers, dark fire scenes and export speed with v0.6.5 before adoption. Revert by installing/restoring v0.6.5. This release is explicitly a quality experiment, not a speed fix.
+
+
+## v0.6.7 — EXTREME 256×256 experimental analysis
+
+This is an exploratory build, NOT a production update. Source based on preserved v0.6.6 checkpoint branch checkpoint/dennis-craft-v0.6.6-before-256-experiment.
+
+- Collects genuine 256x256 (65,536) luminance/bright-channel bins in the **same image sampling scan**, alongside 128x128 and 64x64. A local sample must have at least 3 pixels and a 128 parent at least 8 samples to influence the image. Sparse cells are shrunk toward the existing parent value; 3x3 microzone smoothing.
+- New fine-grid modulation is limited to +/-8%, then blended as just 25% of the final shadow-zone weight. Original 64x64 + 128x128 shadow behaviour remains predominant.
+- The 4x4, 8x8, 16x16 and 64x64 GLOBAL exposure decisions are identical to v0.6.6; Auto WB and all tone, detail, sharpening, colour and JPEG export formulas remain unchanged.
+- The 256 weights travel with per-photo edit snapshots and are bilinearly interpolated at both preview and full-resolution export.
+- Memory use and per-pixel rendering cost are higher. This is not a performance upgrade, and may worsen rendering and saving latency. Compare same photos and speed with the preserved v0.6.5 and v0.6.6 builds. Keep only if the result is actually visibly better.
+- No new permissions and no changes to photo selection, swipe, manual tools or export quality.
+
+No more analysis-level escalation is recommended without objective A/B metrics.

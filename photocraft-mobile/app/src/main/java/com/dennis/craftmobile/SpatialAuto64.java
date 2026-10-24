@@ -14,6 +14,7 @@ final class SpatialAuto64 {
     static final class Scene {
         final float[] zones;
         final float[] fineZones;
+        final float[] ultraZones;
         final float exposure, contrast, highlights, shadows;
         final float brightCoverage;
         final boolean protectedLowKey;
@@ -22,12 +23,13 @@ final class SpatialAuto64 {
         final boolean protectedAtmosphere;
         final String atmosphereDescription;
         final boolean protectedMacroAtmosphere;
-        Scene(float[] zones, float[] fineZones, float exposure, float contrast,
-              float highlights, float shadows, float brightCoverage,
-              SceneJudgement16.Decision judgement, SceneAtmosphere8.Decision atmosphere,
-              SceneIntent4.Decision intent) {
+        Scene(float[] zones, float[] fineZones, float[] ultraZones,
+              float exposure, float contrast, float highlights, float shadows,
+              float brightCoverage, SceneJudgement16.Decision judgement,
+              SceneAtmosphere8.Decision atmosphere, SceneIntent4.Decision intent) {
             this.zones = zones;
             this.fineZones = fineZones;
+            this.ultraZones = ultraZones;
             this.exposure = exposure;
             this.contrast = contrast;
             this.highlights = highlights;
@@ -53,6 +55,9 @@ final class SpatialAuto64 {
         final float[] fineSum=new float[SpatialFine128.CELLS];
         final int[] fineCount=new int[SpatialFine128.CELLS];
         final int[] fineHot=new int[SpatialFine128.CELLS];
+        final float[] ultraSum=new float[SpatialFine256.CELLS];
+        final int[] ultraCount=new int[SpatialFine256.CELLS];
+        final int[] ultraHot=new int[SpatialFine256.CELLS];
         int bright = 0, warmGlow = 0, samples = 0;
 
         for (int y = 0; y < h; y += stride) {
@@ -71,11 +76,17 @@ final class SpatialAuto64 {
                 int fineIndex=fy*128+fx;
                 fineSum[fineIndex]+=lum/255f;
                 fineCount[fineIndex]++;
+                int ux=Math.min(255,(int)((long)x*256/w));
+                int uy=Math.min(255,(int)((long)y*256/h));
+                int ultraIndex=uy*256+ux;
+                ultraSum[ultraIndex]+=lum/255f;
+                ultraCount[ultraIndex]++;
                 histogram[lum]++;
                 // High RGB channels matter even when bright pink petals have low luminance.
                 if (Math.max(r,Math.max(g,b)) >= 237 && lum >= 120) {
                     brightCount[idx]++;
                     fineHot[fineIndex]++;
+                    ultraHot[ultraIndex]++;
                     bright++;
                 }
                 // Strong orange/yellow light is distinct from ordinary warm
@@ -141,8 +152,10 @@ final class SpatialAuto64 {
             }
         }
         float[] fine=SpatialFine128.build(fineSum,fineCount,fineHot,smooth,sum,count);
-        return new Scene(smooth,fine,exposure,contrast,highlights,shadows,coverage,
-                judgement,atmosphere,intent);
+        float[] ultra=SpatialFine256.build(ultraSum,ultraCount,ultraHot,
+                fine,fineSum,fineCount);
+        return new Scene(smooth,fine,ultra,exposure,contrast,highlights,shadows,
+                coverage,judgement,atmosphere,intent);
     }
 
     private static int percentile(int[] h, int total, float fraction) {
