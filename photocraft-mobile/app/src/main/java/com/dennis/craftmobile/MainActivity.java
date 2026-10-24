@@ -63,6 +63,7 @@ public final class MainActivity extends Activity {
         float[] autoZones;  // Immutable zone map measured on original preview.
         float autoStrength = 100f;
         boolean autoLowKey; // 16x16 scene judgement, no semantic portrait mask.
+        String autoAtmosphere = ""; // 8x8 conservative atmosphere decision.
         float luminanceNR, colorNR, sharpen, clarity, texture, dehaze;
         // Colour gains estimated only when spatial neutral evidence is convincing.
         float wbRed = 1f, wbGreen = 1f, wbBlue = 1f, wbConfidence;
@@ -73,6 +74,7 @@ public final class MainActivity extends Activity {
             d.tint = tint; d.ratio = ratio; d.rotation = rotation; d.look = look;
             d.autoZones = autoZones; d.autoStrength = autoStrength;
             d.autoLowKey = autoLowKey;
+            d.autoAtmosphere = autoAtmosphere;
             d.luminanceNR = luminanceNR; d.colorNR = colorNR; d.sharpen = sharpen;
             d.clarity = clarity; d.texture = texture; d.dehaze = dehaze;
             d.wbRed = wbRed; d.wbGreen = wbGreen; d.wbBlue = wbBlue;
@@ -688,6 +690,7 @@ public final class MainActivity extends Activity {
                     edit.wbConfidence = whiteBalance.confidence;
                     edit.autoZones = scene.zones;
                     edit.autoLowKey = scene.protectedLowKey;
+                    edit.autoAtmosphere = scene.atmosphereDescription;
                     edit.autoStrength = 100f;
                     edit.look = "Auto";
                     // Auto tone and both detail groups are all scene dependent.
@@ -697,9 +700,10 @@ public final class MainActivity extends Activity {
                     render();
                     drawControls();
                     Toast.makeText(this, String.format(Locale.US,
-                            "64×64 + 16×16 Auto: %+.2f EV · %s · WB %s",
+                            "Three-Level Auto: %+.2f EV · %s · WB %s",
                             scene.exposure,
-                            scene.protectedLowKey ? "low-key scene protected" : "scene analysed",
+                            scene.protectedAtmosphere ? scene.atmosphereDescription + " protected" :
+                                    scene.protectedLowKey ? "low-key protected" : "scene analysed",
                             whiteBalance.confidence > 0f ? "corrected" : "preserved"),
                             Toast.LENGTH_LONG).show();
                 });
@@ -929,9 +933,11 @@ public final class MainActivity extends Activity {
                     }
                     if ("Auto".equals(snapshot.look) && snapshot.autoZones != null) {
                         status.setText(String.format(Locale.US,
-                                "AUTO 64×64 + 16×16  •  %+.2f EV%s  •  WB %s",
+                                "AUTO 64×16×8  •  %+.2f EV%s  •  WB %s",
                                 snapshot.exposure,
-                                snapshot.autoLowKey ? " · Low-key protected" : "",
+                                !snapshot.autoAtmosphere.isEmpty() ?
+                                        " · " + snapshot.autoAtmosphere + " protected" :
+                                        snapshot.autoLowKey ? " · Low-key protected" : "",
                                 snapshot.wbConfidence > 0f ? "corrected" : "preserved"));
                     } else {
                         status.setText("Live preview · JPEG export Q" + jpegQuality);
@@ -1212,10 +1218,10 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.3")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.4")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
-                        "tone/colour adjustments, 64×64 + 16×16 scene-aware Auto, Auto WB, " +
+                        "tone/colour adjustments, 64×64 + 16×16 + 8×8 three-level Auto, Auto WB, " +
                         "luminance/chroma NR, sharpening, " +
                         "clarity, texture, contrast dehaze, centre crop, rotate, " +
                         "undo/redo, press-and-hold before view, export and share.\n\n" +
