@@ -91,3 +91,17 @@ Limitations: this is an image-processing prototype, not trained or validated sce
 - Neutral indoor image under mild tungsten/fluorescent cast: some WB improvement without flattening the intended ambience.
 - Sunset or blue sky without neutrals: intentional colours must remain.
 - Manual Warmth/Tint after pressing Auto: sliders must visibly change preview and exported JPEG.
+
+
+## v0.6.1 performance checkpoint (experimental)
+
+This update changes scheduling/loading only, not the actual v0.6 tone, Auto WB, colour or detail formulas.
+
+- Replaces the shared background queue with dedicated photo-opening, preview-rendering and JPEG-export workers. A queued full-size export cannot directly hold up image-selection preview decode.
+- Clears the old photograph and shows an explicit opening placeholder as soon as the new photo is selected. Displays the decoded new photo immediately while its edited preview renders.
+- Removes superseded preview jobs from the queue; checks cancellation every eight scanlines both in the tone processor and DetailEngine filter.
+- Debounces continuous slider changes at 90ms and uses an 1100px temporary editing preview during a drag. The full 2000px-cap preview is regenerated when the finger lifts. Photo export still renders up to the original 8192px/50MP cap with all effects.
+- JPEG export now reports read/process/encode stages, serialises concurrent save taps, and bypasses the edit pipeline for truly unedited, uncropped photos.
+- Job completion callbacks are checked for stale selection/render requests and discarded when the user has since opened another photograph.
+
+Boundaries: The cost of applying full-resolution advanced filtering and JPEG compression remains proportional to the original image size and available phone memory. This is not a replacement of the rendering algorithms. Test real-device performance, compare preview/final appearance and test multiple rapid photo selections before considering stable.
