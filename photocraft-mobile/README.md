@@ -172,3 +172,19 @@ Real-device photography comparisons (including exported JPEG vs preview) are req
 - The status line reports 4x4 protection when activated.
 - Existing colour, WB, detail DSP, swiping, preview and JPEG export remain untouched.
 - Test on the phone before considering promotion; scene classification is heuristic. The 128x128 proposal is intentionally deferred.
+
+
+## v0.6.8 — four-grid scene intelligence experiment (normal-development baseline)
+
+Derived *directly* from frozen v0.6.5 commit 21725afbe27cadf9b91fe5fc5fe910f23861937a.
+The 128×128 and 256×256 experiments are intentionally excluded.
+
+- Keep 4×4 scene atmosphere, 8×8 illumination, 16×16 regional exposure, and 64×64 local shadow/highlight maps.
+- Add SceneContentGuard: a connected midtone-region analysis on pooled 16×16 cells, using data already available from the 64×64 sampling pass. It identifies structurally prominent *lit regions*, not subjects/faces/skin as semantic objects. It requires 72+ dark cells, strong region evidence, and non-underexposure before imposing a maximum +0.09 EV and 0.66 shadow-strength cap.
+- Preserve genuinely underexposed images by not triggering the guard where the existing regional judge finds inadequate exposure.
+- When existing low-key/night atmosphere protection or a well-supported lit region indicates the scene is intentionally dark, reduce local shadow lift by up to 25% only in near-black 64×64 zones; feather through the existing 3×3 zone smoothing.
+- All corrections only restrain v0.6.5 decisions. In ordinary scenes both original exposure/shadow decisions and original 64×64 weights are kept unchanged.
+- Manual adjustments, Auto WB (unchanged), colour rendering, noise reduction, sharpening, dehaze, texture, clarity, zoom, picker and swipe, JPEG quality, export and persistence stay as before.
+- Status line identifies structural / near-black protection when detected. Since no semantic model is used, it does NOT claim to recognise people's identity or skin tone.
+- Prototype for A/B checking and benchmarking against v0.6.5, not automatic promotion to production. New protections can be tuned or removed independently.
+

@@ -21,9 +21,12 @@ final class SpatialAuto64 {
         final boolean protectedAtmosphere;
         final String atmosphereDescription;
         final boolean protectedMacroAtmosphere;
+        final boolean protectedImportantRegion;
+        final boolean protectedNearBlack;
         Scene(float[] zones, float exposure, float contrast, float highlights,
               float shadows, float brightCoverage, SceneJudgement16.Decision judgement,
-              SceneAtmosphere8.Decision atmosphere, SceneIntent4.Decision intent) {
+              SceneAtmosphere8.Decision atmosphere, SceneIntent4.Decision intent,
+              SceneContentGuard.Decision content) {
             this.zones = zones;
             this.exposure = exposure;
             this.contrast = contrast;
@@ -37,6 +40,8 @@ final class SpatialAuto64 {
             this.protectedAtmosphere = atmosphere.protectedAtmosphere;
             this.atmosphereDescription = atmosphere.description;
             this.protectedMacroAtmosphere = intent.preserved;
+            this.protectedImportantRegion = content.importantLitRegion;
+            this.protectedNearBlack = content.preserveNearBlack;
         }
     }
 
@@ -94,11 +99,13 @@ final class SpatialAuto64 {
                 judgement.exposureCeiling, judgement.shadowScale);
         SceneIntent4.Decision intent = SceneIntent4.assess(
                 sum, count, histogram, samples, atmosphere);
+        SceneContentGuard.Decision content = SceneContentGuard.assess(
+                sum, count, histogram, samples, judgement, atmosphere, intent);
         float ideal = (float)(Math.log(.36f/Math.max(.09f, median/255f)) /
                 Math.log(2f));
-        float exposure = clamp(ideal, -.16f, intent.exposureCeiling);
+        float exposure = clamp(ideal, -.16f, content.exposureCeiling);
         float shadows = (p5 < 40 ? 15f : p5 < 70 ? 11f : 6f) *
-                intent.shadowScale;
+                content.shadowScale;
         float highlights = highlight > .83f ? -13f :
                            highlight > .71f ? -8f : 0f;
         float contrast = clamp((.60f - (p95-p5)/255f)*11f, -4f, 4f);
@@ -107,8 +114,10 @@ final class SpatialAuto64 {
         for (int i = 0; i < CELLS; i++) {
             float local = count[i] > 0 ? sum[i]/count[i] : median/255f;
             float hot = count[i] > 0 ? brightCount[i]/(float)count[i] : 0f;
-            raw[i] = clamp((.49f-local)/.39f, 0f, 1f) *
+            float baseWeight = clamp((.49f-local)/.39f, 0f, 1f) *
                     (1f-clamp(hot*1.5f, 0f, 1f));
+            raw[i] = SceneContentGuard.restrainedLocalWeight(
+                    baseWeight, local, content.preserveNearBlack);
         }
 
         // 3x3 Gaussian-like smoothing suppresses abrupt zone boundaries.
@@ -129,7 +138,7 @@ final class SpatialAuto64 {
             }
         }
         return new Scene(smooth,exposure,contrast,highlights,shadows,coverage,
-                judgement,atmosphere,intent);
+                judgement,atmosphere,intent,content);
     }
 
     private static int percentile(int[] h, int total, float fraction) {

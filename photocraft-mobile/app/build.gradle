@@ -8,8 +8,8 @@ android {
         applicationId 'com.dennis.craftmobile'
         minSdk 29
         targetSdk 35
-        versionCode 11
-        versionName '0.6.5'
+        versionCode 14
+        versionName '0.6.8-scene-test'
     }
     buildTypes {
         release { minifyEnabled false }

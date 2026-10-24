@@ -65,6 +65,8 @@ public final class MainActivity extends Activity {
         boolean autoLowKey; // 16x16 scene judgement, no semantic portrait mask.
         String autoAtmosphere = ""; // 8x8 conservative atmosphere decision.
         boolean autoMacroProtected; // Additional 4x4 gate, when confident.
+        boolean autoImportantRegion; // Conservative structural importance.
+        boolean autoBlackProtected; // Intentional near-black regions.
         float luminanceNR, colorNR, sharpen, clarity, texture, dehaze;
         // Colour gains estimated only when spatial neutral evidence is convincing.
         float wbRed = 1f, wbGreen = 1f, wbBlue = 1f, wbConfidence;
@@ -77,6 +79,8 @@ public final class MainActivity extends Activity {
             d.autoLowKey = autoLowKey;
             d.autoAtmosphere = autoAtmosphere;
             d.autoMacroProtected = autoMacroProtected;
+            d.autoImportantRegion = autoImportantRegion;
+            d.autoBlackProtected = autoBlackProtected;
             d.luminanceNR = luminanceNR; d.colorNR = colorNR; d.sharpen = sharpen;
             d.clarity = clarity; d.texture = texture; d.dehaze = dehaze;
             d.wbRed = wbRed; d.wbGreen = wbGreen; d.wbBlue = wbBlue;
@@ -694,6 +698,8 @@ public final class MainActivity extends Activity {
                     edit.autoLowKey = scene.protectedLowKey;
                     edit.autoAtmosphere = scene.atmosphereDescription;
                     edit.autoMacroProtected = scene.protectedMacroAtmosphere;
+                    edit.autoImportantRegion = scene.protectedImportantRegion;
+                    edit.autoBlackProtected = scene.protectedNearBlack;
                     edit.autoStrength = 100f;
                     edit.look = "Auto";
                     // Auto tone and both detail groups are all scene dependent.
@@ -703,9 +709,11 @@ public final class MainActivity extends Activity {
                     render();
                     drawControls();
                     Toast.makeText(this, String.format(Locale.US,
-                            "Four-Level Auto: %+.2f EV · %s · WB %s",
+                            "Scene Intelligent Auto: %+.2f EV · %s · WB %s",
                             scene.exposure,
-                            scene.protectedMacroAtmosphere ? "overall dark atmosphere protected" :
+                            scene.protectedImportantRegion ? "important region protected" :
+                                    scene.protectedNearBlack ? "deep blacks preserved" :
+                                    scene.protectedMacroAtmosphere ? "overall dark atmosphere protected" :
                                     scene.protectedAtmosphere ? scene.atmosphereDescription + " protected" :
                                     scene.protectedLowKey ? "low-key protected" : "scene analysed",
                             whiteBalance.confidence > 0f ? "corrected" : "preserved"),
@@ -937,9 +945,11 @@ public final class MainActivity extends Activity {
                     }
                     if ("Auto".equals(snapshot.look) && snapshot.autoZones != null) {
                         status.setText(String.format(Locale.US,
-                                "AUTO 4-LAYER  •  %+.2f EV%s  •  WB %s",
+                                "AUTO 4-LAYER+  •  %+.2f EV%s  •  WB %s",
                                 snapshot.exposure,
-                                snapshot.autoMacroProtected ? " · 4×4 atmosphere protected" :
+                                snapshot.autoImportantRegion ? " · Important region" :
+                                        snapshot.autoBlackProtected ? " · Deep blacks protected" :
+                                        snapshot.autoMacroProtected ? " · 4×4 atmosphere protected" :
                                         !snapshot.autoAtmosphere.isEmpty() ?
                                         " · " + snapshot.autoAtmosphere + " protected" :
                                         snapshot.autoLowKey ? " · Low-key protected" : "",
@@ -1223,10 +1233,10 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.5")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.8 SCENE INTELLIGENCE")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
-                        "tone/colour adjustments, 64×64 + 16×16 + 8×8 + 4×4 four-level Auto, Auto WB, " +
+                        "tone/colour adjustments, four-level Auto + structural region and deep-black safeguards, Auto WB, " +
                         "luminance/chroma NR, sharpening, " +
                         "clarity, texture, contrast dehaze, centre crop, rotate, " +
                         "undo/redo, press-and-hold before view, export and share.\n\n" +
