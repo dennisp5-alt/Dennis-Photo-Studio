@@ -168,7 +168,7 @@ data class ExportChoice(
     val borderColor: Int = 0xFFFFFF,
     /** `original` (the file's name), `dateName` (the date, then the name), `custom` ([customName] and a number from [startNumber]) or `date`. */
     val naming: String = "original",
-    val customName: String = "LightCraft",
+    val customName: String = "LumaWorks",
     val startNumber: Int = 1,
     /** `none`, `screen`, `glossy` or `matte`, and `low`, `standard` or `high`. */
     val sharpen: String = "none",
@@ -191,7 +191,7 @@ data class ExportChoice(
 
     /** The name template (`app.export`'s tokens): braces and path characters left out of the custom text. */
     val template: String get() {
-        val name = customName.replace(Regex("[{}\\\\/:*?\"<>|]"), "").trim().ifEmpty { "LightCraft" }
+        val name = customName.replace(Regex("[{}\\\\/:*?\"<>|]"), "").trim().ifEmpty { "LumaWorks" }
         return when (naming) {
             "dateName" -> "{date}-{name}"
             "custom" -> "$name-{seq:1}"
