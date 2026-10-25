@@ -19,10 +19,18 @@ final class StraightenEngine {
         final float correction;
         final float confidence;
         final boolean reliable;
+        final boolean alreadyLevel;
+        final float observedAngle;
         Estimate(float degrees, float confidence, boolean reliable) {
+            this(degrees,confidence,reliable,false,0f);
+        }
+        Estimate(float degrees, float confidence, boolean reliable,
+                 boolean alreadyLevel, float observedAngle) {
             this.correction=degrees;
             this.confidence=confidence;
             this.reliable=reliable;
+            this.alreadyLevel=alreadyLevel;
+            this.observedAngle=observedAngle;
         }
     }
 
@@ -121,14 +129,37 @@ final class StraightenEngine {
                 }
             }
             int columnCount=Integer.bitCount(columns),rowCount=Integer.bitCount(rows);
-            // Significant structured evidence across the picture; no
-            // automatic correction for a lone sloping limb or branch.
-            boolean reliable=fraction>.205f && peak>atZero*1.17f &&
-                    regions>=3 && (columnCount>=3 || rowCount>=3) &&
-                    Math.abs(angle)>=.35f && Math.abs(angle)<=AUTO_MAX;
+
+            // v0.6.9 rejected practically every photo: the .205 peak-share
+            // threshold is too strict for real architectural scenes, and the
+            // zero-angle test rejected images that were ALREADY straight.
+            // This test accepts distributed line evidence with a well-defined
+            // peak while rejecting competing perspective/diagonal clutter.
+            float competitor=0f;
+            for(int b=1;b<BINS-1;b++) {
+                if(Math.abs(b-best)<=3)continue; // same orientation peak
+                competitor=Math.max(competitor,smooth[b]);
+            }
+            boolean spatialEvidence=regions>=3 &&
+                    (columnCount>=3 || rowCount>=3);
+            boolean distinctPeak=competitor<=0f || peak>competitor*1.08f;
+            boolean nearLevel=Math.abs(angle)<.30f;
+            boolean rotatedEnough=Math.abs(angle)>=.30f &&
+                    Math.abs(angle)<=AUTO_MAX;
+
+            // Do not demand a 17% lead over the zero-degree bin when the
+            // estimated angle is close to zero. Already-level is SUCCESS.
+            boolean fromZero=nearLevel || peak>atZero*1.10f;
+            boolean reliable=edges>=100 && total>9000f &&
+                    fraction>.115f && spatialEvidence && distinctPeak &&
+                    fromZero && (nearLevel || rotatedEnough);
+            // Slightly stronger peak needed to certify already-level scenes.
+            if(nearLevel && fraction<.135f)reliable=false;
+
             float confidence=Math.min(1f,Math.max(0f,
-                    (fraction-.14f)*4.0f));
-            return new Estimate(reliable?-angle:0f,confidence,reliable);
+                    (fraction-.08f)*5.2f));
+            return new Estimate(reliable && !nearLevel ? -angle:0f,
+                    confidence,reliable,reliable && nearLevel,angle);
         } finally {
             if(small!=source&&!small.isRecycled())small.recycle();
         }

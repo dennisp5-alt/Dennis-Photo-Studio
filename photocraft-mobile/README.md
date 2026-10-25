@@ -200,3 +200,12 @@ Crop tab features: Auto Straighten, Reset Angle, Manual Straighten slider from -
 The requested angle is stored non-destructively in each photo's Edit snapshot, restored in Undo/Redo and retained on swipe among selected photos. Looks and tone Auto preserve geometrical adjustments. Both preview and full-res JPEG export rotate and zoom into the existing same-sized output frame to avoid black corners, at the cost of some edge cropping. Aspect crop and unchanged detail engine run after geometric straightening.
 
 Build branch: experiment/dennis-craft-mobile-v0.6.9-auto-straighten. A separate working version of Dennis Craft Mobile, not a change to the unrelated Dennis Photo Studio production app.
+
+
+## v0.6.10 — Auto Straighten detection fix
+
+Regression in v0.6.9: angular peak fraction threshold .205 and the mandatory 17% advantage over zero-degree meant realistic architecture and already-level scenes could be rejected universally. The new detector uses a lower, conservative fraction threshold .115 together with a separate 8% competitor-peak and multi-region support check. Already-level (~0°) is recognized as success rather than 'No confident level'; low-confidence clutter still refuses automatic correction. The algorithm and UI explicitly distinguish already level, detected correction and lacking consistent structural reference.
+
+The user-provided bathroom screenshot includes a strong structural histogram peak around -3.5 degrees; the old .205 fraction fails it (~.17), while the new logic allows detection when line support is sufficiently distributed. Note: screenshot includes UI and was analysed on its cropped image region; real source photo may differ due to perspective.
+
+Same v0.6.8 four-grid photographic Auto, manual angle slider, no AI models, full-resolution export, photo picker and all detail sliders preserved.

@@ -552,14 +552,23 @@ public final class MainActivity extends Activity {
                 ui.post(()->{
                     if(serial!=generation.get()||original!=previewSource)return;
                     if(!estimate.reliable) {
-                        status.setText("Auto straighten · no reliable level found");
-                        Toast.makeText(this,"No confident level detected · use the manual slider",
+                        status.setText("Auto straighten · no consistent line reference");
+                        Toast.makeText(this,"No reliable straight lines · manual angle available",
                                 Toast.LENGTH_LONG).show();
                         return;
                     }
-                    if(Math.abs(edit.straightenAngle-estimate.correction)>.04f) {
+                    boolean changed=Math.abs(edit.straightenAngle-estimate.correction)>.04f;
+                    if(changed) {
                         checkpoint();
                         edit.straightenAngle=estimate.correction;
+                    }
+                    if(estimate.alreadyLevel) {
+                        if(changed)render();
+                        drawControls();
+                        status.setText("Auto straighten · already level (0.0°)");
+                        Toast.makeText(this,"Photo already level · no rotation needed",
+                                Toast.LENGTH_SHORT).show();
+                        return;
                     }
                     render();drawControls();
                     Toast.makeText(this,String.format(Locale.US,
@@ -1346,7 +1355,7 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.9 AUTO STRAIGHTEN")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.10 STRAIGHTEN FIX")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
                         "tone/colour adjustments, four-level Auto + structural region and deep-black safeguards, Auto WB, " +
