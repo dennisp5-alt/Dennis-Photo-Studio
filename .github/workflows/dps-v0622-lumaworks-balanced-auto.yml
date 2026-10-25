@@ -1,15 +1,15 @@
-name: LumaWorks v0.6.22 — Balanced Auto and WB
+name: LumaWorks Auto Lab v0.6.22 — Isolated Existing Auto
 
 on:
   push:
-    branches: [experiment/lumaworks-v0.6.22-balanced-auto-wb]
+    branches: [experiment/lumaworks-v0.6.22-autolab-isolated]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: lumaworks-v0622
+  group: lumaworks-v0622-autolab
   cancel-in-progress: true
 
 jobs:
@@ -252,8 +252,8 @@ jobs:
           assert 'Classic Auto' not in p and 'AutoAmountDialog' not in vm
           assert 'vm.runAutoDetail()' in edit and 'Current: Luminance NR ' in edit
           assert 'ed.wbAutoStatus' in edit and 'Advanced' in edit
-          assert 'lightcraft.version=0.6.22-beta' in Path('apps/lightcraft-android/android/gradle.properties').read_text()
-          assert 'com.dennis.photostudio.assertive.v0612' in Path('apps/lightcraft-android/android/app/build.gradle.kts').read_text()
+          assert 'lightcraft.version=0.6.22-beta.2' in Path('apps/lightcraft-android/android/gradle.properties').read_text()
+          assert 'com.dennis.lumaworks.autolab.v0622' in Path('apps/lightcraft-android/android/app/build.gradle.kts').read_text()
           masking=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/MaskTool.kt').read_text()
           for kind in ('subject','sky','background','brush','linear','radial','colorRange','luminanceRange'):
               assert f'Triple("{kind}",' in masking, kind
@@ -295,10 +295,10 @@ jobs:
           drawer=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/LibrarySheets.kt').read_text()
           pages=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/DrawerPages.kt').read_text()
           gradle=Path('apps/lightcraft-android/android/app/build.gradle.kts').read_text()
-          assert '<string name="app_name">LumaWorks</string>' in strings
+          assert '<string name="app_name">LumaWorks Auto Lab</string>' in strings
           assert 'Text("LumaWorks"' in drawer
           assert '"About LumaWorks"' in drawer and pages
-          assert '"com.dennis.photostudio.assertive.v0612"' in gradle, 'Package identity must remain unchanged'
+          assert '"com.dennis.photostudio.assertive.v0612"' in gradle, 'Autolab identity stays isolated from LumaWorks production'
           assert 'LIBRARY_FOLDER = "LightCraft Library"' in Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/engine/Engine.kt').read_text()
           print('LumaWorks presentation branding and original app identity: PASS')
           print('Source preservation and subject/sky refinement integration: PASS')
@@ -379,7 +379,7 @@ jobs:
       - name: Upload test APK
         uses: actions/upload-artifact@v4
         with:
-          name: LumaWorks-v0.6.22-Balanced-Auto-WB-ARM64
+          name: LumaWorks-Auto-Lab-v0.6.22-ARM64
           path: apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
