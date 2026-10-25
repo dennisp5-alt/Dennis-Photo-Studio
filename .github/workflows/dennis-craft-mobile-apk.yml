@@ -25,6 +25,7 @@ on:
       - experiment/craft-photo-studio-v0.6.17-ui-polish
       - experiment/photo-studio-v0.6.18-inspection-zoom
       - experiment/photo-studio-v0.6.19-neutral-wb
+      - experiment/photo-studio-v0.6.20-final-reliability
     paths:
       - 'photocraft-mobile/**'
       - '.github/workflows/dennis-craft-mobile-apk.yml'
@@ -46,7 +47,7 @@ jobs:
         run: gradle -p photocraft-mobile --no-daemon assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: photo-studio-v0.6.19-neutral-wb-debug-apk
+          name: photo-studio-v0.6.20-final-reliability-debug-apk
           path: photocraft-mobile/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
