@@ -6,7 +6,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="Dennis Craft Mobile"
+        android:label="Photo Studio"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/DennisCraftTheme"
