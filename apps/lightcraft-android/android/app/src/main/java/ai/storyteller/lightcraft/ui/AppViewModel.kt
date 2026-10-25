@@ -1176,7 +1176,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val added = report.imported.firstOrNull()
             val id = added ?: report.existing.firstOrNull()
             if (id == null) {
-                say("Can't open ${p.name}: ${report.failed.firstOrNull() ?: "LightCraft can't read it"}")
+                say("Can't open ${p.name}: ${report.failed.firstOrNull() ?: "LumaWorks can't read it"}")
                 return@launch
             }
             refreshPhotos()
@@ -1806,7 +1806,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val gpu = runCatching { JSONObject(e.command { execute("app.gpu", "") }) }.getOrNull()
         val memory = runCatching { JSONObject(e.command { execute("library.memory", "") }) }.getOrNull()
         return buildString {
-            appendLine("LightCraft ${engineVersion()}, the pure-Rust engine of the desktop app, running on this phone.")
+            appendLine("LumaWorks ${engineVersion()} — offline photo editor with a local Rust imaging engine.")
             appendLine()
             if (gpu != null) {
                 val adapter = gpu.optString("adapter").takeIf { it.isNotBlank() && it != "null" }
