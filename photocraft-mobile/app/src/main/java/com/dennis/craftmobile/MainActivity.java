@@ -110,6 +110,10 @@ public final class MainActivity extends Activity {
     private LinearLayout controls, tabs;
     private FrameLayout canvas;
     private ImageView photo;
+    private View guideOverlay;
+    private boolean guideMode;
+    private int guideStep;
+    private float guideX,guideY,guideDownX,guideDownY;
     private TextView openPlaceholder, status, photoCounter;
     // Only user-granted picker URIs. Edits are session-local, original files untouched.
     private final ArrayList<Uri> photoSelection = new ArrayList<>();
@@ -219,6 +223,25 @@ public final class MainActivity extends Activity {
         openPlaceholder = label("◉\n\nDENNIS CRAFT MOBILE\n\nProfessional photo editing, offline.\n\n＋  TAP TO OPEN PHOTO", 18, Color.rgb(212, 229, 245));
         openPlaceholder.setOnClickListener(v -> openImage());
         canvas.addView(openPlaceholder, new FrameLayout.LayoutParams(-1, -1));
+        guideOverlay=new View(this) {
+            @Override protected void onDraw(android.graphics.Canvas c) {
+                super.onDraw(c);
+                if(!guideMode||guideStep==0)return;
+                android.graphics.Paint pen=new android.graphics.Paint(
+                        android.graphics.Paint.ANTI_ALIAS_FLAG);
+                pen.setColor(Color.WHITE);
+                pen.setStyle(android.graphics.Paint.Style.STROKE);
+                pen.setStrokeWidth(dp(5));
+                c.drawCircle(guideX,guideY,dp(12),pen);
+                pen.setColor(ACCENT);
+                pen.setStrokeWidth(dp(3));
+                c.drawCircle(guideX,guideY,dp(12),pen);
+                c.drawLine(guideX-dp(17),guideY,guideX+dp(17),guideY,pen);
+                c.drawLine(guideX,guideY-dp(17),guideX,guideY+dp(17),pen);
+            }
+        };
+        guideOverlay.setClickable(false);
+        canvas.addView(guideOverlay,new FrameLayout.LayoutParams(-1,-1));
         GestureDetector swipeDetector = new GestureDetector(this,
                 new GestureDetector.SimpleOnGestureListener() {
                     @Override public boolean onDown(MotionEvent e) { return true; }
@@ -233,6 +256,16 @@ public final class MainActivity extends Activity {
                     }
                 });
         photo.setOnTouchListener((v,event) -> {
+            if(guideMode) {
+                if(event.getActionMasked()==MotionEvent.ACTION_DOWN) {
+                    guideDownX=event.getX();guideDownY=event.getY();
+                } else if(event.getActionMasked()==MotionEvent.ACTION_UP &&
+                        Math.hypot(event.getX()-guideDownX,
+                                event.getY()-guideDownY)<dp(22)) {
+                    guidedTap(event.getX(),event.getY());
+                }
+                return true;
+            }
             swipeDetector.onTouchEvent(event);
             return true;
         });
@@ -282,6 +315,7 @@ public final class MainActivity extends Activity {
     }
 
     private void selectMode(Mode newMode) {
+        if(newMode!=Mode.CROP)endGuide();
         mode = newMode;
         drawTabs();
         drawControls();
@@ -467,8 +501,8 @@ public final class MainActivity extends Activity {
         LinearLayout buttons=new LinearLayout(this);
         buttons.setGravity(Gravity.CENTER_VERTICAL);
         buttons.setPadding(dp(10),0,dp(10),0);
-        String[] choices={"AUTO STRAIGHTEN","Reset Angle","Original Ratio",
-                "1:1","4:5","16:9","Rotate 90°"};
+        String[] choices={"AUTO STRAIGHTEN","GUIDED LEVEL","Reset Angle",
+                "Original Ratio","1:1","4:5","16:9","Rotate 90°"};
         for(String choice:choices) {
             TextView button=label(choice,11,Color.WHITE);
             button.setPadding(dp(12),dp(8),dp(12),dp(8));
@@ -480,7 +514,11 @@ public final class MainActivity extends Activity {
             buttons.addView(button,lp);
             button.setOnClickListener(v->{
                 if(previewSource==null){openImage();return;}
-                if("AUTO STRAIGHTEN".equals(choice)){autoStraighten();return;}
+                if("AUTO STRAIGHTEN".equals(choice)){
+                    endGuide();autoStraighten();return;
+                }
+                if("GUIDED LEVEL".equals(choice)){startGuide();return;}
+                endGuide();
                 if("Reset Angle".equals(choice)) {
                     if(Math.abs(edit.straightenAngle)<.015f)return;
                     checkpoint();edit.straightenAngle=0f;
@@ -540,6 +578,90 @@ public final class MainActivity extends Activity {
         controls.addView(anglePanel,new LinearLayout.LayoutParams(-1,dp(79)));
     }
 
+    /** Two user-picked points provide a reference even under perspective. */
+    private void startGuide() {
+        if(previewSource==null){openImage();return;}
+        if(guideMode){endGuide();status.setText("Guided Level cancelled");return;}
+        guideMode=true;
+        guideStep=0;
+        guideOverlay.invalidate();
+        status.setText("Guided Level · tap FIRST point on a straight edge");
+        Toast.makeText(this,"Tap two distant points on the SAME horizontal "+
+                "or vertical edge. Tap Guided Level again to cancel.",
+                Toast.LENGTH_LONG).show();
+    }
+    private void endGuide() {
+        guideMode=false;guideStep=0;
+        if(guideOverlay!=null)guideOverlay.invalidate();
+    }
+    private boolean withinPhoto(float x,float y) {
+        if(photo.getDrawable()==null)return false;
+        int iw=photo.getDrawable().getIntrinsicWidth();
+        int ih=photo.getDrawable().getIntrinsicHeight();
+        if(iw<=0||ih<=0||photo.getWidth()<=0||photo.getHeight()<=0)return false;
+        float factor=Math.min(photo.getWidth()/(float)iw,
+                photo.getHeight()/(float)ih);
+        float left=(photo.getWidth()-iw*factor)*.5f;
+        float top=(photo.getHeight()-ih*factor)*.5f;
+        return x>=left&&x<=left+iw*factor&&y>=top&&y<=top+ih*factor;
+    }
+    private void guidedTap(float x,float y) {
+        if(!guideMode||previewSource==null)return;
+        if(!withinPhoto(x,y)) {
+            Toast.makeText(this,"Tap inside the photograph",Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if(guideStep==0) {
+            guideX=x;guideY=y;guideStep=1;guideOverlay.invalidate();
+            status.setText("Guided Level · tap SECOND point on that SAME edge");
+            return;
+        }
+        float dx=x-guideX,dy=y-guideY;
+        if(Math.hypot(dx,dy)<dp(60)) {
+            Toast.makeText(this,"Select two points farther apart",Toast.LENGTH_SHORT).show();
+            return;
+        }
+        boolean horizontal=Math.abs(dx)>=1.35f*Math.abs(dy);
+        boolean vertical=Math.abs(dy)>=1.35f*Math.abs(dx);
+        if(!horizontal&&!vertical) {
+            Toast.makeText(this,"Choose a nearly horizontal or vertical reference",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        float delta;
+        if(horizontal) {
+            if(dx<0){dx=-dx;dy=-dy;}
+            delta=(float)-Math.toDegrees(Math.atan2(dy,dx));
+        } else {
+            if(dy<0){dx=-dx;dy=-dy;}
+            delta=(float)Math.toDegrees(Math.atan2(dx,dy));
+        }
+        if(Math.abs(delta)>StraightenEngine.MANUAL_MAX) {
+            Toast.makeText(this,"That reference is too sloped; select another edge",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        final float angle=Math.max(-StraightenEngine.MANUAL_MAX,
+                Math.min(StraightenEngine.MANUAL_MAX,
+                        edit.straightenAngle+delta));
+        endGuide();
+        new AlertDialog.Builder(this)
+                .setTitle(horizontal?"Level selected horizontal":"Level selected vertical")
+                .setMessage(String.format(Locale.US,
+                        "Additional correction: %+.1f°\nFinal angle: %+.1f°\n\n"+
+                        "This levels YOUR chosen edge. Perspective may make "+
+                        "other edges lean. Rotation will crop the outer corners.",
+                        delta,angle))
+                .setNegativeButton("Keep current",null)
+                .setPositiveButton("Apply",(dialog,which)->{
+                    if(previewSource==null)return;
+                    if(Math.abs(edit.straightenAngle-angle)>.04f) {
+                        checkpoint();edit.straightenAngle=angle;
+                    }
+                    render();drawControls();
+                }).show();
+    }
+
     private void autoStraighten() {
         final Bitmap original=previewSource;
         if(original==null){openImage();return;}
@@ -581,9 +703,9 @@ public final class MainActivity extends Activity {
                         return;
                     }
                     if(!estimate.reliable) {
-                        status.setText("Auto straighten · uncertain perspective or no trusted line");
+                        status.setText("Auto straighten · perspective conflict · try Guided Level");
                         Toast.makeText(this,
-                                "Unable to determine camera tilt reliably · use manual slider",
+                                "Perspective conflict · try Guided Level or manual slider",
                                 Toast.LENGTH_LONG).show();
                         return;
                     }
@@ -927,6 +1049,7 @@ public final class MainActivity extends Activity {
 
     private void changePhoto(int direction) {
         if(photoSelection.size()<2 || photoIndex<0)return;
+        endGuide();
         int next=photoIndex+direction;
         if(next<0 || next>=photoSelection.size()) {
             Toast.makeText(this,next<0?"First selected photo":"Last selected photo",
@@ -950,6 +1073,7 @@ public final class MainActivity extends Activity {
     }
 
     private void loadChosenPhoto(Uri uri) {
+        endGuide();
         int serial=generation.incrementAndGet();
         if(pendingSliderRender!=null) {
             ui.removeCallbacks(pendingSliderRender);
@@ -1385,13 +1509,14 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.12 STRAIGHTEN SAFETY")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.13 GUIDED LEVEL")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
                         "tone/colour adjustments, four-level Auto + structural region and deep-black safeguards, Auto WB, " +
                         "luminance/chroma NR, sharpening, " +
                         "clarity, texture, contrast dehaze, centre crop, rotate 90°, " +
-                        "conservative Auto Straighten and manual +/-15° angle, " +
+                        "conservative Auto Straighten, Guided Level using two tapped points, " +
+                        "and manual +/-15° angle, " +
                         "corner-safe fill crop, " +
                         "undo/redo, press-and-hold before view, export and share.\n\n" +
                         "Auto WB uses cautious neutral samples, avoids colourful subjects and skips uncertain scenes. Auto analyses noise and detail from 64×64 local probes. Each detail group also has " +
