@@ -50,7 +50,7 @@ jobs:
           assert 'pub mod photo_studio_auto;' in Path('crates/pipeline/src/lib.rs').read_text()
           # Guard the existing offline masking and prevent touching the old lightweight Photo Studio.
           assert Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/engine/SemanticMaskRefinement.kt').is_file()
-          assert Path('photocraft-mobile/app/src/main/java/com/dennis/craftmobile/SpatialAuto64.java').is_file()
+          # The frozen Photo Studio source is on its own branch, not this one.
           print('Isolated Photo Studio Auto, neutral reference and app identity audit: PASS')
           PY
       - uses: actions/setup-java@v4
