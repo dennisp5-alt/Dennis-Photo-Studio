@@ -187,55 +187,6 @@ final class TransformEngine {
                 angleOK,vOK,hOK,confidence,found,aligned);
     }
 
-    hasAngle,vOK,hOK,confidence);
-        } finally {
-            if(sample!=bitmap&&!sample.isRecycled())sample.recycle();
-        }
-    }
-
-    private static final class EdgeStats {
-        static final int COUNT=33;
-        final float[] votes=new float[COUNT];
-        final int[] min=new int[COUNT],max=new int[COUNT];
-        int totalEdges;
-        float totalWeight;
-        EdgeStats() {
-            java.util.Arrays.fill(min,Integer.MAX_VALUE);
-            java.util.Arrays.fill(max,Integer.MIN_VALUE);
-        }
-        void add(float angle,float weight,int pos,int extent) {
-            int bin=Math.round(angle)+16;
-            if(bin<1||bin>31)return;
-            for(int offset=-1;offset<=1;offset++){
-                int b=bin+offset;
-                float contribution=weight*(offset==0?1f:.35f);
-                votes[b]+=contribution;
-                min[b]=Math.min(min[b],pos);
-                max[b]=Math.max(max[b],pos);
-                totalWeight+=contribution;
-            }
-            totalEdges++;
-        }
-        int peakBin(){
-            int best=1;
-            for(int i=2;i<COUNT-1;i++)
-                if(votes[i]>votes[best])best=i;
-            return best;
-        }
-        boolean reliable(){
-            if(totalEdges<38||totalWeight<7000f)return false;
-            int best=peakBin();
-            float bestVote=votes[best];
-            float second=0f;
-            for(int b=1;b<COUNT-1;b++)
-                if(Math.abs(b-best)>2)second=Math.max(second,votes[b]);
-            return bestVote/totalWeight>.085f &&
-                    bestVote>second*1.06f &&
-                    max[best]-min[best]>=30;
-        }
-        float angle(){return peakBin()-16f;}
-    }
-
     private static float clamp(float v,float min,float max){
         return Math.max(min,Math.min(max,v));
     }
