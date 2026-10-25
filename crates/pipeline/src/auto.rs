@@ -712,6 +712,96 @@ pub fn smart_auto_tone_report_balanced(
     audit
 }
 
+/// A separate experimental photographic Auto: Photo Studio v0.6.20's
+/// multiscale decision principles, translated to LumaWorks controls. The
+/// existing Smart Auto candidate and quality guard stay intact for A/B work.
+pub fn photo_studio_auto_tone_report(
+    src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings
+) -> AutoToneAuditReport {
+    // Reuse the existing evidence so the preview diagnostics and safety
+    // checks remain compatible with the LumaWorks UI.
+    let mut audit=smart_auto_tone_report_mode(src,info,s,false);
+    let (proposal,_) = crate::photo_studio_auto::analyse(src,info,s);
+    let guarded=preview_quality_guard_report(src,info,s,proposal);
+    audit.proposed=proposal;
+    audit.final_tone=guarded.tone;
+    audit.guard_reasons=guarded.reasons;
+    audit.new_white_clip_fraction=guarded.white_clip_change;
+    audit.new_black_clip_fraction=guarded.black_clip_change;
+    audit.quality_guard_skipped_for_emission=false;
+    audit
+}
+
+/// Auto neutral-reference WB for the Photo Studio-inspired experiment.
+/// Use the existing neutral-cluster illuminant solver (not average-scene
+/// grey world), and require an independent 8x8 spatial agreement check.
+/// When confidence is insufficient we preserve camera WB instead of
+/// cooling skin, flowers, sunsets or blue-sky photographs.
+pub fn neutral_reference_wb_report(
+    src:&Rgb32f,info:&SourceInfo
+) -> AutoWbReport {
+    let mut report=auto_wb_report_balanced(src,info);
+    if report.camera_balance_retained {
+        return report;
+    }
+    let img=lightcraft_raster::resample::fit(
+        src,384,384,lightcraft_raster::resample::Filter::Box);
+    let mut sum=[[0.0f64;2];64];
+    let mut samples=[0usize;64];
+    for (i,p) in img.data.iter().enumerate() {
+        let y=luminance_2020(*p);
+        if !(0.06..=0.78).contains(&y) {continue;}
+        let high=p[0].max(p[1]).max(p[2]);
+        let low=p[0].min(p[1]).min(p[2]);
+        if high<=1e-5 || ((high-low)/high)>0.16 {continue;}
+        let x=i%img.width;
+        let row=i/img.width;
+        let cell=(row*8/img.height).min(7)*8+(x*8/img.width).min(7);
+        let green=p[1].max(1e-5);
+        let rr=(p[0].max(1e-5)/green).ln();
+        let bb=(p[2].max(1e-5)/green).ln();
+        if !rr.is_finite() || !bb.is_finite() {continue;}
+        sum[cell][0]+=rr as f64;
+        sum[cell][1]+=bb as f64;
+        samples[cell]+=1;
+    }
+    let mut ratios:Vec<[f64;2]>=Vec::new();
+    for i in 0..64 {
+        if samples[i]>=10 {
+            ratios.push([sum[i][0]/samples[i] as f64,
+                         sum[i][1]/samples[i] as f64]);
+        }
+    }
+    if ratios.len()<2 {
+        report.temp=info.as_shot_temp;
+        report.tint=info.as_shot_tint;
+        report.camera_balance_retained=true;
+        report.decision="ambiguous";
+        report.reason="no_consistent_neutral_card_like_regions";
+        return report;
+    }
+    let mut reds:Vec<f64>=ratios.iter().map(|v|v[0]).collect();
+    let mut blues:Vec<f64>=ratios.iter().map(|v|v[1]).collect();
+    reds.sort_by(f64::total_cmp);
+    blues.sort_by(f64::total_cmp);
+    let r=reds[reds.len()/2];
+    let b=blues[blues.len()/2];
+    let consistent=ratios.iter().filter(|v|
+        (v[0]-r).abs()+(v[1]-b).abs()<=0.14
+    ).count();
+    if consistent<2 || consistent*2<ratios.len() ||
+        report.confidence<0.14 {
+        report.temp=info.as_shot_temp;
+        report.tint=info.as_shot_tint;
+        report.camera_balance_retained=true;
+        report.decision="ambiguous";
+        report.reason="neutral_card_regions_disagree";
+    } else {
+        report.reason="independent_neutral_reference_tiles_agree";
+    }
+    report
+}
+
 /// v0.6.12c TEST ONLY: apply the complete scene-dependent Auto candidate
 /// directly, without the preview-render clipping/overlift/contrast vetoes.
 /// The candidate's inherent scene detection and valid slider bounds remain.
