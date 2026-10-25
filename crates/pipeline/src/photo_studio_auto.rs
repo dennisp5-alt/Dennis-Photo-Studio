@@ -79,6 +79,9 @@ pub fn analyse(src:&Rgb32f, info:&SourceInfo, s:&DevelopSettings)
     let mut hist=[0usize;256];
     let mut bright=0usize;
     let mut warm=0usize;
+    let mut dark_pixels=0usize;
+    let mut vivid_subject_pixels=0usize;
+    let mut near_neutral_brights=0usize;
     for (index,p) in img.data.iter().enumerate() {
         // A display-referred proxy for the Java 8-bit Photo Studio estimator.
         // Clamp only for scene classification; keep original linear data for
@@ -94,6 +97,11 @@ pub fn analyse(src:&Rgb32f, info:&SourceInfo, s:&DevelopSettings)
         counts[tile]+=1;
         let rgb=p.map(|v|v.max(0.0).powf(1.0/2.2).clamp(0.0,1.0));
         let hi=rgb[0].max(rgb[1]).max(rgb[2]);
+        let lo=rgb[0].min(rgb[1]).min(rgb[2]);
+        let chroma=(hi-lo)/hi.max(1e-6);
+        if value<0.15 {dark_pixels+=1;}
+        if value>0.43 && hi>0.75 && chroma>0.48 {vivid_subject_pixels+=1;}
+        if value>0.70 && chroma<0.16 {near_neutral_brights+=1;}
         if hi>=0.93 && value>0.47 {bright+=1;}
         if rgb[0]>0.55 && rgb[1]>0.21 &&
             rgb[0]>rgb[1]*1.28 && rgb[1]>rgb[2]*1.50 &&
@@ -107,6 +115,9 @@ pub fn analyse(src:&Rgb32f, info:&SourceInfo, s:&DevelopSettings)
     let p99=quantile(&hist,n,0.99);
     let coverage=bright as f64/n as f64;
     let warm_coverage=warm as f64/n as f64;
+    let dark_fraction=dark_pixels as f64/n as f64;
+    let vivid_fraction=vivid_subject_pixels as f64/n as f64;
+    let neutral_bright_fraction=near_neutral_brights as f64/n as f64;
     let sixteen=coarse(&sums,&counts,16);
     let eight=coarse(&sums,&counts,8);
     let four=coarse(&sums,&counts,4);
@@ -176,10 +187,34 @@ pub fn analyse(src:&Rgb32f, info:&SourceInfo, s:&DevelopSettings)
         ceiling=ceiling.min(0.09);
         shadow_scale=shadow_scale.min(0.66);
     }
-    let exposure=(0.36/median.max(0.09)).log2().clamp(-0.16,ceiling);
-    let shadows=(if p05<40.0/255.0 {15.0}
+    // Colour-aware exception: a luminous saturated subject against a dark
+    // backdrop needs more useful exposure and shadow separation, not a
+    // near-zero exposure simply because a red/pink channel is already bright.
+    // Do NOT use this for neutral white subjects, warm practical lights, or
+    // an already well-exposed sunny scene. Rendering quality is still checked
+    // separately at multiple exposures before a proposal is accepted.
+    let isolated_vivid_subject=dark_fraction>0.42 && median<0.29 &&
+        vivid_fraction>0.025 && neutral_bright_fraction<0.035 &&
+        !protected_atmosphere && !macro_protection;
+    if isolated_vivid_subject {
+        ceiling=0.64;
+        shadow_scale=shadow_scale.max(0.85);
+    }
+    // Open daylight with both bright and shaded regions should not become
+    // gloomy merely because its coloured sky and leaves have high luminance.
+    let sunny_daylight=median>0.39 && p95>0.82 && dark_fraction<0.24 &&
+        vivid_fraction>0.06 && neutral_bright_fraction>0.025;
+    let mut exposure=(0.36/median.max(0.09)).log2().clamp(-0.16,ceiling);
+    if sunny_daylight {exposure=exposure.max(-0.04);}
+    let mut shadows=(if p05<40.0/255.0 {15.0}
         else if p05<70.0/255.0 {11.0} else {6.0})*shadow_scale;
-    let highlights:f64=if p95>0.83 {-13.0} else if p95>0.71 {-8.0} else {0.0};
+    if isolated_vivid_subject {shadows=shadows.max(25.0);}
+    let mut highlights:f64=if p95>0.83 {-13.0} else if p95>0.71 {-8.0} else {0.0};
+    if isolated_vivid_subject {
+        highlights=-39.0;
+    }else if sunny_daylight {
+        highlights=highlights.max(-10.0);
+    }
     let contrast=((0.60-(p95-p05))*11.0).clamp(-4.0,4.0);
     let mut local_shadow=0.0f64;
     for i in 0..CELLS {
@@ -215,7 +250,8 @@ pub fn analyse(src:&Rgb32f, info:&SourceInfo, s:&DevelopSettings)
         contrast:contrast.round(),
         highlights:(highlights*1.45).round(),
         shadows:(shadows*1.25).round(),
-        whites:0.0, blacks:0.0,
+        whites:if isolated_vivid_subject {3.0}else{0.0},
+        blacks:if isolated_vivid_subject {-5.0}else{0.0},
         vibrance:0.0,saturation:0.0,
         curve_shadows:curve_shadows.round(),
         curve_darks:0.0,
@@ -240,6 +276,29 @@ mod tests {
         let img=Rgb32f::filled(128,128,[0.018,0.018,0.018]);
         let (tone,_) = analyse(&img,&SourceInfo::default(),&DevelopSettings::default());
         assert!(tone.exposure>0.0, "underexposure should receive correction: {tone:?}");
+    }
+    #[test]
+    fn vivid_flower_on_dark_foliage_gets_coordinated_correction() {
+        let mut img=Rgb32f::filled(160,160,[0.012,0.012,0.012]);
+        for y in 24..142 {
+            for x in 52..114 {
+                img.data[y*160+x]=[0.90,0.035,0.42];
+            }
+        }
+        let (tone,_) = analyse(&img,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(tone.exposure>=0.30, "isolated colour should permit real exposure: {tone:?}");
+        assert!(tone.highlights<=-25.0, "protect bright petals: {tone:?}");
+        assert!(tone.shadows>=20.0, "recover some foliage shadows: {tone:?}");
+        assert!(tone.blacks<0.0, "retain black-background separation: {tone:?}");
+    }
+    #[test]
+    fn neutral_white_subject_never_uses_vivid_colour_exception() {
+        let mut img=Rgb32f::filled(160,160,[0.012,0.012,0.012]);
+        for y in 24..142 {
+            for x in 52..114 {img.data[y*160+x]=[0.94,0.94,0.94];}
+        }
+        let (tone,_) = analyse(&img,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(tone.exposure<=0.03, "white subject must stay protected: {tone:?}");
     }
     #[test]
     fn sunlight_and_shade_have_bounded_parameters() {
