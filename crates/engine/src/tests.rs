@@ -54,6 +54,60 @@ fn custom_white_balance_keeps_the_one_in_effect() {
 }
 
 #[test]
+fn production_smart_auto_never_invokes_unrestricted_tone_or_wb() {
+    let mut s = demo();
+    let preview=s.execute("develop.autoPreview", &json!({})).unwrap();
+    let audit=&preview["toneAudit"];
+    assert_ne!(audit["guard_reasons"][0],
+        "all_photographic_auto_guards_disabled_test_only",
+        "Read-only Auto preview unexpectedly bypassed safety gates: {audit}");
+    let candidate=&preview["whiteBalance"];
+    assert_ne!(candidate["decision"], "unrestricted",
+        "Read-only Auto preview must use guarded spatial-neutral WB");
+
+    let applied=s.execute("develop.auto", &json!({})).unwrap();
+    assert_ne!(applied["toneAudit"]["guard_reasons"][0],
+        "all_photographic_auto_guards_disabled_test_only",
+        "One-tap Auto bypassed quality guards");
+    assert_ne!(applied["whiteBalance"]["decision"],"unrestricted",
+        "One-tap Auto bypassed WB colour protection");
+    assert_eq!(applied["tone"],preview["tone"],
+        "Preview and real Auto must use the same protected exposure settings");
+}
+
+#[test]
+fn smart_auto_preserves_manually_selected_wb_including_picked_neutral() {
+    use lightcraft_develop::WbMode;
+    let mut s=demo();
+    s.execute("develop.wb",&json!({"mode":"custom","temp":7250,"tint":-13})).unwrap();
+    let before=active_dev(&s).wb;
+    assert_eq!(before.mode,WbMode::Custom);
+    let preview=s.execute("develop.autoPreview",&json!({})).unwrap();
+    assert_eq!(preview["manualWbPreserved"],true);
+    assert_eq!(preview["previewSettings"]["wb"],preview["sourceSettings"]["wb"]);
+    let applied=s.execute("develop.auto",&json!({})).unwrap();
+    assert_eq!(applied["manualWbPreserved"],true);
+    assert_eq!(active_dev(&s).wb,before,
+        "General Smart Auto must not overwrite an explicit Custom WB");
+    // Choosing WB Auto specifically is still permitted to replace Custom.
+    let explicit=s.execute("develop.wb",&json!({"mode":"auto"})).unwrap();
+    assert_ne!(explicit["autoReport"]["decision"],"unrestricted");
+}
+
+#[test]
+fn guarded_wb_auto_keeps_its_correction_bounded() {
+    let mut s=demo();
+    let id=s.active().unwrap();
+    let source=s.source_info(id);
+    let result=s.execute("develop.wb",&json!({"mode":"auto"})).unwrap();
+    let report=&result["autoReport"];
+    assert_ne!(report["decision"],"unrestricted");
+    let wb=active_dev(&s).wb;
+    assert!((wb.tint-source.as_shot_tint).abs()<=27.01);
+    assert!((1e6/wb.temp-1e6/source.as_shot_temp).abs()<=65.01);
+}
+
+#[test]
 fn reset_returns_the_photo_to_what_was_asked() {
     let mut s = demo();
     let id = s.active().unwrap();
