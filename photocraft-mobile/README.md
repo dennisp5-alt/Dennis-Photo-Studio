@@ -209,3 +209,15 @@ Regression in v0.6.9: angular peak fraction threshold .205 and the mandatory 17%
 The user-provided bathroom screenshot includes a strong structural histogram peak around -3.5 degrees; the old .205 fraction fails it (~.17), while the new logic allows detection when line support is sufficiently distributed. Note: screenshot includes UI and was analysed on its cropped image region; real source photo may differ due to perspective.
 
 Same v0.6.8 four-grid photographic Auto, manual angle slider, no AI models, full-resolution export, photo picker and all detail sliders preserved.
+
+## v0.6.11 — Auto Straighten line-aware detector experiment
+
+Fixes the v0.6.10 failure mode, where gradient-pixel orientation histograms rejected most photographs even with visible rooflines, walls or poles. The previous "peak share" and "stronger than 0°" tests could reject genuinely usable lines or naturally level scenes.
+
+NEW: downsample once to longest edge at most 800 pixels, run Sobel edges, then vote for line intercepts within near-horizontal and near-vertical angular candidates. Different line segments get unique intercept bins; each candidate is scored by strength, spatial extent, angular peak prominence and supporting long straight segments. Horizontal and vertical evidence are scored separately, then combined only when they agree or one axis is decisively better supported. Strong perspective conflicts still abstain rather than invent a tilt. A visually negligible <0.8-degree rotation reports "already level" and leaves image uncropped.
+
+A user-provided street screenshot with rooftops and power lines previously returned "no consistent line reference"; an offline implementation-equivalent Hough line diagnostic identified dominant horizontal structure near zero degrees. This is illustrative: Android processing of source photos still requires device testing; do not promise every photo can be straightened automatically, especially portraits and organic/no-line scenes.
+
+All of v0.6.10's manual ±15° straighten, undo, photo swiping, crop-to-fill and full-resolution export remain. All v0.6.8 four-level photographic Auto, WB, noise/sharpen/detail formulas remain IDENTICAL. No AI, no ML Kit, no TFLite, no Restore Lab.
+
+Starting checkpoint: experiment/dennis-craft-mobile-v0.6.10-straighten-fix commit 356d51e1e4ec4b52cebfad1815684b063b3159a8.

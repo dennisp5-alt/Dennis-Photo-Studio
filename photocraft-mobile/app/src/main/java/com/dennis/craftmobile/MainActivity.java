@@ -545,15 +545,15 @@ public final class MainActivity extends Activity {
         if(original==null){openImage();return;}
         int serial=generation.incrementAndGet();
         previewWork.getQueue().clear();
-        status.setText("Detecting dominant horizontal and vertical lines…");
+        status.setText("Scanning long horizontal and vertical line segments…");
         previewWork.execute(()->{
             try {
                 StraightenEngine.Estimate estimate=StraightenEngine.analyse(original);
                 ui.post(()->{
                     if(serial!=generation.get()||original!=previewSource)return;
                     if(!estimate.reliable) {
-                        status.setText("Auto straighten · no consistent line reference");
-                        Toast.makeText(this,"No reliable straight lines · manual angle available",
+                        status.setText("Auto straighten · no trustworthy straight reference");
+                        Toast.makeText(this,"No clear level reference in photo · adjust manually",
                                 Toast.LENGTH_LONG).show();
                         return;
                     }
@@ -1355,7 +1355,7 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.10 STRAIGHTEN FIX")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.11 LINE-AWARE STRAIGHTEN")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
                         "tone/colour adjustments, four-level Auto + structural region and deep-black safeguards, Auto WB, " +

@@ -8,8 +8,8 @@ android {
         applicationId 'com.dennis.craftmobile'
         minSdk 29
         targetSdk 35
-        versionCode 16
-        versionName '0.6.10-straighten-fix'
+        versionCode 17
+        versionName '0.6.11-line-aware'
     }
     buildTypes {
         release { minifyEnabled false }
