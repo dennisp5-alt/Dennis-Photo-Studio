@@ -3015,13 +3015,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         "Dark textured regions with a bright reference"
                     else -> "No strong zonal shadow-imbalance signal"
                 }
+                val hierarchy=zone?.optJSONObject("hierarchy")
+                val macro=hierarchy?.optJSONObject("macro_4")
+                val atmosphere=hierarchy?.optJSONObject("atmosphere_8")
+                val structure=hierarchy?.optJSONObject("structure_16")
+                val sceneHierarchyDetails="Diagnostic-only 4×4 dark dominance " +
+                    (macro?.optBoolean("dark_dominance_candidate",false) ?: false) +
+                    "; 8×8 isolated illumination " +
+                    (atmosphere?.optBoolean("isolated_light_candidate",false) ?: false) +
+                    "; 16×16 recoverable shadow regions " +
+                    (structure?.optInt("recoverable_shadow_regions",0) ?: 0) +
+                    "; 16×16 connected lit cluster " +
+                    (structure?.optInt("largest_lit_cluster",0) ?: 0) +
+                    ". Observations only; Auto unchanged. "
                 val sceneDetails="$sceneSignal; luminous zones " +
                     (zone?.optInt("luminous_zones",0) ?: 0) + "/9, dark-detail zones " +
                     (zone?.optInt("shadow_detail_zones",0) ?: 0) + "/9, " +
                     "suggested local-evidence Shadows " +
                     (zone?.optDouble("proposed_shadow_recovery",0.0)?.toInt() ?: 0) +
                     ". "
-                val auditDetails=sceneDetails+"Scene evidence: median " +
+                val auditDetails=sceneHierarchyDetails+sceneDetails+"Scene evidence: median " +
                     String.format(fmt,"%+.2f",evidence?.optDouble("median_ev",0.0) ?: 0.0) +
                     " EV, 5th–95th percentile " +
                     String.format(fmt,"%.2f",evidence?.optDouble("p05_ev",0.0) ?: 0.0) +
