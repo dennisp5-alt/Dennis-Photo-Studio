@@ -20,11 +20,13 @@ final class TransformEngine {
         final float angle,vertical,horizontal;
         final boolean hasAngle,hasVertical,hasHorizontal;
         final float confidence;
+        final boolean structureFound, alreadyAligned;
         Suggestion(float a,float v,float h,boolean aOK,boolean vOK,
-                   boolean hOK,float confidence) {
+                   boolean hOK,float confidence,boolean found,boolean aligned) {
             angle=a;vertical=v;horizontal=h;
             hasAngle=aOK;hasVertical=vOK;hasHorizontal=hOK;
             this.confidence=confidence;
+            structureFound=found;alreadyAligned=aligned;
         }
         boolean hasAny(){return hasAngle||hasVertical||hasHorizontal;}
     }
@@ -100,103 +102,92 @@ final class TransformEngine {
     /**
      * Two genuinely separate analyses:
      *  - Existing line-aware StraightenEngine estimates roll safely.
-     *  - Regional vertical/horizontal edge slopes estimate convergence.
-     * A transform is merely SUGGESTED, never silently applied.
+        /**
+     * v0.6.15: match actual extended lines and repeated structural spans, not
+     * isolated Sobel pixel orientations. Do not demand slopes have opposite
+     * signs: camera roll can shift both toward the same sign.
      */
     static Suggestion analyse(Bitmap bitmap,boolean balanced) {
-        if(bitmap==null)return new Suggestion(0,0,0,false,false,false,0);
-        StraightenEngine.Estimate level=StraightenEngine.analyse(bitmap);
-        boolean hasAngle=level.reliable||level.requiresConfirmation;
-        float roll=hasAngle?clamp(level.correction,-8f,8f):0f;
-        if(level.alreadyLevel)roll=0f;
-        float maxTilt=balanced?8f:18f;
-        float strength=balanced?.55f:.90f;
-
-        Bitmap sample=bitmap;
-        int longEdge=Math.max(bitmap.getWidth(),bitmap.getHeight());
-        if(longEdge>700){
-            float scale=700f/longEdge;
-            sample=Bitmap.createScaledBitmap(bitmap,
-                    Math.max(96,Math.round(bitmap.getWidth()*scale)),
-                    Math.max(96,Math.round(bitmap.getHeight()*scale)),true);
+        if(bitmap==null)return new Suggestion(0,0,0,false,false,false,0,false,false);
+        ArchitecturalLines.Scene scene=ArchitecturalLines.scan(bitmap);
+        StraightenEngine.Estimate prior=StraightenEngine.analyse(bitmap);
+        boolean found=scene.structureFound ||
+                prior.reliable || prior.requiresConfirmation;
+        ArchitecturalLines.Estimate hv=scene.vAll;
+        ArchitecturalLines.Estimate hh=scene.hAll;
+        float angle=0f;
+        boolean angleOK=false;
+        if(hv.confident && hh.confident) {
+            // In genuine camera roll, horizontal and vertical architectural
+            // families indicate roughly the same angle. Perspective can make
+            // them disagree. Never use a dominant fence alone in conflict.
+            if(Math.abs(hv.angle-hh.angle)<2.2f) {
+                float geometricAngle=(hv.angle+hh.angle)*.5f;
+                if(Math.abs(geometricAngle)>.8f &&
+                        Math.abs(geometricAngle)<8f) {
+                    angle=-geometricAngle;
+                    angleOK=true;
+                }
+            }
+        } else {
+            ArchitecturalLines.Estimate observed=hv.confident?hv:hh;
+            if(observed.confident && observed.strength>=.25f &&
+                    Math.abs(observed.angle)>.9f &&
+                    Math.abs(observed.angle)<6f) {
+                angle=-observed.angle;
+                angleOK=true;
+            }
         }
-        try {
-            int w=sample.getWidth(),h=sample.getHeight();
-            int[] rgb=new int[w*h];
-            sample.getPixels(rgb,0,w,0,0,w,h);
-            float[] gray=new float[rgb.length];
-            for(int k=0;k<rgb.length;k++){
-                int c=rgb[k];
-                gray[k]=.2126f*Color.red(c)+.7152f*Color.green(c)+
-                        .0722f*Color.blue(c);
-            }
+        // Only use older line-angle results when the new detector finds no
+        // stable architectural family, avoiding reintroduction of misleading
+        // perspective correction on roof and sidewalk photographs.
+        if(!scene.structureFound &&
+                (prior.reliable||prior.requiresConfirmation) &&
+                Math.abs(prior.correction)>.8f &&
+                Math.abs(prior.correction)<5f) {
+            angle=prior.correction;
+            angleOK=true;
+        }
 
-            // Angle histograms for left/right verticals and upper/lower
-            // horizontals. Absence of one side means perspective is unknown;
-            // refuse to invent an automatic trapezoid correction.
-            EdgeStats vLeft=new EdgeStats(),vRight=new EdgeStats();
-            EdgeStats hTop=new EdgeStats(),hBottom=new EdgeStats();
-            for(int y=2;y<h-2;y+=2){
-                if(Thread.currentThread().isInterrupted())
-                    return new Suggestion(0,0,0,false,false,false,0);
-                for(int x=2;x<w-2;x+=2){
-                    int i=y*w+x;
-                    float gx=(gray[i-w+1]+2f*gray[i+1]+gray[i+w+1])-
-                            (gray[i-w-1]+2f*gray[i-1]+gray[i+w-1]);
-                    float gy=(gray[i+w-1]+2f*gray[i+w]+gray[i+w+1])-
-                            (gray[i-w-1]+2f*gray[i-w]+gray[i-w+1]);
-                    float energy=(float)Math.hypot(gx,gy);
-                    if(energy<145f)continue;
-                    float strengthPixel=Math.min(energy,440f);
-                    if(Math.abs(gx)>Math.abs(gy)*2f){
-                        float angle=(float)Math.toDegrees(Math.atan(-gy/gx));
-                        if(Math.abs(angle)<16f) {
-                            if(x<w*.44f)vLeft.add(angle,strengthPixel,y,h);
-                            else if(x>w*.56f)vRight.add(angle,strengthPixel,y,h);
-                        }
-                    }
-                    if(Math.abs(gy)>Math.abs(gx)*2f){
-                        float angle=(float)Math.toDegrees(Math.atan(-gx/gy));
-                        if(Math.abs(angle)<16f) {
-                            if(y<h*.44f)hTop.add(angle,strengthPixel,x,w);
-                            else if(y>h*.56f)hBottom.add(angle,strengthPixel,x,w);
-                        }
-                    }
-                }
+        final float damp=balanced?.55f:.86f;
+        final float cap=balanced?8f:17f;
+        float vertical=0f,horizontal=0f;
+        boolean vOK=false,hOK=false;
+        ArchitecturalLines.Estimate l=scene.vLeft,r=scene.vRight;
+        if(l.confident && r.confident) {
+            float separation=r.angle-l.angle;
+            if(Math.abs(separation)>=1.4f &&
+                    Math.abs(separation)<=10.5f) {
+                float gradient=(float)(Math.tan(Math.toRadians(r.angle))-
+                        Math.tan(Math.toRadians(l.angle)));
+                vertical=clamp(-gradient*bitmap.getHeight()/
+                        (float)bitmap.getWidth()*100f*damp,-cap,cap);
+                vOK=Math.abs(vertical)>.85f;
             }
+        }
+        ArchitecturalLines.Estimate t=scene.hTop,b=scene.hBottom;
+        if(t.confident && b.confident) {
+            float separation=b.angle-t.angle;
+            if(Math.abs(separation)>=1.4f &&
+                    Math.abs(separation)<=10.5f) {
+                float gradient=(float)(Math.tan(Math.toRadians(b.angle))-
+                        Math.tan(Math.toRadians(t.angle)));
+                horizontal=clamp(-gradient*bitmap.getWidth()/
+                        (float)bitmap.getHeight()*100f*damp,-cap,cap);
+                hOK=Math.abs(horizontal)>.85f;
+            }
+        }
+        // Rotation and keystone are independent; if no skew is supported,
+        // we can still report that the photo contains well-aligned lines,
+        // instead of falsely claiming "no architecture found."
+        boolean aligned=found && !angleOK && !vOK && !hOK;
+        float confidence=Math.max(prior.confidence,
+                Math.max(hv.strength,hh.strength));
+        return new Suggestion(angle,vertical,horizontal,
+                angleOK,vOK,hOK,confidence,found,aligned);
+    }
 
-            float vertical=0f,horizontal=0f;
-            boolean vOK=false,hOK=false;
-            if(vLeft.reliable() && vRight.reliable()){
-                float a=vLeft.angle(),b=vRight.angle();
-                float separation=b-a;
-                // Opposite convergence is evidence for projective distortion;
-                // uniform slope means camera roll, not vertical keystone.
-                if(a*b<0f && Math.abs(separation)>1.6f &&
-                        Math.abs(separation)<13f) {
-                    float slopes=(float)(Math.tan(Math.toRadians(b))-
-                            Math.tan(Math.toRadians(a)));
-                    vertical=clamp(-slopes*(h/(float)w)*100f*strength,
-                            -maxTilt,maxTilt);
-                    vOK=Math.abs(vertical)>=.75f;
-                }
-            }
-            if(hTop.reliable()&&hBottom.reliable()) {
-                float a=hTop.angle(),b=hBottom.angle();
-                float separation=b-a;
-                if(a*b<0f && Math.abs(separation)>1.6f &&
-                        Math.abs(separation)<13f) {
-                    float slopes=(float)(Math.tan(Math.toRadians(b))-
-                            Math.tan(Math.toRadians(a)));
-                    horizontal=clamp(-slopes*(w/(float)h)*100f*strength,
-                            -maxTilt,maxTilt);
-                    hOK=Math.abs(horizontal)>=.75f;
-                }
-            }
-            float confidence=(vOK||hOK)?.65f:
-                    (hasAngle?level.confidence:0f);
-            return new Suggestion(roll,vertical,horizontal,
-                    hasAngle,vOK,hOK,confidence);
+    hasAngle,vOK,hOK,confidence);
         } finally {
             if(sample!=bitmap&&!sample.isRecycled())sample.recycle();
         }
