@@ -20,7 +20,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
 import android.view.Gravity;
-import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -117,7 +116,7 @@ public final class MainActivity extends Activity {
     private Runnable pendingSliderRender;
     private LinearLayout controls, tabs;
     private FrameLayout canvas;
-    private ImageView photo;
+    private ZoomPhotoView photo;
     private View guideOverlay;
     private boolean guideMode;
     private boolean gridVisible;
@@ -228,9 +227,10 @@ public final class MainActivity extends Activity {
 
         canvas = new FrameLayout(this);
         root.addView(canvas, new LinearLayout.LayoutParams(-1, 0, 1));
-        photo = new ImageView(this);
-        photo.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        photo.setBackgroundColor(BG);
+        photo = new ZoomPhotoView(this, this::changePhoto, this::guidedTap,
+                () -> guideMode, () -> {
+                    if (guideOverlay != null) guideOverlay.invalidate();
+                });
         canvas.addView(photo, new FrameLayout.LayoutParams(-1, -1));
         openPlaceholder = label("◉\n\nPHOTO STUDIO\n\nProfessional photo editing, offline.\n\n＋  TAP TO OPEN PHOTO", 18, Color.rgb(212, 229, 245));
         openPlaceholder.setOnClickListener(v -> choosePhotoSource());
@@ -242,11 +242,12 @@ public final class MainActivity extends Activity {
                     int iw=photo.getDrawable().getIntrinsicWidth();
                     int ih=photo.getDrawable().getIntrinsicHeight();
                     if(iw>0&&ih>0&&photo.getWidth()>0&&photo.getHeight()>0) {
-                        float scale=Math.min(photo.getWidth()/(float)iw,
-                                photo.getHeight()/(float)ih);
-                        float x0=(photo.getWidth()-iw*scale)*.5f;
-                        float y0=(photo.getHeight()-ih*scale)*.5f;
-                        float fw=iw*scale,fh=ih*scale;
+                        // Match the live zoom/pan image matrix so the 3x3 grid
+                        // follows the photograph while inspecting perspective.
+                        float[] corners={0f,0f,(float)iw,(float)ih};
+                        photo.getImageMatrix().mapPoints(corners);
+                        float x0=corners[0],y0=corners[1];
+                        float fw=corners[2]-x0,fh=corners[3]-y0;
                         android.graphics.Paint p=new android.graphics.Paint(
                                 android.graphics.Paint.ANTI_ALIAS_FLAG);
                         p.setColor(Color.argb(180,255,255,255));
@@ -275,33 +276,6 @@ public final class MainActivity extends Activity {
         };
         guideOverlay.setClickable(false);
         canvas.addView(guideOverlay,new FrameLayout.LayoutParams(-1,-1));
-        GestureDetector swipeDetector = new GestureDetector(this,
-                new GestureDetector.SimpleOnGestureListener() {
-                    @Override public boolean onDown(MotionEvent e) { return true; }
-                    @Override public boolean onFling(MotionEvent start, MotionEvent end,
-                            float velocityX, float velocityY) {
-                        if (start==null || end==null || photoSelection.size()<2) return false;
-                        float dx=end.getX()-start.getX(),dy=end.getY()-start.getY();
-                        if(Math.abs(dx)<dp(80) || Math.abs(dx)<Math.abs(dy)*1.4f ||
-                                Math.abs(velocityX)<190f) return false;
-                        changePhoto(dx<0 ? 1 : -1);
-                        return true;
-                    }
-                });
-        photo.setOnTouchListener((v,event) -> {
-            if(guideMode) {
-                if(event.getActionMasked()==MotionEvent.ACTION_DOWN) {
-                    guideDownX=event.getX();guideDownY=event.getY();
-                } else if(event.getActionMasked()==MotionEvent.ACTION_UP &&
-                        Math.hypot(event.getX()-guideDownX,
-                                event.getY()-guideDownY)<dp(22)) {
-                    guidedTap(event.getX(),event.getY());
-                }
-                return true;
-            }
-            swipeDetector.onTouchEvent(event);
-            return true;
-        });
         photoCounter = label("",11,Color.WHITE);
         photoCounter.setPadding(dp(12),dp(6),dp(12),dp(6));
         photoCounter.setMaxWidth(dp(260));
@@ -836,6 +810,8 @@ public final class MainActivity extends Activity {
     private void startGuide() {
         if(previewSource==null){openImage();return;}
         if(guideMode){endGuide();status.setText("Guided Level cancelled");return;}
+        // Guided reference points always use the fit-to-screen photo coordinates.
+        photo.resetZoom();
         guideMode=true;
         guideStep=0;
         guideOverlay.invalidate();
@@ -1449,6 +1425,7 @@ public final class MainActivity extends Activity {
         openingWork.getQueue().clear();
         Bitmap old=previewSource,oldFast=fastPreviewSource,oldRender=renderedPreview;
         input=null;previewSource=null;fastPreviewSource=null;renderedPreview=null;
+        photo.resetZoom();
         photo.setImageDrawable(null);
         releaseOldBitmaps(old,oldFast,oldRender);
         openPlaceholder.setText("OPENING PHOTO…\n\nPreparing preview");
@@ -1479,6 +1456,7 @@ public final class MainActivity extends Activity {
                             "Auto Strength".equals(activeAdjustment))
                         activeAdjustment="Exposure";
                     photo.setImageBitmap(decoded);
+                    photo.resetZoom();
                     openPlaceholder.setVisibility(View.GONE);
                     status.setText("Photo ready · "+(photoIndex+1)+" / "+
                             photoSelection.size());
@@ -1882,9 +1860,9 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Photo Studio · v0.6.17")
+        new AlertDialog.Builder(this).setTitle("Photo Studio · v0.6.18")
                 .setMessage("Offline native Android editing prototype.\n\n" +
-                        "Working: whole-album browsing and modern Android photo picker, JPEG/HEIC, styled looks, " +
+                        "Working: pinch zoom, double-tap inspection and pan, whole-album browsing, modern Android photo picker, JPEG/HEIC, styled looks, " +
                         "tone/colour adjustments, four-level Auto + structural region and deep-black safeguards, Auto WB, " +
                         "luminance/chroma NR, sharpening, " +
                         "clarity, texture, contrast dehaze, centre crop, rotate 90°, " +
