@@ -653,7 +653,7 @@ private fun AlbumList(
     LazyColumn(modifier, contentPadding = PaddingValues(bottom = bottom)) {
         item(key = "library") {
             // where the reference names itself ("… albums"), LightCraft does
-            PickerHeading("LightCraft albums", top = headingTop, bottom = headingBottom, start = headingStart) {
+            PickerHeading("LumaWorks albums", top = headingTop, bottom = headingBottom, start = headingStart) {
                 // open ⌄, folded ‹ (the reference's)
                 BarButton(if (libraryOpen) MdIcon.ExpandMore else MdIcon.ChevronLeft, if (libraryOpen) "Collapse" else "Expand", size = 48.2.dp, iconSize = 26.dp, tint = Lc.text) {
                     libraryOpen = !libraryOpen
@@ -818,7 +818,7 @@ fun DrawerContent(onPick: (String) -> Unit) {
             Image(painterResource(R.drawable.dennis_studio_lens), contentDescription = null, modifier = Modifier.size(59.8.dp).clip(RoundedCornerShape(8.dp)))
             Spacer(Modifier.width(16.dp))
             Column {
-                Text("LightCraft", color = Lc.text, fontFamily = Inter, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                Text("LumaWorks", color = Lc.text, fontFamily = Inter, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
                 Text("Photo editor", color = Lc.textDim, fontFamily = Inter, fontSize = 13.sp)
             }
         }
@@ -828,7 +828,7 @@ fun DrawerContent(onPick: (String) -> Unit) {
         listOf(
             Triple("preferences", MdIcon.Settings, "Preferences"),
             Triple("storage", MdIcon.PhoneIphone, "Local storage"),
-            Triple("about", MdIcon.Info, "About LightCraft"),
+            Triple("about", MdIcon.Info, "About LumaWorks"),
             Triple("help", MdIcon.Help, "Help"),
         ).forEach { (id, icon, label) ->
             Row(
