@@ -322,7 +322,7 @@ fun StoragePage(vm: AppViewModel, onBack: () -> Unit) {
                 DetailRow(Lc.textDim, "Everything else", gb((s.deviceTotal - s.deviceFree - s.libraryBytes).coerceAtLeast(0L)))
                 DetailRow(Lc.divider, "Free", gb(s.deviceFree))
                 Spacer(Modifier.height(12.dp))
-                Text(s.libraryPath, color = pageNote, fontFamily = Inter, fontSize = 13.sp, lineHeight = 16.sp)
+                Text(if (s.libraryPath == "The demo library (in memory)") s.libraryPath else "Private app storage · existing library preserved", color = pageNote, fontFamily = Inter, fontSize = 13.sp, lineHeight = 16.sp)
             }
         }
     }
