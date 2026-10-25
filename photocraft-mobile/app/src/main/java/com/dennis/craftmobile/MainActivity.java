@@ -60,6 +60,7 @@ public final class MainActivity extends Activity {
         float ratio = 0f;
         int rotation = 0;
         float straightenAngle = 0f;
+        float perspectiveVertical, perspectiveHorizontal;
         String look = "Original";
         float[] autoZones;  // Immutable zone map measured on original preview.
         float autoStrength = 100f;
@@ -76,7 +77,10 @@ public final class MainActivity extends Activity {
             d.exposure = exposure; d.contrast = contrast; d.highlights = highlights;
             d.shadows = shadows; d.saturation = saturation; d.warmth = warmth;
             d.tint = tint; d.ratio = ratio; d.rotation = rotation;
-            d.straightenAngle = straightenAngle; d.look = look;
+            d.straightenAngle = straightenAngle;
+            d.perspectiveVertical=perspectiveVertical;
+            d.perspectiveHorizontal=perspectiveHorizontal;
+            d.look = look;
             d.autoZones = autoZones; d.autoStrength = autoStrength;
             d.autoLowKey = autoLowKey;
             d.autoAtmosphere = autoAtmosphere;
@@ -112,6 +116,8 @@ public final class MainActivity extends Activity {
     private ImageView photo;
     private View guideOverlay;
     private boolean guideMode;
+    private boolean gridVisible;
+    private int cropSection=1; // 0 Crop, 1 Straighten, 2 Transform
     private int guideStep;
     private float guideX,guideY,guideDownX,guideDownY;
     private TextView openPlaceholder, status, photoCounter;
@@ -226,6 +232,27 @@ public final class MainActivity extends Activity {
         guideOverlay=new View(this) {
             @Override protected void onDraw(android.graphics.Canvas c) {
                 super.onDraw(c);
+                if(gridVisible && photo!=null && photo.getDrawable()!=null) {
+                    int iw=photo.getDrawable().getIntrinsicWidth();
+                    int ih=photo.getDrawable().getIntrinsicHeight();
+                    if(iw>0&&ih>0&&photo.getWidth()>0&&photo.getHeight()>0) {
+                        float scale=Math.min(photo.getWidth()/(float)iw,
+                                photo.getHeight()/(float)ih);
+                        float x0=(photo.getWidth()-iw*scale)*.5f;
+                        float y0=(photo.getHeight()-ih*scale)*.5f;
+                        float fw=iw*scale,fh=ih*scale;
+                        android.graphics.Paint p=new android.graphics.Paint(
+                                android.graphics.Paint.ANTI_ALIAS_FLAG);
+                        p.setColor(Color.argb(180,255,255,255));
+                        p.setStrokeWidth(dp(1));
+                        for(int line=1;line<3;line++) {
+                            float gx=x0+fw*line/3f;
+                            float gy=y0+fh*line/3f;
+                            c.drawLine(gx,y0,gx,y0+fh,p);
+                            c.drawLine(x0,gy,x0+fw,gy,p);
+                        }
+                    }
+                }
                 if(!guideMode||guideStep==0)return;
                 android.graphics.Paint pen=new android.graphics.Paint(
                         android.graphics.Paint.ANTI_ALIAS_FLAG);
@@ -315,7 +342,11 @@ public final class MainActivity extends Activity {
     }
 
     private void selectMode(Mode newMode) {
-        if(newMode!=Mode.CROP)endGuide();
+        if(newMode!=Mode.CROP) {
+            endGuide();
+            gridVisible=false;
+            if(guideOverlay!=null)guideOverlay.invalidate();
+        }
         mode = newMode;
         drawTabs();
         drawControls();
@@ -464,7 +495,7 @@ public final class MainActivity extends Activity {
     private void drawControls() {
         controls.removeAllViews();
         controls.setLayoutParams(new LinearLayout.LayoutParams(-1,
-                dp(mode == Mode.ADJUST ? 224 : 189)));
+                dp(mode == Mode.ADJUST ? 224 : mode == Mode.CROP ? 260 : 189)));
         if (mode == Mode.LOOKS) {
             panelTitle("LOOKS", "Tap a style to apply");
             addHorizontalChoices(new String[]{"Original", "Natural", "Warm", "Cool", "Dramatic", "B&W"},
@@ -490,9 +521,204 @@ public final class MainActivity extends Activity {
             controls.addView(scroll, new LinearLayout.LayoutParams(-1, dp(43)));
             showSlider();
         } else {
-            panelTitle("CROP & STRAIGHTEN", "Auto or manual · no black corners");
-            drawCropAndStraighten();
+            panelTitle("CROP & TRANSFORM", "Non-destructive · no AI");
+            drawCropSections();
         }
+    }
+
+
+    private void drawCropSections() {
+        LinearLayout strip=new LinearLayout(this);
+        strip.setPadding(dp(12),dp(2),dp(12),0);
+        String[] tabs={"CROP","STRAIGHTEN","TRANSFORM"};
+        for(int n=0;n<tabs.length;n++) {
+            final int section=n;
+            TextView option=label(tabs[n],12,n==cropSection?Color.WHITE:Color.LTGRAY);
+            option.setGravity(Gravity.CENTER);
+            option.setBackground(background(n==cropSection?Color.rgb(30,76,121):
+                    Color.rgb(22,34,49),8));
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(33),1f);
+            lp.setMargins(dp(3),0,dp(3),0);
+            strip.addView(option,lp);
+            option.setOnClickListener(v->{
+                endGuide();
+                cropSection=section;
+                gridVisible=cropSection==2;
+                guideOverlay.invalidate();
+                drawControls();
+            });
+        }
+        controls.addView(strip,new LinearLayout.LayoutParams(-1,dp(39)));
+        if(cropSection==0)drawCropRatios();
+        else if(cropSection==1)drawCropAndStraighten();
+        else drawTransformControls();
+    }
+
+    private void drawCropRatios() {
+        HorizontalScrollView scroll=new HorizontalScrollView(this);
+        scroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout buttons=new LinearLayout(this);
+        buttons.setPadding(dp(12),dp(8),dp(12),dp(8));
+        String[] ratios={"Original","1:1","4:5","16:9","Rotate 90°"};
+        for(String item:ratios) {
+            TextView label=label(item,12,Color.WHITE);
+            label.setPadding(dp(14),dp(9),dp(14),dp(9));
+            label.setBackground(background(Color.rgb(29,49,69),8));
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-2,dp(42));
+            lp.setMargins(dp(3),0,dp(3),0);
+            buttons.addView(label,lp);
+            label.setOnClickListener(v->{
+                if(previewSource==null){openImage();return;}
+                checkpoint();
+                switch(item) {
+                    case "1:1":edit.ratio=1f;break;
+                    case "4:5":edit.ratio=.8f;break;
+                    case "16:9":edit.ratio=16f/9f;break;
+                    case "Rotate 90°":edit.rotation=(edit.rotation+90)%360;break;
+                    default:edit.ratio=0f;
+                }
+                render();drawControls();
+            });
+        }
+        scroll.addView(buttons);
+        controls.addView(scroll,new LinearLayout.LayoutParams(-1,dp(60)));
+        TextView hint=label("Rotation, straighten and perspective remain editable. "+
+                "Full-resolution exports use the same geometry.",12,Color.LTGRAY);
+        hint.setPadding(dp(16),dp(12),dp(16),0);
+        controls.addView(hint,new LinearLayout.LayoutParams(-1,dp(57)));
+    }
+
+    private void drawTransformControls() {
+        HorizontalScrollView scroll=new HorizontalScrollView(this);
+        scroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout strip=new LinearLayout(this);
+        strip.setPadding(dp(9),dp(5),dp(9),dp(2));
+        String[] actions={"FULL AUTO","BALANCED AUTO","RESET","GRID"};
+        for(String action:actions){
+            TextView v=label(action,11,Color.WHITE);
+            v.setPadding(dp(12),dp(8),dp(12),dp(8));
+            v.setBackground(background(action.contains("AUTO")?ACCENT:
+                    Color.rgb(30,48,67),8));
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-2,dp(38));
+            lp.setMargins(dp(4),0,dp(4),0);
+            strip.addView(v,lp);
+            v.setOnClickListener(a->{
+                if(previewSource==null){openImage();return;}
+                if("FULL AUTO".equals(action)){proposeAutoTransform(false);return;}
+                if("BALANCED AUTO".equals(action)){proposeAutoTransform(true);return;}
+                if("GRID".equals(action)){
+                    gridVisible=!gridVisible;guideOverlay.invalidate();return;
+                }
+                if(Math.abs(edit.perspectiveVertical)<.01f &&
+                        Math.abs(edit.perspectiveHorizontal)<.01f)return;
+                checkpoint();
+                edit.perspectiveVertical=0f;
+                edit.perspectiveHorizontal=0f;
+                render();drawControls();
+            });
+        }
+        scroll.addView(strip);
+        controls.addView(scroll,new LinearLayout.LayoutParams(-1,dp(45)));
+        drawTransformSlider("Vertical Skew",true);
+        drawTransformSlider("Horizontal Skew",false);
+    }
+
+    private void drawTransformSlider(String title,boolean vertical) {
+        LinearLayout group=new LinearLayout(this);
+        group.setOrientation(LinearLayout.VERTICAL);
+        group.setPadding(dp(15),0,dp(15),0);
+        float starting=vertical?edit.perspectiveVertical:edit.perspectiveHorizontal;
+        TextView value=label(String.format(Locale.US,"%s: %+.1f",title,starting),
+                12,Color.WHITE);
+        group.addView(value,new LinearLayout.LayoutParams(-1,dp(20)));
+        SeekBar slider=new SeekBar(this);
+        slider.setMax(500);
+        slider.setProgress(Math.round(starting*10f)+250);
+        Edit before=edit.copy();
+        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+            @Override public void onProgressChanged(SeekBar seek,int position,boolean byUser){
+                if(!byUser || previewSource==null)return;
+                float amount=(position-250)/10f;
+                if(vertical)edit.perspectiveVertical=amount;
+                else edit.perspectiveHorizontal=amount;
+                value.setText(String.format(Locale.US,"%s: %+.1f",title,amount));
+                scheduleSliderPreview();
+            }
+            @Override public void onStartTrackingTouch(SeekBar seek){}
+            @Override public void onStopTrackingTouch(SeekBar seek){
+                if(pendingSliderRender!=null){
+                    ui.removeCallbacks(pendingSliderRender);pendingSliderRender=null;
+                }
+                if(previewSource!=null) {
+                    float after=vertical?edit.perspectiveVertical:edit.perspectiveHorizontal;
+                    if(Math.abs(after-starting)>.04f){
+                        undo.addLast(before);
+                        if(undo.size()>35)undo.removeFirst();
+                        redo.clear();
+                    }
+                    render();
+                }
+            }
+        });
+        group.addView(slider,new LinearLayout.LayoutParams(-1,dp(34)));
+        controls.addView(group,new LinearLayout.LayoutParams(-1,dp(56)));
+    }
+
+    private void proposeAutoTransform(boolean balanced) {
+        final Bitmap original=previewSource;
+        if(original==null){openImage();return;}
+        endGuide();
+        int serial=generation.incrementAndGet();
+        previewWork.getQueue().clear();
+        status.setText((balanced?"Balanced":"Full")+
+                " Auto Transform · analysing architectural lines…");
+        previewWork.execute(()->{
+            try{
+                TransformEngine.Suggestion decision=TransformEngine.analyse(
+                        original,balanced);
+                ui.post(()->{
+                    if(serial!=generation.get()||previewSource!=original)return;
+                    if(!decision.hasAny()){
+                        status.setText("Auto Transform · no reliable perspective reference");
+                        Toast.makeText(this,"No reliable architecture found. "+
+                                "Use Vertical / Horizontal Skew or Guided Level.",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    final float angle=decision.hasAngle?decision.angle:
+                            edit.straightenAngle;
+                    final float vert=decision.hasVertical?decision.vertical:
+                            edit.perspectiveVertical;
+                    final float horiz=decision.hasHorizontal?decision.horizontal:
+                            edit.perspectiveHorizontal;
+                    String description=String.format(Locale.US,
+                            "Proposed straighten: %+.1f°%s\n"+
+                            "Vertical Skew: %+.1f%s\n"+
+                            "Horizontal Skew: %+.1f%s\n\n"+
+                            "This is a conservative geometric estimate. "+
+                            "Perspective lines can be misleading. Inspect the "+
+                            "preview and use Undo if it looks unnatural. "+
+                            "Automatic cropping keeps black corners out.",
+                            angle,decision.hasAngle?"":" (preserved)",
+                            vert,decision.hasVertical?"":" (preserved)",
+                            horiz,decision.hasHorizontal?"":" (preserved)");
+                    new AlertDialog.Builder(this)
+                            .setTitle(balanced?"Balanced Auto Transform":"Full Auto Transform")
+                            .setMessage(description)
+                            .setNegativeButton("Keep current",null)
+                            .setPositiveButton("Apply & review",(dialog,which)->{
+                                if(serial!=generation.get() || previewSource!=original)return;
+                                checkpoint();
+                                edit.straightenAngle=angle;
+                                edit.perspectiveVertical=vert;
+                                edit.perspectiveHorizontal=horiz;
+                                render();drawControls();
+                            }).show();
+                });
+            }catch(RuntimeException|OutOfMemoryError ex){
+                showError("Auto Transform failed: "+ex.getMessage());
+            }
+        });
     }
 
     private void drawCropAndStraighten() {
@@ -902,7 +1128,10 @@ public final class MainActivity extends Activity {
         checkpoint();
         Edit v = new Edit();
         v.rotation = edit.rotation; v.ratio = edit.ratio;
-        v.straightenAngle = edit.straightenAngle; v.look = name;
+        v.straightenAngle=edit.straightenAngle;
+        v.perspectiveVertical=edit.perspectiveVertical;
+        v.perspectiveHorizontal=edit.perspectiveHorizontal;
+        v.look = name;
         switch (name) {
             case "Natural": v.contrast = 9; v.shadows = 10; v.saturation = 5; break;
             case "Warm": v.contrast = 7; v.warmth = 24; v.saturation = 9; break;
@@ -1369,15 +1598,18 @@ public final class MainActivity extends Activity {
             rotated = Bitmap.createBitmap(output, 0, 0, w, h, m, true);
             if (rotated != output) output.recycle();
         }
-        if (Math.abs(e.straightenAngle)>=.015f) {
+        if(Math.abs(e.straightenAngle)>=.015f ||
+                Math.abs(e.perspectiveVertical)>=.015f ||
+                Math.abs(e.perspectiveHorizontal)>=.015f) {
             if(cancelled.getAsBoolean()) {
                 rotated.recycle();
                 throw new CancellationException();
             }
-            Bitmap straightened=StraightenEngine.rotateAndFill(
-                    rotated,e.straightenAngle);
-            if(straightened!=rotated)rotated.recycle();
-            rotated=straightened;
+            Bitmap transformed=TransformEngine.render(rotated,
+                    e.straightenAngle,e.perspectiveVertical,
+                    e.perspectiveHorizontal,cancelled);
+            if(transformed!=rotated)rotated.recycle();
+            rotated=transformed;
         }
         if (e.ratio <= 0) {
             try {
@@ -1405,6 +1637,8 @@ public final class MainActivity extends Activity {
 
     private static boolean noEdits(Edit e) {
         return e.rotation == 0 && Math.abs(e.straightenAngle)<.015f &&
+                Math.abs(e.perspectiveVertical)<.015f &&
+                Math.abs(e.perspectiveHorizontal)<.015f &&
                 e.ratio == 0f && e.autoZones == null &&
                 e.exposure == 0f && e.contrast == 0f && e.highlights == 0f &&
                 e.shadows == 0f && e.saturation == 0f && e.warmth == 0f &&
@@ -1509,14 +1743,15 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.13 GUIDED LEVEL")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.14 CROP & TRANSFORM")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
                         "tone/colour adjustments, four-level Auto + structural region and deep-black safeguards, Auto WB, " +
                         "luminance/chroma NR, sharpening, " +
                         "clarity, texture, contrast dehaze, centre crop, rotate 90°, " +
                         "conservative Auto Straighten, Guided Level using two tapped points, " +
-                        "and manual +/-15° angle, " +
+                        "manual +/-15° angle, full and balanced perspective auto, " +
+                        "vertical/horizontal skew and alignment grid, " +
                         "corner-safe fill crop, " +
                         "undo/redo, press-and-hold before view, export and share.\n\n" +
                         "Auto WB uses cautious neutral samples, avoids colourful subjects and skips uncertain scenes. Auto analyses noise and detail from 64×64 local probes. Each detail group also has " +
