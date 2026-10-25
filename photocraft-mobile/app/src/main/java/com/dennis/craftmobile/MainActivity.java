@@ -2,6 +2,9 @@ package com.dennis.craftmobile;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.Manifest;
+import android.content.pm.PackageManager;
+import android.provider.Settings;
 import android.content.ContentValues;
 import android.content.ClipData;
 import android.content.Intent;
@@ -50,6 +53,7 @@ import java.util.function.BooleanSupplier;
 
 public final class MainActivity extends Activity {
     private static final int OPEN_IMAGE = 701;
+    private static final int ALBUM_PERMISSION = 702;
     private static final int BG = Color.rgb(8, 12, 19);
     private static final int PANEL = Color.rgb(13, 21, 32);
     private static final int ACCENT = Color.rgb(36, 136, 255);
@@ -125,6 +129,8 @@ public final class MainActivity extends Activity {
     private final ArrayList<Uri> photoSelection = new ArrayList<>();
     private final HashMap<String,Edit> editsByPhoto = new HashMap<>();
     private int photoIndex = -1;
+    private String activeAlbumName = "";
+    private AlbumBrowser albumBrowser;
     private Mode mode = Mode.LOOKS;
     private String activeAdjustment = "Exposure";
     private int adjustGroup = 0;  // 0 Tone, 1 Noise+Sharpen, 2 Presence
@@ -189,7 +195,7 @@ public final class MainActivity extends Activity {
         bar.setPadding(dp(8), dp(3), dp(8), dp(3));
         bar.setBackgroundColor(Color.rgb(13, 20, 30));
         root.addView(bar, new LinearLayout.LayoutParams(-1, dp(62)));
-        toolbar(bar, "＋", this::openImage);
+        toolbar(bar, "＋", this::choosePhotoSource);
         LinearLayout brand = new LinearLayout(this);
         brand.setOrientation(LinearLayout.VERTICAL);
         brand.setGravity(Gravity.CENTER_VERTICAL);
@@ -227,7 +233,7 @@ public final class MainActivity extends Activity {
         photo.setBackgroundColor(BG);
         canvas.addView(photo, new FrameLayout.LayoutParams(-1, -1));
         openPlaceholder = label("◉\n\nDENNIS CRAFT MOBILE\n\nProfessional photo editing, offline.\n\n＋  TAP TO OPEN PHOTO", 18, Color.rgb(212, 229, 245));
-        openPlaceholder.setOnClickListener(v -> openImage());
+        openPlaceholder.setOnClickListener(v -> choosePhotoSource());
         canvas.addView(openPlaceholder, new FrameLayout.LayoutParams(-1, -1));
         guideOverlay=new View(this) {
             @Override protected void onDraw(android.graphics.Canvas c) {
@@ -298,6 +304,9 @@ public final class MainActivity extends Activity {
         });
         photoCounter = label("",11,Color.WHITE);
         photoCounter.setPadding(dp(12),dp(6),dp(12),dp(6));
+        photoCounter.setMaxWidth(dp(260));
+        photoCounter.setSingleLine(true);
+        photoCounter.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
         photoCounter.setBackground(background(Color.rgb(25,40,59),10));
         FrameLayout.LayoutParams position=new FrameLayout.LayoutParams(
                 -2,dp(34),Gravity.TOP|Gravity.RIGHT);
@@ -458,7 +467,7 @@ public final class MainActivity extends Activity {
     }
 
     private void exportDialog() {
-        if (input == null) { openImage(); return; }
+        if (input == null) { choosePhotoSource(); return; }
         String[] options = {"85 · Smaller file", "90 · High quality",
                 "95 · Very high quality", "100 · Maximum JPEG quality"};
         int selected = jpegQuality == 85 ? 0 : jpegQuality == 90 ? 1 :
@@ -1250,6 +1259,98 @@ public final class MainActivity extends Activity {
                 Math.max(1,Math.round(h*scale)), true);
     }
 
+    // Album mode asks for read-only library access. The existing photo picker is still available.
+    private void choosePhotoSource() {
+        new AlertDialog.Builder(this).setTitle("Open photographs")
+                .setItems(new String[]{
+                        "Browse an album · swipe through every photo",
+                        "Select individual photos · up to 24"
+                }, (dialog, selection) -> {
+                    if (selection == 0) browseAlbums();
+                    else openImage();
+                }).show();
+    }
+
+    private void browseAlbums() {
+        String permission = Build.VERSION.SDK_INT >= 33
+                ? Manifest.permission.READ_MEDIA_IMAGES
+                : Manifest.permission.READ_EXTERNAL_STORAGE;
+        if (checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
+            showAlbumBrowser();
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 34 &&
+                checkSelfPermission(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+                        == PackageManager.PERMISSION_GRANTED) {
+            explainPartialAlbumAccess();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Browse complete photo albums")
+                .setMessage("To browse a whole album and swipe between all of its pictures, Dennis Craft needs read-only access to your photos. Your originals are never changed. You can also keep using the individual photo picker without this permission.\n\nChoose Allow all photos when Android asks.")
+                .setPositiveButton("Continue", (d, w) -> requestAlbumPermission())
+                .setNegativeButton("Use photo picker", (d, w) -> openImage())
+                .show();
+    }
+
+    private void requestAlbumPermission() {
+        if (Build.VERSION.SDK_INT >= 34) {
+            requestPermissions(new String[]{
+                    Manifest.permission.READ_MEDIA_IMAGES,
+                    Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+            }, ALBUM_PERMISSION);
+        } else {
+            requestPermissions(new String[]{
+                    Build.VERSION.SDK_INT >= 33 ? Manifest.permission.READ_MEDIA_IMAGES
+                            : Manifest.permission.READ_EXTERNAL_STORAGE
+            }, ALBUM_PERMISSION);
+        }
+    }
+
+    @Override public void onRequestPermissionsResult(int requestCode,
+            String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode != ALBUM_PERMISSION) return;
+        String fullPermission = Build.VERSION.SDK_INT >= 33
+                ? Manifest.permission.READ_MEDIA_IMAGES
+                : Manifest.permission.READ_EXTERNAL_STORAGE;
+        if (checkSelfPermission(fullPermission) == PackageManager.PERMISSION_GRANTED) {
+            showAlbumBrowser();
+        } else if (Build.VERSION.SDK_INT >= 34 &&
+                checkSelfPermission(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+                        == PackageManager.PERMISSION_GRANTED) {
+            explainPartialAlbumAccess();
+        } else {
+            Toast.makeText(this, "Album access not granted. Individual photo picker is available.",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void explainPartialAlbumAccess() {
+        new AlertDialog.Builder(this).setTitle("Selected photos only")
+                .setMessage("Android currently gives Dennis Craft access to selected photos only. For a complete album, change Photos and videos permission to Allow all in App info. You can also browse the accessible photos now.")
+                .setPositiveButton("Browse accessible", (d, w) -> showAlbumBrowser())
+                .setNeutralButton("App settings", (d, w) -> {
+                    Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:" + getPackageName()));
+                    startActivity(intent);
+                })
+                .setNegativeButton("Cancel", null).show();
+    }
+
+    private void showAlbumBrowser() {
+        if (albumBrowser == null)
+            albumBrowser = new AlbumBrowser(this, (photos, chosenIndex, name) -> {
+                photoSelection.clear();
+                photoSelection.addAll(photos);
+                editsByPhoto.clear();
+                activeAlbumName = name;
+                photoIndex = chosenIndex;
+                loadChosenPhoto(photoSelection.get(photoIndex));
+            });
+        albumBrowser.showAlbums();
+    }
+
     private void openImage() {
         Intent pick;
         if (Build.VERSION.SDK_INT >= 33) {
@@ -1278,7 +1379,8 @@ public final class MainActivity extends Activity {
     private void updatePhotoCounter() {
         if(photoSelection.size()>1 && photoIndex>=0) {
             photoCounter.setVisibility(View.VISIBLE);
-            photoCounter.setText("‹  "+(photoIndex+1)+" / "+photoSelection.size()+"  ›");
+            photoCounter.setText("‹  " + (activeAlbumName.isEmpty() ? "" : activeAlbumName + " · ") +
+                    (photoIndex+1) + " / " + photoSelection.size() + "  ›");
             photoCounter.setContentDescription("Photo "+(photoIndex+1)+" of "+
                     photoSelection.size()+". Tap to show next.");
         } else photoCounter.setVisibility(View.GONE);
@@ -1289,7 +1391,7 @@ public final class MainActivity extends Activity {
         endGuide();
         int next=photoIndex+direction;
         if(next<0 || next>=photoSelection.size()) {
-            Toast.makeText(this,next<0?"First selected photo":"Last selected photo",
+            Toast.makeText(this,next<0?"First photo":(activeAlbumName.isEmpty() ? "Last selected photo" : "Last photo in album"),
                     Toast.LENGTH_SHORT).show();
             return;
         }
@@ -1392,6 +1494,7 @@ public final class MainActivity extends Activity {
         }
         photoSelection.clear();
         photoSelection.addAll(selected);
+        activeAlbumName = "";
         editsByPhoto.clear();
         photoIndex=0;
         loadChosenPhoto(photoSelection.get(0));
@@ -1663,7 +1766,7 @@ public final class MainActivity extends Activity {
     }
 
     private void save(boolean share) {
-        if (input == null) { openImage(); return; }
+        if (input == null) { choosePhotoSource(); return; }
         if (!saving.compareAndSet(false, true)) {
             Toast.makeText(this, "A photo is already being saved", Toast.LENGTH_SHORT).show();
             return;
@@ -1736,24 +1839,25 @@ public final class MainActivity extends Activity {
     }
 
     private void more() {
-        String[] options = {"Modern photo picker", "Export / share", "JPEG quality", "Reset edits",
-                "About / limitations"};
+        String[] options = {"Browse full photo album", "Modern photo picker", "Export / share",
+                "JPEG quality", "Reset edits", "About / limitations"};
         new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile")
                 .setItems(options, (dialog, which) -> {
-                    if (which==0) openImage();
-                    if (which==1) exportDialog();
-                    if (which==2) chooseQuality();
-                    if (which==3 && previewSource != null) {
+                    if (which==0) browseAlbums();
+                    if (which==1) openImage();
+                    if (which==2) exportDialog();
+                    if (which==3) chooseQuality();
+                    if (which==4 && previewSource != null) {
                         checkpoint(); edit = new Edit(); render(); drawControls();
                     }
-                    if (which==4) about();
+                    if (which==5) about();
                 }).show();
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.15 STRONGER TRANSFORM")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.16 ALBUM BROWSING")
                 .setMessage("Offline native Android editing prototype.\n\n" +
-                        "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
+                        "Working: whole-album browsing and modern Android photo picker, JPEG/HEIC, styled looks, " +
                         "tone/colour adjustments, four-level Auto + structural region and deep-black safeguards, Auto WB, " +
                         "luminance/chroma NR, sharpening, " +
                         "clarity, texture, contrast dehaze, centre crop, rotate 90°, " +
@@ -1779,6 +1883,7 @@ public final class MainActivity extends Activity {
     @Override protected void onDestroy() {
         generation.incrementAndGet();
         if (pendingSliderRender != null) ui.removeCallbacks(pendingSliderRender);
+        if (albumBrowser != null) albumBrowser.close();
         previewWork.shutdownNow(); openingWork.shutdownNow(); savingWork.shutdownNow();
         super.onDestroy();
     }
