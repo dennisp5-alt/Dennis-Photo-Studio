@@ -232,7 +232,7 @@ public final class MainActivity extends Activity {
         photo.setScaleType(ImageView.ScaleType.FIT_CENTER);
         photo.setBackgroundColor(BG);
         canvas.addView(photo, new FrameLayout.LayoutParams(-1, -1));
-        openPlaceholder = label("◉\n\nCRAFT PHOTO STUDIO\n\nProfessional photo editing, offline.\n\n＋  TAP TO OPEN PHOTO", 18, Color.rgb(212, 229, 245));
+        openPlaceholder = label("◉\n\nPHOTO STUDIO\n\nProfessional photo editing, offline.\n\n＋  TAP TO OPEN PHOTO", 18, Color.rgb(212, 229, 245));
         openPlaceholder.setOnClickListener(v -> choosePhotoSource());
         canvas.addView(openPlaceholder, new FrameLayout.LayoutParams(-1, -1));
         guideOverlay=new View(this) {
@@ -1314,7 +1314,7 @@ public final class MainActivity extends Activity {
         }
         new AlertDialog.Builder(this)
                 .setTitle("Browse complete photo albums")
-                .setMessage("To browse a whole album and swipe between all of its pictures, Craft Photo Studio needs read-only access to your photos. Your originals are never changed. You can also keep using the individual photo picker without this permission.\n\nChoose Allow all photos when Android asks.")
+                .setMessage("To browse a whole album and swipe between all of its pictures, Photo Studio needs read-only access to your photos. Your originals are never changed. You can also keep using the individual photo picker without this permission.\n\nChoose Allow all photos when Android asks.")
                 .setPositiveButton("Continue", (d, w) -> requestAlbumPermission())
                 .setNegativeButton("Use photo picker", (d, w) -> openImage())
                 .show();
@@ -1355,7 +1355,7 @@ public final class MainActivity extends Activity {
 
     private void explainPartialAlbumAccess() {
         new AlertDialog.Builder(this).setTitle("Selected photos only")
-                .setMessage("Android currently gives Craft Photo Studio access to selected photos only. For a complete album, change Photos and videos permission to Allow all in App info. You can also browse the accessible photos now.")
+                .setMessage("Android currently gives Photo Studio access to selected photos only. For a complete album, change Photos and videos permission to Allow all in App info. You can also browse the accessible photos now.")
                 .setPositiveButton("Browse accessible", (d, w) -> showAlbumBrowser())
                 .setNeutralButton("App settings", (d, w) -> {
                     Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
@@ -1817,7 +1817,7 @@ public final class MainActivity extends Activity {
                 ContentValues values = new ContentValues();
                 values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
                 values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
-                values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Craft Photo Studio");
+                values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Photo Studio");
                 values.put(MediaStore.Images.Media.IS_PENDING, 1);
                 saved = getContentResolver().insert(
                         MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
@@ -1835,7 +1835,7 @@ public final class MainActivity extends Activity {
                 ui.post(() -> {
                     if (toLoad.equals(input)) {
                         status.setText("Saved JPEG Q" + quality +
-                                " to Pictures/Craft Photo Studio");
+                                " to Pictures/Photo Studio");
                     }
                     Toast.makeText(this, "Exported JPEG Q" + quality,
                             Toast.LENGTH_LONG).show();
@@ -1868,7 +1868,7 @@ public final class MainActivity extends Activity {
     private void more() {
         String[] options = {"Browse full photo album", "Modern photo picker", "Export / share",
                 "JPEG quality", "Reset edits", "About / limitations"};
-        new AlertDialog.Builder(this).setTitle("Craft Photo Studio")
+        new AlertDialog.Builder(this).setTitle("Photo Studio")
                 .setItems(options, (dialog, which) -> {
                     if (which==0) browseAlbums();
                     if (which==1) openImage();
@@ -1882,7 +1882,7 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Craft Photo Studio · v0.6.17")
+        new AlertDialog.Builder(this).setTitle("Photo Studio · v0.6.17")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: whole-album browsing and modern Android photo picker, JPEG/HEIC, styled looks, " +
                         "tone/colour adjustments, four-level Auto + structural region and deep-black safeguards, Auto WB, " +
