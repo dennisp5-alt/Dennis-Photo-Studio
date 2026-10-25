@@ -203,7 +203,7 @@ fun PreferencesPage(vm: AppViewModel, onBack: () -> Unit) {
         gpu?.let { on ->
             PageGroup {
                 PageHeading("Rendering")
-                PageSwitch("Render with the GPU", "Faster where the phone's graphics driver can run LightCraft's shaders. Turn it off if photos look wrong.", on) { v ->
+                PageSwitch("Render with the GPU", "Faster where the phone's graphics driver can run LumaWorks' rendering engine. Turn it off if photos look wrong.", on) { v ->
                     gpu = v
                     vm.setGpu(v)
                 }
@@ -229,7 +229,7 @@ private fun ImportOptionsPage(vm: AppViewModel, onBack: () -> Unit) {
     Box(Modifier.fillMaxSize()) {
         DrawerPage("Photo import options", onBack) {
             PageGroup {
-                PageRow("Raw defaults", if (rawPreset == null) "LightCraft default" else presetName ?: "Preset") { sheet = "raw" }
+                PageRow("Raw defaults", if (rawPreset == null) "LumaWorks default" else presetName ?: "Preset") { sheet = "raw" }
                 PageRow("Add copyright", copyright.ifBlank { "Off" }) { editingCopyright = true }
             }
             Text(
@@ -246,7 +246,7 @@ private fun ImportOptionsPage(vm: AppViewModel, onBack: () -> Unit) {
                 if (which == "raw") {
                     // the reference's sheet: its default or a preset (ticked), then Choose preset
                     Spacer(Modifier.height(10.dp))
-                    OptionRow("LightCraft default", selected = rawPreset == null) {
+                    OptionRow("LumaWorks default", selected = rawPreset == null) {
                         sheet = null
                         vm.changeImportDefaults(JSONObject().put("rawPreset", "default"))
                     }
@@ -318,7 +318,7 @@ fun StoragePage(vm: AppViewModel, onBack: () -> Unit) {
                 Text("Details", color = pageText, fontFamily = Inter, fontSize = 15.sp)
             }
             if (details && s != null) {
-                DetailRow(Lc.highlight, "LightCraft's library (${s.photos} photos)", gb(s.libraryBytes))
+                DetailRow(Lc.highlight, "LumaWorks library (${s.photos} photos)", gb(s.libraryBytes))
                 DetailRow(Lc.textDim, "Everything else", gb((s.deviceTotal - s.deviceFree - s.libraryBytes).coerceAtLeast(0L)))
                 DetailRow(Lc.divider, "Free", gb(s.deviceFree))
                 Spacer(Modifier.height(12.dp))
@@ -348,19 +348,19 @@ fun AboutPage(vm: AppViewModel, onBack: () -> Unit) {
     var text by remember { mutableStateOf("") }
     LaunchedEffect(Unit) { text = vm.about() }
     val uri = LocalUriHandler.current
-    DrawerPage("About LightCraft", onBack) {
+    DrawerPage("About LumaWorks", onBack) {
         Column(Modifier.padding(horizontal = 28.7.dp).widthIn(max = 468.dp).fillMaxWidth()) {
             Spacer(Modifier.height(23.8.dp))
             Row(Modifier.fillMaxWidth()) {
-                Text("LIGHTCRAFT ANDROID", color = pageText, fontFamily = Inter, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                Text("LUMAWORKS", color = pageText, fontFamily = Inter, fontSize = 13.sp, modifier = Modifier.weight(1f))
                 Text("v${engineVersion()}", color = pageText, fontFamily = Inter, fontSize = 13.sp)
             }
             Spacer(Modifier.height(16.dp))
-            Text("Open source under the MIT or Apache-2.0 licence. Your photos stay on this phone: LightCraft sends nothing anywhere.", color = pageNote, fontFamily = Inter, fontSize = 13.sp, lineHeight = 16.sp)
+            Text("Open source under the MIT or Apache-2.0 licence. Your photos are processed locally; the editor does not upload them.", color = pageNote, fontFamily = Inter, fontSize = 13.sp, lineHeight = 16.sp)
             Spacer(Modifier.height(16.dp))
             Text(text, color = pageNote, fontFamily = Inter, fontSize = 13.sp, lineHeight = 16.sp)
-            AboutLink("SOURCE CODE", HELP_URL) { runCatching { uri.openUri(HELP_URL) } }
-            AboutLink("THIRD-PARTY LICENCES", "$HELP_URL/blob/main/apps/lightcraft-android/README.md") {
+            AboutLink("SOURCE CODE", "Open source repository") { runCatching { uri.openUri(HELP_URL) } }
+            AboutLink("THIRD-PARTY LICENCES", "View licence information") {
                 runCatching { uri.openUri("$HELP_URL/blob/main/apps/lightcraft-android/README.md") }
             }
         }
