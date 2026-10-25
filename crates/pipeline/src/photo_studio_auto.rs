@@ -149,7 +149,7 @@ pub fn analyse(src:&Rgb32f, info:&SourceInfo, s:&DevelopSettings)
         p95>=123.0/255.0 && clustered16>=9;
     let keep_black=p05<27.0/255.0 && dark16>=72 &&
         (protected_atmosphere || macro_protection || low_key || important_region);
-    let mut ceiling=if p95>0.84 || coverage>0.10 {0.025}
+    let mut ceiling:f64=if p95>0.84 || coverage>0.10 {0.025}
         else if p95>0.71 || coverage>0.025 {0.085}
         else if p95>0.62 {0.18} else {0.45};
     let mut shadow_scale=1.0f64;
@@ -179,7 +179,7 @@ pub fn analyse(src:&Rgb32f, info:&SourceInfo, s:&DevelopSettings)
     let exposure=(0.36/median.max(0.09)).log2().clamp(-0.16,ceiling);
     let shadows=(if p05<40.0/255.0 {15.0}
         else if p05<70.0/255.0 {11.0} else {6.0})*shadow_scale;
-    let highlights=if p95>0.83 {-13.0} else if p95>0.71 {-8.0} else {0.0};
+    let highlights:f64=if p95>0.83 {-13.0} else if p95>0.71 {-8.0} else {0.0};
     let contrast=((0.60-(p95-p05))*11.0).clamp(-4.0,4.0);
     let mut local_shadow=0.0f64;
     for i in 0..CELLS {
