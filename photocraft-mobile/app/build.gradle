@@ -8,8 +8,8 @@ android {
         applicationId 'com.dennis.craftmobile'
         minSdk 29
         targetSdk 35
-        versionCode 23
-        versionName '0.6.17-ui-polish'
+        versionCode 24
+        versionName '0.6.18-inspection-zoom'
     }
     buildTypes {
         release { minifyEnabled false }
