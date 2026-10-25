@@ -272,3 +272,13 @@ Crop bottom navigation now contains three sub-tabs: Crop / Straighten / Transfor
 - This is a candidate to evaluate with bathroom verticals, street rooflines, the playground structure and natural landscapes. If Auto does not find reliable lines, use manual skew or Guided Level. One perspective correction cannot flatten 3D perspective differences across different objects without compromises.
 
 Known performance: Projective bitmap transformation requires one additional filtered bitmap allocation when geometric transforms are nonzero; full-resolution images may be slower to save, especially extreme adjustments. Watch GPU/CPU memory and image quality on the Samsung Galaxy S23 Ultra before promoting v0.6.14.
+
+## v0.6.15 — Stronger architectural-line detection experiment
+
+- Starts from v0.6.14 Crop & Transform. Existing four-layer photographic Auto/WB, original crop, guided leveling, undo, manual Transform sliders, single-pass perspective rendering and full-resolution export unchanged. No AI/ML models bundled.
+- Replaces Auto Transform's overly brittle pixel-edge left/right histogram and requirement that perspective slopes have opposite signs. This incorrectly produced “no reliable architecture” even on buildings, fences, roofs and shelter posts.
+- New ArchitecturalLines detector downsamples once to 740px, calculates Sobel edge gradients, and accumulates orientation plus *line intercept* Hough votes. It rejects short fragmented edges, requires actual spatial line span and groups separate lines at distinct intercepts, scoring vertical, horizontal, left/right and top/bottom independently.
+- Uses coherent line evidence to propose camera roll and/or projective corrections. Perspective convergence can be detected even when overall roll shifts both slope families in the same direction; region and line-strength checks still reduce false positives.
+- A distinct status “Architectural lines found · no trustworthy adjustment” is now shown when obvious structures are present but they do not justify an actual correction. “No reliable structural reference” is reserved for scenes without adequate aligned line evidence.
+- Both Full Auto and Balanced Auto are *proposals* requiring explicit user review. Balanced remains restrained, Full permits more transformation. No automatic geometric operation on photo opening or main Auto.
+- Same on-device Java image algorithms, no network requests. Test first on previously reported scooter shelter, demolition building and bathroom scenes, comparing status + proposed angle/skew. Avoid relying on grids in screenshots as evidence: the engine analyses the raw loaded photo bitmap without overlay.

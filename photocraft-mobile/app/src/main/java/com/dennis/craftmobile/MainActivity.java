@@ -679,10 +679,18 @@ public final class MainActivity extends Activity {
                 ui.post(()->{
                     if(serial!=generation.get()||previewSource!=original)return;
                     if(!decision.hasAny()){
-                        status.setText("Auto Transform · no reliable perspective reference");
-                        Toast.makeText(this,"No reliable architecture found. "+
-                                "Use Vertical / Horizontal Skew or Guided Level.",
-                                Toast.LENGTH_LONG).show();
+                        if(decision.structureFound) {
+                            status.setText("Architectural lines found · no trustworthy adjustment");
+                            Toast.makeText(this,"Straight structures detected, but no "+
+                                    "reliable tilt or perspective correction is needed "+
+                                    "or supported. Adjust manually if desired.",
+                                    Toast.LENGTH_LONG).show();
+                        } else {
+                            status.setText("Auto Transform · no reliable structural reference");
+                            Toast.makeText(this,"No dependable architectural lines "+
+                                    "found · use manual skew or Guided Level.",
+                                    Toast.LENGTH_LONG).show();
+                        }
                         return;
                     }
                     final float angle=decision.hasAngle?decision.angle:
@@ -1743,7 +1751,7 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.14 CROP & TRANSFORM")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.15 STRONGER TRANSFORM")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
                         "tone/colour adjustments, four-level Auto + structural region and deep-black safeguards, Auto WB, " +
