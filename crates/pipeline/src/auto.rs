@@ -640,6 +640,78 @@ pub fn smart_auto_tone_report(src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings)
     smart_auto_tone_report_mode(src,info,s,true)
 }
 
+/// LumaWorks v0.6.22: a middle path between the nearly inert legacy
+/// conservative proposal and the old wholly unprotected experiment.
+/// Fine grids can propose recoverable structure, but the suggestion is
+/// deliberately attenuated and evaluated against rendered image pixels.
+/// This never changes the diagnostic-only 4/8/16 evidence.
+pub fn smart_auto_tone_report_balanced(
+    src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings
+) -> AutoToneAuditReport {
+    let mut audit=smart_auto_tone_report(src,info,s);
+    let (active,_)=smart_auto_candidate_mode(src,info,s,true);
+    let basic=audit.proposed;
+    let blend=|safe:f64, assertive:f64, weight:f64| {
+        safe*(1.0-weight)+assertive*weight
+    };
+    let mut proposed=AutoTone {
+        exposure:blend(basic.exposure,active.exposure,0.65).clamp(-0.9,0.9),
+        contrast:blend(basic.contrast,active.contrast,0.63).clamp(-12.0,13.0),
+        highlights:blend(basic.highlights,active.highlights,0.77).clamp(-37.0,12.0),
+        shadows:blend(basic.shadows,active.shadows,0.74).clamp(-20.0,35.0),
+        whites:blend(basic.whites,active.whites,0.67).clamp(-20.0,9.0),
+        blacks:blend(basic.blacks,active.blacks,0.62).clamp(-9.0,10.0),
+        vibrance:blend(basic.vibrance,active.vibrance,0.55).clamp(-9.0,11.0),
+        saturation:blend(basic.saturation,active.saturation,0.45).clamp(-4.0,5.0),
+        curve_shadows:blend(basic.curve_shadows,active.curve_shadows,0.66).clamp(-15.0,20.0),
+        curve_darks:blend(basic.curve_darks,active.curve_darks,0.72).clamp(-18.0,24.0),
+        curve_lights:blend(basic.curve_lights,active.curve_lights,0.62).clamp(-10.0,13.0),
+        curve_highlights:blend(basic.curve_highlights,active.curve_highlights,0.67).clamp(-19.0,8.0),
+    };
+    let ev=&audit.evidence;
+    // A small luminous subject or a broad bright sky should not get a
+    // global lift just because most of the photograph is relatively dark.
+    if ev.zonal.micro.neutral_white_subject ||
+       ev.zonal.nano.neutral_white_subject {
+        proposed.exposure=proposed.exposure.min(0.05);
+    }else if ev.bright_fraction>0.09 && proposed.exposure>0.0 {
+        proposed.exposure=proposed.exposure.min(0.18);
+    }
+    // Avoid making flat, nearly black night scenes look like daylight.
+    if ev.dark_fraction>0.80 && ev.recoverable_fraction<0.07 &&
+        ev.bright_fraction<0.02 {
+        proposed.exposure=proposed.exposure.min(0.12);
+        proposed.shadows=proposed.shadows.min(10.0);
+    }
+    // Existing color is not evidence of weak saturation. In a strongly
+    // saturated flower/foliage scene preserve the neutral basic colour.
+    if ev.zonal.nano.neutral_white_subject {
+        proposed.vibrance=proposed.vibrance.min(4.0);
+        proposed.saturation=proposed.saturation.min(2.0);
+    }
+    // Keep editable controls at sensible slider precision.
+    proposed.exposure=(proposed.exposure*100.0).round()/100.0;
+    proposed.contrast=proposed.contrast.round();
+    proposed.highlights=proposed.highlights.round();
+    proposed.shadows=proposed.shadows.round();
+    proposed.whites=proposed.whites.round();
+    proposed.blacks=proposed.blacks.round();
+    proposed.vibrance=proposed.vibrance.round();
+    proposed.saturation=proposed.saturation.round();
+    proposed.curve_shadows=proposed.curve_shadows.round();
+    proposed.curve_darks=proposed.curve_darks.round();
+    proposed.curve_lights=proposed.curve_lights.round();
+    proposed.curve_highlights=proposed.curve_highlights.round();
+    let quality=preview_quality_guard_report(src,info,s,proposed);
+    audit.proposed=proposed;
+    audit.final_tone=quality.tone;
+    audit.guard_reasons=quality.reasons;
+    audit.new_white_clip_fraction=quality.white_clip_change;
+    audit.new_black_clip_fraction=quality.black_clip_change;
+    audit.quality_guard_skipped_for_emission=false;
+    audit
+}
+
 /// v0.6.12c TEST ONLY: apply the complete scene-dependent Auto candidate
 /// directly, without the preview-render clipping/overlift/contrast vetoes.
 /// The candidate's inherent scene detection and valid slider bounds remain.
@@ -1448,6 +1520,105 @@ pub fn auto_wb_report(src:&Rgb32f,info:&SourceInfo)->AutoWbReport{
         "high_trust_neutrals_override_coloured_regions"
     } else {"consistent_spatial_neutral_estimate"};
     report
+}
+
+/// Middle-ground automatic white balance. The existing spatial-neutral
+/// estimator remains the first choice. When its conservative minimum-step
+/// threshold rejects a small, supported correction, use a modest one. When
+/// a moderate cast makes the reference fall outside strict neutral chroma,
+/// cross-check neutral-ish areas in several spatial tiles before correcting.
+/// This is NOT unrestricted grey-world balancing.
+pub fn auto_wb_report_balanced(src:&Rgb32f,info:&SourceInfo)->AutoWbReport {
+    let mut result=auto_wb_report(src,info);
+    if result.decision=="corrected" ||
+       result.decision=="warm_light_preserved" ||
+       result.bright_cool_dominance {
+        return result;
+    }
+    let mut candidate=None;
+    let mut strength=0.0;
+    if result.decision=="already_neutral" &&
+       result.confidence>=0.12 &&
+       result.neutral_fraction>0.02 {
+        // The neutral estimate was trusted, but its separate Temp/Tint
+        // minimum steps were too strict. Require a useful joint signal.
+        candidate=Some((result.candidate_temp,result.candidate_tint));
+        strength=result.confidence.max(0.25).min(0.72);
+    }else if result.reason=="insufficient_spatial_neutral_support" {
+        let img=lightcraft_raster::resample::fit(
+            src,256,256,lightcraft_raster::resample::Filter::Box);
+        if img.width<32 || img.height<32 {return result;}
+        let mut count=[0usize;16];
+        let mut sum=[[0.0f64;3];16];
+        for (i,c) in img.data.iter().enumerate() {
+            let y=luminance_2020(*c);
+            if !(0.065..0.70).contains(&y) {continue;}
+            let hi=c[0].max(c[1]).max(c[2]).max(1e-6);
+            let lo=c[0].min(c[1]).min(c[2]);
+            let chroma=(hi-lo)/hi;
+            if !(0.085..0.37).contains(&chroma) {continue;}
+            // Reject obvious foliage, intensely cool skies and magenta
+            // subjects even when their chroma is moderate.
+            if (c[1]>c[0]*1.13 && c[1]>c[2]*1.13) ||
+               (c[2]>c[0]*1.20 && c[2]>c[1]*1.10) ||
+               (c[0]>c[1]*1.20 && c[2]>c[1]*1.12) {
+                continue;
+            }
+            let x=i%img.width;
+            let y=i/img.width;
+            let cell=((y*4/img.height).min(3))*4+(x*4/img.width).min(3);
+            count[cell]+=1;
+            for ch in 0..3 {sum[cell][ch]+=c[ch] as f64;}
+        }
+        let mut accepted=0usize;
+        let mut observations=Vec::new();
+        let mut rgb=[0.0f64;3];
+        for cell in 0..16 {
+            if count[cell]<40 {continue;}
+            accepted+=count[cell];
+            let mean=sum[cell].map(|v|v/count[cell] as f64);
+            observations.push([
+                (mean[0].max(1e-5)/mean[1].max(1e-5)).ln(),
+                (mean[2].max(1e-5)/mean[1].max(1e-5)).ln(),
+            ]);
+            for ch in 0..3 {rgb[ch]+=sum[cell][ch];}
+        }
+        if accepted<400 || observations.len()<4 {return result;}
+        let count_regions=observations.len() as f64;
+        let mean_ratio=[
+            observations.iter().map(|r|r[0]).sum::<f64>()/count_regions,
+            observations.iter().map(|r|r[1]).sum::<f64>()/count_regions,
+        ];
+        let dev=observations.iter().map(|r|
+            (r[0]-mean_ratio[0]).powi(2)+(r[1]-mean_ratio[1]).powi(2)
+        ).sum::<f64>()/count_regions;
+        // Different hues across tiles indicate subject reflectance, not
+        // one consistent illuminant; keep camera colour in that case.
+        if dev>0.007 {return result;}
+        let mean=rgb.map(|v|(v/accepted as f64) as f32);
+        let patch=Rgb32f::filled(16,16,mean);
+        candidate=Some(auto_wb_classic(&patch,info));
+        strength=0.44;
+    }
+    let Some((temp,tint))=candidate else{return result;};
+    if !temp.is_finite() || !tint.is_finite() {return result;}
+    let base_mired=1e6/info.as_shot_temp.clamp(2000.0,50000.0);
+    let raw_delta=(1e6/temp.clamp(2000.0,50000.0)-base_mired)*strength;
+    let tint_delta=(tint-info.as_shot_tint)*strength;
+    // The new middle-ground mode must never repeat the -100 / -100
+    // behaviour of the old unrestricted experiment.
+    let dm=raw_delta.clamp(-29.0,29.0);
+    let dt=tint_delta.clamp(-12.0,12.0);
+    if dm.abs()<1.3 && dt.abs()<1.5 {return result;}
+    result.temp=(1e6/(base_mired+dm)).clamp(2000.0,50000.0).round();
+    result.tint=(info.as_shot_tint+dt).round();
+    result.candidate_temp=temp;
+    result.candidate_tint=tint;
+    result.confidence=strength;
+    result.camera_balance_retained=false;
+    result.decision="corrected";
+    result.reason="moderate_spatial_neutral_correction";
+    result
 }
 
 /// v0.6.12d DIAGNOSTIC ONLY: take the direct calculated colour
