@@ -208,7 +208,10 @@ pub fn analyse(src:&Rgb32f, info:&SourceInfo, s:&DevelopSettings)
         region_shadow_weight:local_shadow,
     };
     let tone=AutoTone {
-        exposure:(exposure*100.0).round()/100.0,
+        // Positive EV must never round *above* the scene's clipping cap:
+        // +0.025 EV is displayed as +0.02, not an unsafe +0.03.
+        exposure:if exposure>0.0 {(exposure*100.0).floor()/100.0}
+                 else {(exposure*100.0).round()/100.0},
         contrast:contrast.round(),
         highlights:(highlights*1.45).round(),
         shadows:(shadows*1.25).round(),
