@@ -2688,6 +2688,66 @@ mod studio_v0611_scene_auto_integration {
 }
 
 #[cfg(test)]
+mod lumaworks_balanced_auto_wb_regressions {
+    use super::*;
+    #[test]
+    fn moderate_cast_on_multiregion_grey_gets_a_real_bounded_wb_edit() {
+        let image=Rgb32f::from_fn(320,240,|x,y|{
+            let v=0.20+((x/19+y/13)%9) as f32*0.009;
+            [v*1.18,v,v*0.84]
+        });
+        let info=SourceInfo::default();
+        let wb=auto_wb_report_balanced(&image,&info);
+        assert_eq!(wb.decision,"corrected","Moderate neutral cast ignored: {wb:?}");
+        assert!(wb.temp!=info.as_shot_temp || wb.tint!=info.as_shot_tint);
+        assert!((1e6/wb.temp-1e6/info.as_shot_temp).abs()<=29.1);
+        assert!((wb.tint-info.as_shot_tint).abs()<=12.1);
+    }
+
+    #[test]
+    fn vivid_pink_flower_and_green_foliage_do_not_look_like_neutral_grey() {
+        let image=Rgb32f::from_fn(320,240,|x,y|{
+            if (86..245).contains(&x)&&(42..201).contains(&y) {
+                [0.67,0.14,0.39]
+            }else{[0.07,0.22,0.065]}
+        });
+        let info=SourceInfo::default();
+        let wb=auto_wb_report_balanced(&image,&info);
+        assert!(wb.camera_balance_retained,
+            "Pink petals and green leaves falsely corrected as greys: {wb:?}");
+    }
+
+    #[test]
+    fn balanced_auto_changes_textured_underexposure_without_unrestricted_values() {
+        let img=Rgb32f::from_fn(320,240,|x,y|{
+            let v=0.040+((x*13+y*7)%29) as f32*0.002;
+            [v*1.035,v,v*0.975]
+        });
+        let report=smart_auto_tone_report_balanced(
+            &img,&SourceInfo::default(),&DevelopSettings::default());
+        assert_ne!(report.guard_reasons,
+            vec!["all_photographic_auto_guards_disabled_test_only"]);
+        let a=report.final_tone;
+        assert!(a.exposure>0.05 || a.shadows>3.0 || a.curve_darks>3.0,
+            "Moderately dark textured photo got no useful Auto edit: {a:?}");
+        assert!(a.exposure<=0.90);
+    }
+
+    #[test]
+    fn balanced_auto_preserves_bright_subject_against_dark_background() {
+        let img=Rgb32f::from_fn(320,240,|x,y|{
+            if (102..215).contains(&x)&&(55..190).contains(&y) {
+                [0.95,0.955,0.96]
+            }else{[0.04,0.08,0.025]}
+        });
+        let report=smart_auto_tone_report_balanced(
+            &img,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(report.final_tone.exposure<=0.18,
+            "Bright subject was blown out by global Auto: {:?}",report.final_tone);
+    }
+}
+
+#[cfg(test)]
 mod studio_v0616_nano_highlight_test {
     use super::*;
     #[test]
