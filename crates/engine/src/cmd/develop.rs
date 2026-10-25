@@ -584,20 +584,41 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("develop.wbPick", "White Balance Selector", [], Some("W"), "{x, y} normalized image coords of a neutral point", has_active, |s, p| {
             let (x, y) = (f64_req(p, "x", "develop.wbPick")?, f64_req(p, "y", "develop.wbPick")?);
             let id = active(s, "develop.wbPick")?;
-            let src = s.source_now(id, SourceLevel::Thumb).map_err(|e| bad("develop.wbPick", e))?;
+            // The user is explicitly selecting a known grey/white reference.
+            // A 512px thumb's 5x5 patch mixes edge colours unpredictably;
+            // inspect a larger, orientation-correct preview instead.
+            let src = s.source_now(id, SourceLevel::Preview)
+                .map_err(|e| bad("develop.wbPick", e))?;
             let info = s.source_info(id);
             let d = s.develop_of(id).unwrap_or_default();
-            // Sample a small neighbourhood in the oriented source.
             let o = src.oriented(d.orientation);
-            let (cx, cy) = ((x.clamp(0.0, 1.0) * o.width as f64) as isize, (y.clamp(0.0, 1.0) * o.height as f64) as isize);
-            let mut acc = [0.0f32; 3];
-            for dy in -2..=2 {
-                for dx in -2..=2 {
-                    let c = o.get_clamped(cx + dx, cy + dy);
-                    for i in 0..3 {
-                        acc[i] += c[i] / 25.0;
+            let (cx, cy) = ((x.clamp(0.0, 1.0) * o.width as f64) as isize,
+                            (y.clamp(0.0, 1.0) * o.height as f64) as isize);
+            let radius=((o.width.max(o.height)/220).clamp(3,18)) as isize;
+            let mut candidates=Vec::<(f32,[f32;3])>::new();
+            for dy in -radius..=radius {
+                for dx in -radius..=radius {
+                    let c=o.get_clamped(cx+dx,cy+dy);
+                    let y=lightcraft_color::luminance_2020(c);
+                    let clipped=c.iter().any(|v| !v.is_finite() || *v>=0.985);
+                    if (0.035..=0.87).contains(&y) && !clipped {
+                        candidates.push((y,c));
                     }
                 }
+            }
+            if candidates.len()<12 {
+                return Err(bad("develop.wbPick",
+                    "The selected reference is clipped or too dark; select an unclipped grey or white area"));
+            }
+            candidates.sort_by(|a,b|a.0.total_cmp(&b.0));
+            // Trim brightest/darkest samples; use robust per-channel means.
+            // This tolerates texture or minor edge mixing without averaging
+            // the surrounding sky, skin or foliage into the picked neutral.
+            let trim=candidates.len()/6;
+            let core=&candidates[trim..candidates.len()-trim];
+            let mut acc=[0.0f32;3];
+            for (_,c) in core {
+                for k in 0..3 {acc[k]+=c[k]/core.len() as f32;}
             }
             let patch = lightcraft_raster::Rgb32f::filled(4, 4, acc);
             // A user-selected neutral spot is a trusted calibration target:
@@ -609,7 +630,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 d.wb.tint = tint;
                 Ok(())
             })?;
-            Ok(json!({"temp": t, "tint": tint}))
+            Ok(json!({"temp": t, "tint": tint, "source":"selected_neutral_reference", "sampleCount":core.len()}))
         }),
         cmd!("develop.treatment", "Black & White", ["Photo"], Some("V"), "{bw?: bool} (toggles when omitted)", has_active, |s, p| {
             edit(s, "develop.treatment", "Treatment", |d| {
