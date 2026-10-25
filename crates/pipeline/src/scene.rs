@@ -341,6 +341,125 @@ fn analyse_nano_linear(img:&Rgb32f,lum:&[f32])->NanoSceneEvidence {
     report
 }
 
+/// Evidence-only 4/8/16 scene hierarchy. These observations never change
+/// Smart Auto, any edit, export pixels, WB or preview gain.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+pub struct HierarchyGridEvidence {
+    pub side:usize,
+    pub populated:usize,
+    pub dark_regions:usize,
+    pub bright_regions:usize,
+    pub recoverable_shadow_regions:usize,
+    pub near_black_fraction:f64,
+    pub bright_fraction:f64,
+    /// Suggests reviewing the photo before lifting darkness: not a scene classification.
+    pub dark_dominance_candidate:bool,
+    /// A small illuminant amid darkness should not dictate global exposure.
+    pub isolated_light_candidate:bool,
+    /// Shows areas of recoverable shadow texture separate from bright areas.
+    pub mixed_light_shadow_candidate:bool,
+    /// Connected lit region present, not proof of a recognised subject.
+    pub largest_lit_cluster:usize,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+pub struct HierarchySceneEvidence {
+    pub macro_4:HierarchyGridEvidence,
+    pub atmosphere_8:HierarchyGridEvidence,
+    pub structure_16:HierarchyGridEvidence,
+}
+#[derive(Clone, Copy, Debug, Default)]
+struct HierarchyCell {
+    count:u32,
+    black:u32,
+    bright:u32,
+    recoverable:u32,
+    texture:u32,
+}
+fn hierarchy_grid(img:&Rgb32f,lum:&[f32],side:usize)->HierarchyGridEvidence {
+    let mut result=HierarchyGridEvidence {side,..Default::default()};
+    if img.width<side*3 || img.height<side*3 || lum.len()!=img.width*img.height {
+        return result;
+    }
+    let mut cells=vec![HierarchyCell::default();side*side];
+    let (mut blacks,mut brights)=(0usize,0usize);
+    for y in 0..img.height {
+        for x in 0..img.width {
+            let i=y*img.width+x;
+            let value=lum[i];
+            let cell=&mut cells[(y*side/img.height)*side+(x*side/img.width)];
+            cell.count+=1;
+            if value<0.022 {cell.black+=1;blacks+=1;}
+            if value>0.56 {cell.bright+=1;brights+=1;}
+            if (0.035..0.26).contains(&value) {
+                cell.recoverable+=1;
+                if x>0 && y>0 {
+                    let horizontal=lum[i-1];
+                    let vertical=lum[i-img.width];
+                    if ((value-horizontal).abs()+(value-vertical).abs())/
+                        (0.04+value+horizontal+vertical)>0.07 {
+                        cell.texture+=1;
+                    }
+                }
+            }
+        }
+    }
+    let mut lit=vec![false;side*side];
+    for (i,cell) in cells.iter().enumerate() {
+        if cell.count<8 {continue;}
+        result.populated+=1;
+        let count=cell.count as f64;
+        if cell.black as f64/count>0.72 {result.dark_regions+=1;}
+        if cell.bright as f64/count>0.38 {
+            result.bright_regions+=1;
+            lit[i]=true;
+        }
+        if cell.recoverable as f64/count>0.20 &&
+            cell.texture>=2 &&
+            cell.texture as f64/count>0.018 {
+            result.recoverable_shadow_regions+=1;
+        }
+    }
+    if result.populated<side*side/3 {return result;}
+    result.near_black_fraction=blacks as f64/lum.len() as f64;
+    result.bright_fraction=brights as f64/lum.len() as f64;
+    result.dark_dominance_candidate=result.dark_regions>=(result.populated*6/10)
+        && result.near_black_fraction>0.35;
+    result.isolated_light_candidate=result.dark_dominance_candidate
+        && result.bright_regions>0 && result.bright_regions<=(side*side/12).max(1);
+    result.mixed_light_shadow_candidate=result.bright_regions>0
+        && result.recoverable_shadow_regions>=2
+        && result.dark_regions>0;
+    // Connectivity is photometric evidence, never semantic recognition.
+    let mut seen=vec![false;side*side];
+    let mut stack=Vec::with_capacity(side*side);
+    for first in 0..lit.len() {
+        if seen[first]||!lit[first] {continue;}
+        seen[first]=true;
+        stack.push(first);
+        let mut size=0;
+        while let Some(at)=stack.pop() {
+            size+=1;
+            let x=at%side;
+            let y=at/side;
+            for n in [if x>0 {Some(at-1)} else {None},
+                      if x+1<side {Some(at+1)} else {None},
+                      if y>0 {Some(at-side)} else {None},
+                      if y+1<side {Some(at+side)} else {None}].into_iter().flatten() {
+                if lit[n]&&!seen[n] {seen[n]=true;stack.push(n);}
+            }
+        }
+        result.largest_lit_cluster=result.largest_lit_cluster.max(size);
+    }
+    result
+}
+fn hierarchy_scene(img:&Rgb32f,lum:&[f32])->HierarchySceneEvidence {
+    HierarchySceneEvidence {
+        macro_4:hierarchy_grid(img,lum,4),
+        atmosphere_8:hierarchy_grid(img,lum,8),
+        structure_16:hierarchy_grid(img,lum,16),
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
 pub struct ZonalSceneEvidence {
     /// Row-major 3x3 zones (top-left to bottom-right).
@@ -348,6 +467,7 @@ pub struct ZonalSceneEvidence {
     pub fine:FineSceneEvidence,
     pub micro:MicroSceneEvidence,
     pub nano:NanoSceneEvidence,
+    pub hierarchy:HierarchySceneEvidence,
     pub luminous_zones:usize,
     pub shadow_detail_zones:usize,
     pub tonal_separation:f64,
@@ -466,6 +586,7 @@ pub fn analyse_linear(img:&Rgb32f)->ZonalSceneEvidence {
         zones,fine:analyse_fine_linear(img,&lum),
         micro:analyse_micro_linear(img,&lum),
         nano:analyse_nano_linear(img,&lum),
+        hierarchy:hierarchy_scene(img,&lum),
         luminous_zones,shadow_detail_zones,tonal_separation,
         bright_surround_dark_detail,dark_texture_with_bright_reference,
         proposed_shadow_recovery:strength.round(),
@@ -476,6 +597,45 @@ pub fn analyse_linear(img:&Rgb32f)->ZonalSceneEvidence {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hierarchy_reports_dark_scene_and_small_illuminant_without_editing() {
+        let image=Rgb32f::from_fn(512,384,|x,y|{
+            if (240..275).contains(&x) && (130..165).contains(&y) {
+                [0.95,0.67,0.19]
+            } else {[0.006,0.006,0.006]}
+        });
+        let z=analyse_linear(&image);
+        assert_eq!(z.hierarchy.macro_4.side,4);
+        assert_eq!(z.hierarchy.atmosphere_8.side,8);
+        assert_eq!(z.hierarchy.structure_16.side,16);
+        assert!(z.hierarchy.macro_4.dark_dominance_candidate);
+        assert!(z.hierarchy.atmosphere_8.dark_dominance_candidate);
+        assert!(!z.hierarchy.structure_16.mixed_light_shadow_candidate);
+    }
+
+    #[test]
+    fn hierarchy_detects_backlit_foreground_detail_as_evidence_only() {
+        let image=Rgb32f::from_fn(512,384,|x,y|{
+            if y<210 {[0.72,0.76,0.82]} else {
+                let v=0.05+((x*19+y*11)%31) as f32*0.003;
+                [v,v*1.05,v*0.92]
+            }
+        });
+        let z=analyse_linear(&image);
+        assert!(z.hierarchy.structure_16.bright_regions>0);
+        assert!(z.hierarchy.structure_16.recoverable_shadow_regions>0);
+        assert!(!z.hierarchy.macro_4.dark_dominance_candidate);
+    }
+
+    #[test]
+    fn hierarchy_avoids_false_dark_flag_on_balanced_scene() {
+        let image=Rgb32f::filled(512,384,[0.34,0.36,0.35]);
+        let z=analyse_linear(&image);
+        assert_eq!(z.hierarchy.macro_4.dark_regions,0);
+        assert!(!z.hierarchy.atmosphere_8.dark_dominance_candidate);
+        assert!(!z.hierarchy.structure_16.mixed_light_shadow_candidate);
+    }
+
     #[test]
     fn nano_grid_recognises_coherent_bright_moon_without_lifting_dark_sky() {
         let img=Rgb32f::from_fn(512,384,|x,y|{
