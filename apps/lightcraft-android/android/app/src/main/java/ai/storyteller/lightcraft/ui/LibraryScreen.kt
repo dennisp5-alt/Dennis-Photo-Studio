@@ -208,7 +208,7 @@ fun LibraryScreen(vm: AppViewModel, snackbar: SnackbarHostState, list: LazyListS
             val body: @Composable BoxScope.() -> Unit = {
                 val error = vm.loadError
                 when {
-                    error != null -> Centered("LightCraft couldn't start its engine:\n$error")
+                    error != null -> Centered("LumaWorks couldn't start its engine:\n$error")
                     vm.engine == null -> CircularProgressIndicator(Modifier.align(Alignment.Center), color = Lc.highlight, trackColor = Lc.divider)
                     device -> DeviceGallery(vm, deviceList, refused, onAllow = askMore, onSettings = openSettings, onBrowse = pickers.browse)
                     vm.photos.isEmpty() -> EmptyLibrary(vm, Modifier.align(Alignment.Center))
@@ -811,7 +811,7 @@ private fun EmptyLibrary(vm: AppViewModel, modifier: Modifier = Modifier) {
         vm.view.kind == "edited" -> "No edited photos yet." to "Photos you edit appear here."
         vm.view.kind == "unedited" -> "Every photo is edited." to "Photos without edits appear here."
         vm.view.kind == "recentlyAdded" -> "Nothing added lately." to "Photos added in the last 30 days appear here."
-        else -> "No photos in LightCraft yet." to "Add photos from your phone to start editing."
+        else -> "No photos in LumaWorks yet." to "Add photos from your phone to start editing."
     }
     // the reference's sizes: a picture about 100 dp wide, the title 80 dp under its middle, the hint 37 dp under that
     Column(modifier.padding(start = 32.dp, end = 32.dp, bottom = 9.4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
