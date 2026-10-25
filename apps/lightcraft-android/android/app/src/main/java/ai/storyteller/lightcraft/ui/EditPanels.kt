@@ -1050,7 +1050,7 @@ fun PresetsSheet(vm: AppViewModel, ed: EditorState, modifier: Modifier) {
     Column(modifier) {
         val open = group?.let { g -> groups[g]?.let { g to it } }
         if (open == null) {
-            Tabs(listOf("lightcraft" to "LightCraft", "yours" to "Yours"), ed.presetTab, centred = false, textSize = 15.5f) { ed.presetTab = it }
+            Tabs(listOf("lightcraft" to "LumaWorks", "yours" to "Yours"), ed.presetTab, centred = false, textSize = 15.5f) { ed.presetTab = it }
             Box(Modifier.fillMaxWidth().height(1.dp).background(Lc.panelButtonBorder))
             if (shown.isEmpty()) {
                 Text(
