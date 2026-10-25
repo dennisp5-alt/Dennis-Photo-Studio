@@ -223,9 +223,11 @@ public final class MainActivity extends Activity {
     private void handleIncomingImage(Intent intent) {
         if(intent==null)return;
         String action=intent.getAction();
-        if(!Intent.ACTION_EDIT.equals(action)&&!Intent.ACTION_SEND.equals(action))return;
+        if(!Intent.ACTION_EDIT.equals(action)&&!Intent.ACTION_SEND.equals(action)&&
+                !Intent.ACTION_VIEW.equals(action))return;
         if(intent.getType()!=null&&!intent.getType().startsWith("image/"))return;
-        Uri uri=Intent.ACTION_EDIT.equals(action)?intent.getData():
+        Uri uri=(Intent.ACTION_EDIT.equals(action)||Intent.ACTION_VIEW.equals(action))?
+                intent.getData():
                 (Build.VERSION.SDK_INT>=33 ?
                         intent.getParcelableExtra(Intent.EXTRA_STREAM,Uri.class) :
                         intent.getParcelableExtra(Intent.EXTRA_STREAM));
@@ -236,7 +238,7 @@ public final class MainActivity extends Activity {
             Toast.makeText(this,"Unsupported source image",Toast.LENGTH_LONG).show();
             return;
         }
-        editingFromAnotherApp=true;
+        editingFromAnotherApp=Intent.ACTION_EDIT.equals(action);
         photoSelection.clear();
         photoSelection.add(uri);
         activeAlbumName="";
@@ -1514,6 +1516,7 @@ public final class MainActivity extends Activity {
         if (albumBrowser == null)
             albumBrowser = new AlbumBrowser(this, (photos, chosenIndex, name) -> {
                 photoSelection.clear();
+                editingFromAnotherApp=false;
                 photoSelection.addAll(photos);
                 editsByPhoto.clear();
                 activeAlbumName = name;
@@ -1670,6 +1673,7 @@ public final class MainActivity extends Activity {
         }
         photoSelection.clear();
         photoSelection.addAll(selected);
+        editingFromAnotherApp=false;
         activeAlbumName = "";
         editsByPhoto.clear();
         photoIndex=0;
