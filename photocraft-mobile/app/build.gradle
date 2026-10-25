@@ -8,8 +8,8 @@ android {
         applicationId 'com.dennis.craftmobile'
         minSdk 29
         targetSdk 35
-        versionCode 22
-        versionName '0.6.16-album-browser'
+        versionCode 23
+        versionName '0.6.17-ui-polish'
     }
     buildTypes {
         release { minifyEnabled false }
