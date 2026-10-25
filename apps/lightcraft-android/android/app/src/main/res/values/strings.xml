@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Dennis Photo Studio v0.6</string>
-    <string name="import_into_lightcraft">Import into Dennis Photo Studio</string>
-    <string name="edit_in_lightcraft">Edit in Dennis Photo Studio</string>
+    <string name="app_name">LumaWorks</string>
+    <string name="import_into_lightcraft">Import into LumaWorks</string>
+    <string name="edit_in_lightcraft">Edit in LumaWorks</string>
 </resources>
