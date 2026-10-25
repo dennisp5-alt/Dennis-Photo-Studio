@@ -551,9 +551,39 @@ public final class MainActivity extends Activity {
                 StraightenEngine.Estimate estimate=StraightenEngine.analyse(original);
                 ui.post(()->{
                     if(serial!=generation.get()||original!=previewSource)return;
+                    if(estimate.requiresConfirmation) {
+                        // Do not silently rotate by 4–10 degrees merely
+                        // because rooflines, paths or perspective dominate.
+                        // The user explicitly approves potential frame loss.
+                        status.setText(String.format(Locale.US,
+                                "Straighten suggestion %+.1f° · review before applying",
+                                estimate.correction));
+                        new AlertDialog.Builder(this)
+                                .setTitle("Review suggested straightening")
+                                .setMessage(String.format(Locale.US,
+                                        "Suggested rotation: %+.1f°\n\n"+
+                                        "This photo contains lines that may be affected by perspective. "+
+                                        "Applying this angle will crop some edges. "+
+                                        "Keep the original if it already looks level. "+
+                                        "You can fine-tune the manual slider or Undo afterwards.",
+                                        estimate.correction))
+                                .setNegativeButton("Keep original",(dialog,which)->
+                                        status.setText("Straighten suggestion skipped"))
+                                .setPositiveButton("Apply suggested angle",(dialog,which)->{
+                                    if(serial!=generation.get()||original!=previewSource)return;
+                                    if(Math.abs(edit.straightenAngle-estimate.correction)>.04f) {
+                                        checkpoint();
+                                        edit.straightenAngle=estimate.correction;
+                                    }
+                                    render();drawControls();
+                                })
+                                .show();
+                        return;
+                    }
                     if(!estimate.reliable) {
-                        status.setText("Auto straighten · no trustworthy straight reference");
-                        Toast.makeText(this,"No clear level reference in photo · adjust manually",
+                        status.setText("Auto straighten · uncertain perspective or no trusted line");
+                        Toast.makeText(this,
+                                "Unable to determine camera tilt reliably · use manual slider",
                                 Toast.LENGTH_LONG).show();
                         return;
                     }
@@ -1355,7 +1385,7 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.11 LINE-AWARE STRAIGHTEN")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.12 STRAIGHTEN SAFETY")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
                         "tone/colour adjustments, four-level Auto + structural region and deep-black safeguards, Auto WB, " +

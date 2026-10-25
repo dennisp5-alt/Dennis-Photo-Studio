@@ -221,3 +221,18 @@ A user-provided street screenshot with rooftops and power lines previously retur
 All of v0.6.10's manual ±15° straighten, undo, photo swiping, crop-to-fill and full-resolution export remain. All v0.6.8 four-level photographic Auto, WB, noise/sharpen/detail formulas remain IDENTICAL. No AI, no ML Kit, no TFLite, no Restore Lab.
 
 Starting checkpoint: experiment/dennis-craft-mobile-v0.6.10-straighten-fix commit 356d51e1e4ec4b52cebfad1815684b063b3159a8.
+
+
+## v0.6.12 — Conservative Auto Straighten safety and perspective guard
+
+Based on preserved v0.6.11 line-aware straightening (commit 32a03aa887b7e9700e672285fb06787193f76e76). No photographic DSP, colour, Auto WB, 4-grid Auto or detail changes. No Restore Lab / AI dependency.
+
+User A/B screenshot demonstrates a confidently proposed -4.1° correction can tilt a complex-perspective outdoor scene incorrectly. Root failure: a scoreAxis peak divided by median (often near zero) can claim very high confidence based on one roof or converging lines, and v0.6.11 allowed one axis to override a contradictory other axis. Build instead:
+- Reject if simultaneously strong horizontal and vertical line estimates disagree >1.6°, instead of letting one override the other.
+- Analyze horizontal/vertical line evidence separately across left and right halves, and veto strong incompatible regional estimates.
+- Require multiple spatially distinct line groups and actual peak prominence versus the second significant angle, not the almost-zero histogram median.
+- Apply automatically only for high-consensus small corrections within ±1.5°. Large or uncertain but plausible rotations are proposed in a review dialog, NEVER silently applied. User can Keep Original or Apply Suggested Angle, then use manual slider and Undo.
+- Continue recognising well-supported already-level scenes and avoiding needless zoom/crop.
+- Preserve full-resolution export and black-corner-free fill, existing Crop ratio/Rotate 90°, manual slider and per-photo undo/session state.
+
+This is deliberately a safety-first version: some photographs without trustworthy straight structural references will still require manual adjustment. A wrong automated 4° tilt is worse than abstaining.
