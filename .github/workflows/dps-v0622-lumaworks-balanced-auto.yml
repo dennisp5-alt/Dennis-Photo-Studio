@@ -298,7 +298,7 @@ jobs:
           assert '<string name="app_name">LumaWorks Auto Lab</string>' in strings
           assert 'Text("LumaWorks"' in drawer
           assert '"About LumaWorks"' in drawer and pages
-          assert '"com.dennis.photostudio.assertive.v0612"' in gradle, 'Autolab identity stays isolated from LumaWorks production'
+          assert '"com.dennis.lumaworks.autolab.v0622"' in gradle, 'Autolab identity stays isolated from LumaWorks production'
           assert 'LIBRARY_FOLDER = "LightCraft Library"' in Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/engine/Engine.kt').read_text()
           print('LumaWorks presentation branding and original app identity: PASS')
           print('Source preservation and subject/sky refinement integration: PASS')
