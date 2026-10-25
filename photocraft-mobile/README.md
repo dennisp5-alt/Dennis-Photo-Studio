@@ -236,3 +236,22 @@ User A/B screenshot demonstrates a confidently proposed -4.1° correction can ti
 - Preserve full-resolution export and black-corner-free fill, existing Crop ratio/Rotate 90°, manual slider and per-photo undo/session state.
 
 This is deliberately a safety-first version: some photographs without trustworthy straight structural references will still require manual adjustment. A wrong automated 4° tilt is worse than abstaining.
+
+
+## v0.6.13 Guided Level — Perspective-safe manual reference
+
+Based on preserved working v0.6.12 (commit 66b08e2ddcab08af9d417302486c3758e5e6ffb4). No changes to the existing automatic line detector, photographic 4x4/8x8/16x16/64x64 Auto, WB, denoise, sharpening, detail, export quality, selection or swiping. No AI/Restore Lab models.
+
+**Why:** User comparison shows bathroom screenshot vertical shower-frame edges lean by around 4–5 degrees while window frame edges on the other side remain almost upright. The auto detector's safe abstention is geometrically sound: one angle cannot eliminate camera perspective on all edges. Weakening thresholds would reintroduce aggressive wrong corrections.
+
+New **Crop → GUIDED LEVEL** allows the user to choose a reference instead:
+1. Tap GUIDED LEVEL.
+2. Tap two fairly distant points along the *same* visible straight horizontal or vertical edge. A marker identifies the first point. The image must be displayed; touches in black letterbox margins are rejected.
+3. App computes a relative angle in image-view coordinates (FIT_CENTER uniform scaling preserves line angle). A horizontal edge uses the inverse slope; a vertical edge uses the inverse deviation from true vertical.
+4. Review dialog shows the additional and final angle, warns of perspective/cropping, and requires explicit consent before applying. Cancelling leaves the edit untouched.
+5. Guided mode temporarily consumes taps, not left/right image swipes. Leaving Crop or moving to another photo cancels guide mode. A second GUIDED LEVEL tap cancels it.
+6. Applies as one non-destructive straightenAngle value; old angles are not accumulated through repeated bitmap resampling. Existing undo/redo and full-res export processing are reused.
+
+Current Auto Straighten remains unchanged and conservative, including review dialogs for uncertain large corrections. The 0.1 degree manual slider remains.
+
+The user should test the bathroom by tapping two endpoints of one shower-frame or window-frame vertical (not one point on each). These choose different perspective references, so the best angle is partly a compositional preference. The feature is an experimental quality-of-life fallback until an optional full perspective transform is developed.

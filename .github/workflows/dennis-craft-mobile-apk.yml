@@ -18,6 +18,7 @@ on:
       - experiment/dennis-craft-mobile-v0.6.10-straighten-fix
       - experiment/dennis-craft-mobile-v0.6.11-line-aware-straighten
       - experiment/dennis-craft-mobile-v0.6.12-straighten-safety
+      - experiment/dennis-craft-mobile-v0.6.13-guided-straighten
     paths:
       - 'photocraft-mobile/**'
       - '.github/workflows/dennis-craft-mobile-apk.yml'
@@ -39,7 +40,7 @@ jobs:
         run: gradle -p photocraft-mobile --no-daemon assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: dennis-craft-mobile-v0.6.12-straighten-safety-debug-apk
+          name: dennis-craft-mobile-v0.6.13-guided-level-debug-apk
           path: photocraft-mobile/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
