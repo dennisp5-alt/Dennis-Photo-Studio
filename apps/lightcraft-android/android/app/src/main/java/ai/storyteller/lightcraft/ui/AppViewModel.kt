@@ -2988,7 +2988,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val vibrance=t.optDouble("vibrance",0.0).toInt()
                 val darks=t.optDouble("curve_darks",0.0).toInt()
                 val wb=result.optJSONObject("whiteBalance")
-                val wbStatus=when(wb?.optString("decision")) {
+                val wbStatus=if(result.optBoolean("manualWbPreserved",false)) {
+                    "Your manually chosen white balance remains unchanged."
+                } else when(wb?.optString("decision")) {
                     "warm_light_preserved" -> "Warm ambient light preserved; Auto WB unchanged."
                     "corrected" -> "White balance: evidence-supported correction proposed."
                     "already_neutral" -> "White balance: unchanged; no sufficiently reliable improvement."
@@ -3055,8 +3057,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     ". WB decision " + (wb?.optString("reason","unknown") ?: "manual") +
                     ". Source " + (if(evidence?.optBoolean("source_raw",false)==true) "RAW" else "rendered") +
                     "."
-                val modelExplanation="Experimental Assertive Auto: lighter estimation gates and relaxed clipping/detail vetoes. Compare carefully; it may over-adjust some photos. $wbStatus " +
-                    "Review Original and Suggested before applying."
+                val modelExplanation="Protected Smart Auto uses the original camera-colour, highlight and low-light safeguards. $wbStatus " +
+                    "Compare Original and Suggested before applying."
                 ed.autoPreview=AutoPreviewData(
                     original=original,
                     candidate=candidate,
@@ -3120,7 +3122,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val tone = result.optJSONObject("tone")
                 val wb = result.optJSONObject("whiteBalance")
                 val decision = wb?.optString("decision") ?: "manual"
-                ed.wbAutoStatus = when (decision) {
+                ed.wbAutoStatus = if (result.optBoolean("manualWbPreserved",false)) {
+                    "Your manually set white balance was preserved. Choose WB → Auto to request a new correction."
+                } else when (decision) {
                     "corrected" -> "Smart Auto also adjusted white balance using spatially consistent neutral areas."
                     "already_neutral" -> "White balance is already near neutral; no change needed."
                     "ambiguous" -> "White balance was left unchanged: neutral-looking regions disagree."
