@@ -75,6 +75,7 @@ public final class MainActivity extends Activity {
         float luminanceNR, colorNR, sharpen, clarity, texture, dehaze;
         // Colour gains estimated only when spatial neutral evidence is convincing.
         float wbRed = 1f, wbGreen = 1f, wbBlue = 1f, wbConfidence;
+        boolean wbPicked;
         Edit copy() {
             Edit d = new Edit();
             d.exposure = exposure; d.contrast = contrast; d.highlights = highlights;
@@ -94,6 +95,7 @@ public final class MainActivity extends Activity {
             d.clarity = clarity; d.texture = texture; d.dehaze = dehaze;
             d.wbRed = wbRed; d.wbGreen = wbGreen; d.wbBlue = wbBlue;
             d.wbConfidence = wbConfidence;
+            d.wbPicked=wbPicked;
             return d;
         }
     }
@@ -119,6 +121,7 @@ public final class MainActivity extends Activity {
     private ZoomPhotoView photo;
     private View guideOverlay;
     private boolean guideMode;
+    private boolean neutralPickMode;
     private boolean gridVisible;
     private int cropSection=1; // 0 Crop, 1 Straighten, 2 Transform
     private int guideStep;
@@ -227,8 +230,8 @@ public final class MainActivity extends Activity {
 
         canvas = new FrameLayout(this);
         root.addView(canvas, new LinearLayout.LayoutParams(-1, 0, 1));
-        photo = new ZoomPhotoView(this, this::changePhoto, this::guidedTap,
-                () -> guideMode, () -> {
+        photo = new ZoomPhotoView(this, this::changePhoto, this::onEditorPhotoTap,
+                () -> guideMode || neutralPickMode, () -> {
                     if (guideOverlay != null) guideOverlay.invalidate();
                 });
         canvas.addView(photo, new FrameLayout.LayoutParams(-1, -1));
@@ -330,6 +333,7 @@ public final class MainActivity extends Activity {
             gridVisible=false;
             if(guideOverlay!=null)guideOverlay.invalidate();
         }
+        if(newMode!=Mode.ADJUST)neutralPickMode=false;
         mode = newMode;
         drawTabs();
         drawControls();
@@ -806,10 +810,69 @@ public final class MainActivity extends Activity {
         controls.addView(anglePanel,new LinearLayout.LayoutParams(-1,dp(79)));
     }
 
+
+    private void toggleNeutralPick() {
+        if(previewSource==null) {
+            Toast.makeText(this,"Open a photograph first",Toast.LENGTH_SHORT).show();return;
+        }
+        if(neutralPickMode) {
+            neutralPickMode=false;
+            status.setText("Neutral WB cancelled");
+        } else {
+            endGuide();
+            photo.resetZoom();
+            neutralPickMode=true;
+            status.setText("WB: tap a known grey or white object");
+            Toast.makeText(this,"Tap a grey or white surface away from glare.",
+                    Toast.LENGTH_LONG).show();
+        }
+        drawControls();
+    }
+    private void onEditorPhotoTap(float x,float y) {
+        if(neutralPickMode)pickNeutralPoint(x,y);
+        else if(guideMode)guidedTap(x,y);
+    }
+    private void pickNeutralPoint(float x,float y) {
+        if(!neutralPickMode||previewSource==null)return;
+        try {
+            android.graphics.drawable.Drawable drawable=photo.getDrawable();
+            if(!(drawable instanceof android.graphics.drawable.BitmapDrawable))
+                throw new IllegalArgumentException("Photo not ready");
+            Bitmap shown=((android.graphics.drawable.BitmapDrawable)drawable).getBitmap();
+            Matrix inverse=new Matrix();
+            if(!photo.getImageMatrix().invert(inverse))
+                throw new IllegalArgumentException("Reference point not available");
+            float[] p={x,y};
+            inverse.mapPoints(p);
+            AutoWhiteBalance.Estimate wb=NeutralPointWB.measure(shown,p[0],p[1]);
+            neutralPickMode=false;
+            if(wb.confidence==0f) {
+                status.setText("Reference already appears neutral");
+                Toast.makeText(this,"Reference already neutral; WB unchanged",
+                        Toast.LENGTH_LONG).show();
+                drawControls();
+                return;
+            }
+            checkpoint();
+            edit.wbRed=clamp(edit.wbRed*wb.red,.78f,1.24f);
+            edit.wbGreen=clamp(edit.wbGreen*wb.green,.92f,1.08f);
+            edit.wbBlue=clamp(edit.wbBlue*wb.blue,.78f,1.24f);
+            edit.wbConfidence=1f;
+            edit.wbPicked=true;
+            status.setText("WB adjusted using selected neutral");
+            render();drawControls();
+            Toast.makeText(this,"Neutral WB applied — use Undo to compare.",
+                    Toast.LENGTH_LONG).show();
+        } catch(IllegalArgumentException ex) {
+            Toast.makeText(this,ex.getMessage(),Toast.LENGTH_LONG).show();
+        }
+    }
+
     /** Two user-picked points provide a reference even under perspective. */
     private void startGuide() {
         if(previewSource==null){openImage();return;}
         if(guideMode){endGuide();status.setText("Guided Level cancelled");return;}
+        neutralPickMode=false;
         // Guided reference points always use the fit-to-screen photo coordinates.
         photo.resetZoom();
         guideMode=true;
@@ -981,6 +1044,19 @@ public final class MainActivity extends Activity {
         param.leftMargin=dp(9);
         bar.addView(auto,param);
         auto.setOnClickListener(v -> autoForCurrentGroup());
+        if(adjustGroup==0) {
+            TextView pick=label(neutralPickMode?"CANCEL WB PICK":"◎ PICK NEUTRAL WB",11,Color.WHITE);
+            pick.setTypeface(android.graphics.Typeface.create("sans-serif-medium",0));
+            pick.setPadding(dp(13),0,dp(13),0);
+            GradientDrawable shape=background(neutralPickMode ?
+                    Color.rgb(32,97,147):Color.rgb(35,57,80),9);
+            shape.setStroke(dp(1),Color.rgb(69,115,158));
+            pick.setBackground(shape);
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-2,dp(33));
+            lp.leftMargin=dp(9);
+            bar.addView(pick,lp);
+            pick.setOnClickListener(v->toggleNeutralPick());
+        }
         controls.addView(scroller,new LinearLayout.LayoutParams(-1,dp(42)));
     }
     private void detailTab(LinearLayout bar,String title,int group) {
@@ -1190,6 +1266,7 @@ public final class MainActivity extends Activity {
                     edit.wbGreen = whiteBalance.green;
                     edit.wbBlue = whiteBalance.blue;
                     edit.wbConfidence = whiteBalance.confidence;
+                    edit.wbPicked=false;
                     edit.autoZones = scene.zones;
                     edit.autoLowKey = scene.protectedLowKey;
                     edit.autoAtmosphere = scene.atmosphereDescription;
@@ -1392,6 +1469,7 @@ public final class MainActivity extends Activity {
     private void changePhoto(int direction) {
         if(photoSelection.size()<2 || photoIndex<0)return;
         endGuide();
+        neutralPickMode=false;
         int next=photoIndex+direction;
         if(next<0 || next>=photoSelection.size()) {
             Toast.makeText(this,next<0?"First photo":(activeAlbumName.isEmpty() ? "Last selected photo" : "Last photo in album"),
@@ -1416,6 +1494,7 @@ public final class MainActivity extends Activity {
 
     private void loadChosenPhoto(Uri uri) {
         endGuide();
+        neutralPickMode=false;
         int serial=generation.incrementAndGet();
         if(pendingSliderRender!=null) {
             ui.removeCallbacks(pendingSliderRender);
@@ -1671,11 +1750,12 @@ public final class MainActivity extends Activity {
                         float colourGate=(1f-.35f*SpatialAuto64.smoothstep(
                                 .20f,.65f,chroma)) *
                                 (1f-.78f*SpatialAuto64.smoothstep(.84f,.99f,maxChannel));
-                        float dr = baseR*(e.wbRed-1f)*strength*colourGate +
+                        float wbStrength=e.wbPicked ? 1f : strength;
+                        float dr = baseR*(e.wbRed-1f)*wbStrength*colourGate +
                                 (warmth+tint)*colourGate;
-                        float dg = baseG*(e.wbGreen-1f)*strength*colourGate -
+                        float dg = baseG*(e.wbGreen-1f)*wbStrength*colourGate -
                                 tint*colourGate;
-                        float db = baseB*(e.wbBlue-1f)*strength*colourGate +
+                        float db = baseB*(e.wbBlue-1f)*wbStrength*colourGate +
                                 (-warmth+tint)*colourGate;
                         float deltaLum = .2126f*dr+.7152f*dg+.0722f*db;
                         baseR += dr-deltaLum;
@@ -1860,9 +1940,9 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Photo Studio · v0.6.18")
+        new AlertDialog.Builder(this).setTitle("Photo Studio · v0.6.19")
                 .setMessage("Offline native Android editing prototype.\n\n" +
-                        "Working: pinch zoom, double-tap inspection and pan, whole-album browsing, modern Android photo picker, JPEG/HEIC, styled looks, " +
+                        "Working: neutral-point WB picker, pinch zoom, double-tap inspection and pan, whole-album browsing, modern Android photo picker, JPEG/HEIC, styled looks, " +
                         "tone/colour adjustments, four-level Auto + structural region and deep-black safeguards, Auto WB, " +
                         "luminance/chroma NR, sharpening, " +
                         "clarity, texture, contrast dehaze, centre crop, rotate 90°, " +
