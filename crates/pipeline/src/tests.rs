@@ -20,6 +20,21 @@ fn default_render_is_sane() {
     assert!(r.histogram.total > 0);
 }
 
+
+#[test]
+fn neutral_render_does_not_dark_shift_untouched_midtone_jpeg_like_pixels() {
+    // Display sRGB 128 is about 0.216 in linear light. A default
+    // non-RAW develop with no edits should not turn this into deep shadow.
+    for (level, expected) in [(0.035f32,52.0f32),(0.216f32,128.0f32),(0.604f32,204.0f32)] {
+        let source=Rgb32f::filled(96,72,[level;3]);
+        let result=render(&source,&SourceInfo::default(),&DevelopSettings::default(),
+                          &RenderRequest::fit(96,72));
+        let observed=mean_luma(&result.image);
+        assert!((observed-expected).abs()<28.0,
+                "Untouched source {level} should display near sRGB {expected}, got {observed}");
+    }
+}
+
 #[test]
 fn histogram_is_derived_from_the_current_rendered_pixels() {
     use lightcraft_raster::Histogram;
