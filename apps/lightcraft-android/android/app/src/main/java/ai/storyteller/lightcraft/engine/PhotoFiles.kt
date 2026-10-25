@@ -59,13 +59,13 @@ object PhotoFiles {
         return file
     }
 
-    /** Save an export into Pictures/Dennis Photo Studio (the system picks another name if it is taken). */
+    /** Save an export into Pictures/LumaWorks (the system picks another name if it is taken). */
     fun saveToPictures(context: Context, file: ExportedFile): Uri {
         val resolver = context.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, file.fileName)
             put(MediaStore.Images.Media.MIME_TYPE, file.mimeType)
-            put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/Dennis Photo Studio")
+            put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/LumaWorks")
             put(MediaStore.Images.Media.IS_PENDING, 1)
         }
         val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
