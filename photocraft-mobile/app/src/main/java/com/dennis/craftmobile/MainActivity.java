@@ -168,7 +168,7 @@ public final class MainActivity extends Activity {
                     if(editingFromAnotherApp) {
                         Intent data=new Intent().setDataAndType(saved,"image/jpeg")
                                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                        setResult(RESULT_OK,data);
+                        MainActivity.this.setResult(RESULT_OK,data);
                     }
                 }
                 Toast.makeText(MainActivity.this,"JPEG saved in Gallery",Toast.LENGTH_LONG).show();
