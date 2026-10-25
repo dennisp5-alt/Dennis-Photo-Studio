@@ -90,7 +90,7 @@ fun ManagePresetsPage(vm: AppViewModel, onDismiss: () -> Unit) {
             }
             if (list == null) {
                 Text("Preset Groups", color = Lc.panelTextDim, fontFamily = Inter, fontSize = 14.sp, modifier = Modifier.padding(start = 24.dp, top = 20.dp, bottom = 8.dp))
-                listOf(true to ("LightCraft" to builtin), false to ("Yours" to yours)).forEach { (key, named) ->
+                listOf(true to ("LumaWorks" to builtin), false to ("Yours" to yours)).forEach { (key, named) ->
                     val (name, groups) = named
                     Row(
                         Modifier.fillMaxWidth().height(54.dp).clickable(enabled = groups.isNotEmpty(), role = Role.Button) { open = key }.padding(start = 24.dp, end = 12.dp),
