@@ -323,12 +323,14 @@ pub fn specs() -> Vec<CommandSpec> {
             let current=s.develop_of(id).unwrap_or_default();
             // Use the production render-quality guard, NOT the old test-only
             // all-guards-off experiment. These settings are actually applied.
-            let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report_balanced(&src,&info,&current);
+            let tone_audit=lightcraft_pipeline::auto::photo_studio_auto_tone_report(&src,&info,&current);
             let tone=tone_audit.final_tone;
             // Respect a consciously chosen neutral reference or manual WB.
             // Dedicated WB Auto remains available to replace it explicitly.
             let manual_wb=current.wb.mode==WbMode::Custom;
-            let wb=(!manual_wb).then(||lightcraft_pipeline::auto::auto_wb_report_balanced(&src,&info));
+            let wb=(!manual_wb).then(||lightcraft_pipeline::auto::neutral_reference_wb_report(&src,&info));
+            let detail=lightcraft_pipeline::auto::auto_detail(&src,&info);
+            let effects=lightcraft_pipeline::auto::auto_effects(&src,&info);
             let mut proposal=(*current).clone();
             proposal.light.exposure=tone.exposure;
             proposal.light.contrast=tone.contrast;
@@ -347,6 +349,18 @@ pub fn specs() -> Vec<CommandSpec> {
                 proposal.wb.temp=report.temp;
                 proposal.wb.tint=report.tint;
             }
+            proposal.detail.nr_luminance=detail.nr_luminance;
+            proposal.detail.nr_color=detail.nr_color;
+            proposal.detail.nr_detail=detail.nr_detail;
+            proposal.detail.nr_color_detail=detail.nr_color_detail;
+            proposal.detail.nr_color_smoothness=detail.nr_color_smoothness;
+            proposal.detail.sharpen_amount=detail.sharpen_amount;
+            proposal.detail.sharpen_radius=detail.sharpen_radius;
+            proposal.detail.sharpen_detail=detail.sharpen_detail;
+            proposal.detail.sharpen_masking=detail.sharpen_masking;
+            proposal.effects.texture=effects.texture;
+            proposal.effects.clarity=effects.clarity;
+            proposal.effects.dehaze=effects.dehaze;
             // Compare complete current/proposed settings; zero recommendations
             // can still reset nonzero manual Light/Colour controls.
             let no_change=proposal==*current;
@@ -357,6 +371,9 @@ pub fn specs() -> Vec<CommandSpec> {
                 "tone":tone,
                 "toneAudit":tone_audit,
                 "whiteBalance":wb,
+                "detail":detail,
+                "effects":effects,
+                "autoSystem":"photo_studio_reference_v1",
                 "manualWbPreserved":manual_wb,
                 "noChangeRecommended":no_change,
                 "model":model
@@ -398,9 +415,13 @@ pub fn specs() -> Vec<CommandSpec> {
             // Smart Auto respects manual Custom WB; other modes use the same
             // bounded spatial-neutral report as the one-tap Auto command.
             allowed.wb=proposed.wb.clone();
+            allowed.detail=proposed.detail.clone();
+            allowed.effects.texture=proposed.effects.texture;
+            allowed.effects.clarity=proposed.effects.clarity;
+            allowed.effects.dehaze=proposed.effects.dehaze;
             if allowed!=proposed {
                 return Err(bad("develop.autoApplyPreview",
-                    "Only Auto tone/curve/colour/WB values can be applied from preview"));
+                    "Only Auto tone/colour/WB/detail/effects values can be applied from preview"));
             }
             edit(s,"develop.autoApplyPreview","Smart Auto",|d|{
                 *d=proposed.clone();
@@ -417,11 +438,13 @@ pub fn specs() -> Vec<CommandSpec> {
             // Normal one-tap Auto must apply the same protected decision as
             // the read-only preview. Do not route experimental unrestricted
             // tone or WB candidates to production commands.
-            let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report_balanced(&src,&info,&d);
+            let tone_audit=lightcraft_pipeline::auto::photo_studio_auto_tone_report(&src,&info,&d);
             let a=tone_audit.final_tone;
             let manual_wb=d.wb.mode==WbMode::Custom;
-            let wb=(!manual_wb).then(||lightcraft_pipeline::auto::auto_wb_report_balanced(&src,&info));
-            edit(s,"develop.auto","Smart Auto",|d|{
+            let wb=(!manual_wb).then(||lightcraft_pipeline::auto::neutral_reference_wb_report(&src,&info));
+            let detail=lightcraft_pipeline::auto::auto_detail(&src,&info);
+            let effects=lightcraft_pipeline::auto::auto_effects(&src,&info);
+            edit(s,"develop.auto","Photo Studio Auto",|d|{
                 d.light.exposure=a.exposure;
                 d.light.contrast=a.contrast;
                 d.light.highlights=a.highlights;
@@ -443,9 +466,23 @@ pub fn specs() -> Vec<CommandSpec> {
                     d.wb.temp=report.temp;
                     d.wb.tint=report.tint;
                 }
+                d.detail.nr_luminance=detail.nr_luminance;
+                d.detail.nr_color=detail.nr_color;
+                d.detail.nr_detail=detail.nr_detail;
+                d.detail.nr_color_detail=detail.nr_color_detail;
+                d.detail.nr_color_smoothness=detail.nr_color_smoothness;
+                d.detail.sharpen_amount=detail.sharpen_amount;
+                d.detail.sharpen_radius=detail.sharpen_radius;
+                d.detail.sharpen_detail=detail.sharpen_detail;
+                d.detail.sharpen_masking=detail.sharpen_masking;
+                d.effects.texture=effects.texture;
+                d.effects.clarity=effects.clarity;
+                d.effects.dehaze=effects.dehaze;
                 Ok(())
             })?;
-            Ok(json!({"tone":a,"toneAudit":tone_audit,"whiteBalance":wb,"manualWbPreserved":manual_wb}))
+            Ok(json!({"tone":a,"toneAudit":tone_audit,"whiteBalance":wb,
+                "detail":detail,"effects":effects,"autoSystem":"photo_studio_reference_v1",
+                "manualWbPreserved":manual_wb}))
         }),
         cmd!("develop.autoDetail", "Auto Detail & Noise", ["Photo"], None, "{}", has_active, |s, _p| {
             let id=active(s,"develop.autoDetail")?;
@@ -511,7 +548,7 @@ pub fn specs() -> Vec<CommandSpec> {
                         // Preserve camera WB if the reference is ambiguous.
                         let src = s.source_now(id, SourceLevel::Preview)
                             .map_err(|e| bad("develop.wb", e))?;
-                        let result = lightcraft_pipeline::auto::auto_wb_report_balanced(&src, &info);
+                        let result = lightcraft_pipeline::auto::neutral_reference_wb_report(&src, &info);
                         auto_report = Some(result);
                         (result.temp, result.tint)
                     }
