@@ -59,6 +59,7 @@ public final class MainActivity extends Activity {
         float exposure, contrast, highlights, shadows, saturation, warmth, tint;
         float ratio = 0f;
         int rotation = 0;
+        float straightenAngle = 0f;
         String look = "Original";
         float[] autoZones;  // Immutable zone map measured on original preview.
         float autoStrength = 100f;
@@ -74,7 +75,8 @@ public final class MainActivity extends Activity {
             Edit d = new Edit();
             d.exposure = exposure; d.contrast = contrast; d.highlights = highlights;
             d.shadows = shadows; d.saturation = saturation; d.warmth = warmth;
-            d.tint = tint; d.ratio = ratio; d.rotation = rotation; d.look = look;
+            d.tint = tint; d.ratio = ratio; d.rotation = rotation;
+            d.straightenAngle = straightenAngle; d.look = look;
             d.autoZones = autoZones; d.autoStrength = autoStrength;
             d.autoLowKey = autoLowKey;
             d.autoAtmosphere = autoAtmosphere;
@@ -454,21 +456,120 @@ public final class MainActivity extends Activity {
             controls.addView(scroll, new LinearLayout.LayoutParams(-1, dp(43)));
             showSlider();
         } else {
-            panelTitle("CROP & ROTATE", "Non-destructive preview");
-            addHorizontalChoices(new String[]{"Original", "1:1", "4:5", "16:9", "Rotate 90°"},
-                    choice -> {
-                        if (previewSource == null) { openImage(); return; }
-                        checkpoint();
-                        switch (choice) {
-                            case "1:1": edit.ratio = 1; break;
-                            case "4:5": edit.ratio = .8f; break;
-                            case "16:9": edit.ratio = 16f/9f; break;
-                            case "Rotate 90°": edit.rotation = (edit.rotation + 90) % 360; break;
-                            default: edit.ratio = 0;
-                        }
-                        render();
-                    });
+            panelTitle("CROP & STRAIGHTEN", "Auto or manual · no black corners");
+            drawCropAndStraighten();
         }
+    }
+
+    private void drawCropAndStraighten() {
+        HorizontalScrollView scroll=new HorizontalScrollView(this);
+        scroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout buttons=new LinearLayout(this);
+        buttons.setGravity(Gravity.CENTER_VERTICAL);
+        buttons.setPadding(dp(10),0,dp(10),0);
+        String[] choices={"AUTO STRAIGHTEN","Reset Angle","Original Ratio",
+                "1:1","4:5","16:9","Rotate 90°"};
+        for(String choice:choices) {
+            TextView button=label(choice,11,Color.WHITE);
+            button.setPadding(dp(12),dp(8),dp(12),dp(8));
+            boolean prominent="AUTO STRAIGHTEN".equals(choice);
+            button.setBackground(background(prominent?ACCENT:
+                    Color.rgb(30,49,69),8));
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-2,dp(36));
+            lp.setMargins(dp(3),0,dp(3),0);
+            buttons.addView(button,lp);
+            button.setOnClickListener(v->{
+                if(previewSource==null){openImage();return;}
+                if("AUTO STRAIGHTEN".equals(choice)){autoStraighten();return;}
+                if("Reset Angle".equals(choice)) {
+                    if(Math.abs(edit.straightenAngle)<.015f)return;
+                    checkpoint();edit.straightenAngle=0f;
+                } else {
+                    checkpoint();
+                    switch(choice) {
+                        case "1:1":edit.ratio=1f;break;
+                        case "4:5":edit.ratio=.8f;break;
+                        case "16:9":edit.ratio=16f/9f;break;
+                        case "Rotate 90°":edit.rotation=(edit.rotation+90)%360;break;
+                        default:edit.ratio=0f;break;
+                    }
+                }
+                render();drawControls();
+            });
+        }
+        scroll.addView(buttons);
+        controls.addView(scroll,new LinearLayout.LayoutParams(-1,dp(47)));
+
+        LinearLayout anglePanel=new LinearLayout(this);
+        anglePanel.setOrientation(LinearLayout.VERTICAL);
+        anglePanel.setPadding(dp(15),0,dp(15),0);
+        TextView value=label("",12,Color.WHITE);
+        value.setGravity(Gravity.CENTER_VERTICAL|Gravity.LEFT);
+        float originalAngle=edit.straightenAngle;
+        value.setText(String.format(Locale.US,"Manual straighten: %+.1f°",originalAngle));
+        anglePanel.addView(value,new LinearLayout.LayoutParams(-1,dp(27)));
+        SeekBar slider=new SeekBar(this);
+        slider.setMax(300);
+        slider.setProgress(Math.round(originalAngle*10f)+150);
+        Edit starting=edit.copy();
+        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+            @Override public void onProgressChanged(SeekBar bar,int progress,boolean fromUser) {
+                if(!fromUser||previewSource==null)return;
+                float angle=(progress-150)/10f;
+                edit.straightenAngle=angle;
+                value.setText(String.format(Locale.US,"Manual straighten: %+.1f°",angle));
+                scheduleSliderPreview();
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) {}
+            @Override public void onStopTrackingTouch(SeekBar bar) {
+                if(pendingSliderRender!=null) {
+                    ui.removeCallbacks(pendingSliderRender);
+                    pendingSliderRender=null;
+                }
+                if(previewSource!=null) {
+                    if(Math.abs(edit.straightenAngle-originalAngle)>.04f) {
+                        undo.addLast(starting);
+                        if(undo.size()>35)undo.removeFirst();
+                        redo.clear();
+                    }
+                    render();
+                }
+            }
+        });
+        anglePanel.addView(slider,new LinearLayout.LayoutParams(-1,dp(52)));
+        controls.addView(anglePanel,new LinearLayout.LayoutParams(-1,dp(79)));
+    }
+
+    private void autoStraighten() {
+        final Bitmap original=previewSource;
+        if(original==null){openImage();return;}
+        int serial=generation.incrementAndGet();
+        previewWork.getQueue().clear();
+        status.setText("Detecting dominant horizontal and vertical lines…");
+        previewWork.execute(()->{
+            try {
+                StraightenEngine.Estimate estimate=StraightenEngine.analyse(original);
+                ui.post(()->{
+                    if(serial!=generation.get()||original!=previewSource)return;
+                    if(!estimate.reliable) {
+                        status.setText("Auto straighten · no reliable level found");
+                        Toast.makeText(this,"No confident level detected · use the manual slider",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    if(Math.abs(edit.straightenAngle-estimate.correction)>.04f) {
+                        checkpoint();
+                        edit.straightenAngle=estimate.correction;
+                    }
+                    render();drawControls();
+                    Toast.makeText(this,String.format(Locale.US,
+                            "Auto straightened %+.1f° · fine-tune manually",
+                            estimate.correction),Toast.LENGTH_LONG).show();
+                });
+            } catch(RuntimeException | OutOfMemoryError ex) {
+                showError("Auto straighten failed: "+ex.getMessage());
+            }
+        });
     }
 
     private void addDetailGroupStrip() {
@@ -639,7 +740,8 @@ public final class MainActivity extends Activity {
         if (previewSource == null) { openImage(); return; }
         checkpoint();
         Edit v = new Edit();
-        v.rotation = edit.rotation; v.ratio = edit.ratio; v.look = name;
+        v.rotation = edit.rotation; v.ratio = edit.ratio;
+        v.straightenAngle = edit.straightenAngle; v.look = name;
         switch (name) {
             case "Natural": v.contrast = 9; v.shadows = 10; v.saturation = 5; break;
             case "Warm": v.contrast = 7; v.warmth = 24; v.saturation = 9; break;
@@ -1104,6 +1206,16 @@ public final class MainActivity extends Activity {
             rotated = Bitmap.createBitmap(output, 0, 0, w, h, m, true);
             if (rotated != output) output.recycle();
         }
+        if (Math.abs(e.straightenAngle)>=.015f) {
+            if(cancelled.getAsBoolean()) {
+                rotated.recycle();
+                throw new CancellationException();
+            }
+            Bitmap straightened=StraightenEngine.rotateAndFill(
+                    rotated,e.straightenAngle);
+            if(straightened!=rotated)rotated.recycle();
+            rotated=straightened;
+        }
         if (e.ratio <= 0) {
             try {
                 DetailEngine.applyInPlace(rotated, detailSettings(e), cancelled);
@@ -1129,7 +1241,8 @@ public final class MainActivity extends Activity {
     }
 
     private static boolean noEdits(Edit e) {
-        return e.rotation == 0 && e.ratio == 0f && e.autoZones == null &&
+        return e.rotation == 0 && Math.abs(e.straightenAngle)<.015f &&
+                e.ratio == 0f && e.autoZones == null &&
                 e.exposure == 0f && e.contrast == 0f && e.highlights == 0f &&
                 e.shadows == 0f && e.saturation == 0f && e.warmth == 0f &&
                 e.tint == 0f && e.wbConfidence == 0f &&
@@ -1233,12 +1346,14 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.8 SCENE INTELLIGENCE")
+        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.9 AUTO STRAIGHTEN")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: modern Android photo picker, JPEG/HEIC, styled looks, " +
                         "tone/colour adjustments, four-level Auto + structural region and deep-black safeguards, Auto WB, " +
                         "luminance/chroma NR, sharpening, " +
-                        "clarity, texture, contrast dehaze, centre crop, rotate, " +
+                        "clarity, texture, contrast dehaze, centre crop, rotate 90°, " +
+                        "conservative Auto Straighten and manual +/-15° angle, " +
+                        "corner-safe fill crop, " +
                         "undo/redo, press-and-hold before view, export and share.\n\n" +
                         "Auto WB uses cautious neutral samples, avoids colourful subjects and skips uncertain scenes. Auto analyses noise and detail from 64×64 local probes. Each detail group also has " +
                         "its own Auto button and six manual sliders. Dehaze is a contrast-based " +

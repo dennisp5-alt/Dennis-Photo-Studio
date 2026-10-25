@@ -188,3 +188,15 @@ The 128×128 and 256×256 experiments are intentionally excluded.
 - Status line identifies structural / near-black protection when detected. Since no semantic model is used, it does NOT claim to recognise people's identity or skin tone.
 - Prototype for A/B checking and benchmarking against v0.6.5, not automatic promotion to production. New protections can be tuned or removed independently.
 
+
+## v0.6.9 — Back to v0.6.8 with Auto/Manual Straighten
+
+Source: checkpoint/dennis-craft-v0.6.8-before-restore-lab, commit 1af8d3dd5f22c8177c6224b686bff3d75260164a.
+
+This project intentionally excludes ALL Restore Lab/AI models, TensorFlow Lite and face detection features, plus the 128x128/256x256 analysis experiments. Four-grid Auto and manual colour/detail work exactly as v0.6.8.
+
+Crop tab features: Auto Straighten, Reset Angle, Manual Straighten slider from -15 degrees to +15 degrees at .1-degree increments, Original Ratio, 1:1, 4:5, 16:9 and Rotate 90. Automatic correction uses Sobel edges and a weighted orientation histogram for axes with evidence spread across multiple photo regions; auto result capped at ±10°. If no reliable straight reference is detected, the angle is untouched and manual adjustment remains available.
+
+The requested angle is stored non-destructively in each photo's Edit snapshot, restored in Undo/Redo and retained on swipe among selected photos. Looks and tone Auto preserve geometrical adjustments. Both preview and full-res JPEG export rotate and zoom into the existing same-sized output frame to avoid black corners, at the cost of some edge cropping. Aspect crop and unchanged detail engine run after geometric straightening.
+
+Build branch: experiment/dennis-craft-mobile-v0.6.9-auto-straighten. A separate working version of Dennis Craft Mobile, not a change to the unrelated Dennis Photo Studio production app.
