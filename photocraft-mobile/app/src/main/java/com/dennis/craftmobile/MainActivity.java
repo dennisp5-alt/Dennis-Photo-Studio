@@ -199,10 +199,10 @@ public final class MainActivity extends Activity {
         LinearLayout brand = new LinearLayout(this);
         brand.setOrientation(LinearLayout.VERTICAL);
         brand.setGravity(Gravity.CENTER_VERTICAL);
-        TextView brandTop = label("DENNIS CRAFT", 13, Color.WHITE);
+        TextView brandTop = label("CRAFT", 15, Color.WHITE);
         brandTop.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         brandTop.setTypeface(android.graphics.Typeface.create("sans-serif-medium", 0));
-        TextView brandSub = label("MOBILE PHOTO STUDIO", 9, Color.rgb(112, 163, 222));
+        TextView brandSub = label("PHOTO STUDIO", 9, Color.rgb(112, 163, 222));
         brandSub.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         brand.addView(brandTop, new LinearLayout.LayoutParams(-1, dp(22)));
         brand.addView(brandSub, new LinearLayout.LayoutParams(-1, dp(15)));
@@ -232,7 +232,7 @@ public final class MainActivity extends Activity {
         photo.setScaleType(ImageView.ScaleType.FIT_CENTER);
         photo.setBackgroundColor(BG);
         canvas.addView(photo, new FrameLayout.LayoutParams(-1, -1));
-        openPlaceholder = label("◉\n\nDENNIS CRAFT MOBILE\n\nProfessional photo editing, offline.\n\n＋  TAP TO OPEN PHOTO", 18, Color.rgb(212, 229, 245));
+        openPlaceholder = label("◉\n\nCRAFT PHOTO STUDIO\n\nProfessional photo editing, offline.\n\n＋  TAP TO OPEN PHOTO", 18, Color.rgb(212, 229, 245));
         openPlaceholder.setOnClickListener(v -> choosePhotoSource());
         canvas.addView(openPlaceholder, new FrameLayout.LayoutParams(-1, -1));
         guideOverlay=new View(this) {
@@ -402,6 +402,15 @@ public final class MainActivity extends Activity {
         return v;
     }
 
+
+    // Preview-only sampling; never stretch the original photo into a forced 4:3 frame.
+    private static Bitmap aspectSafeLookSample(Bitmap src) {
+        float scale = 144f / Math.max(src.getWidth(), src.getHeight());
+        return Bitmap.createScaledBitmap(src,
+                Math.max(1, Math.round(src.getWidth() * scale)),
+                Math.max(1, Math.round(src.getHeight() * scale)), true);
+    }
+
     private void addHorizontalChoices(String[] names, java.util.function.Consumer<String> consumer) {
         HorizontalScrollView scroll = new HorizontalScrollView(this);
         scroll.setHorizontalScrollBarEnabled(false);
@@ -409,8 +418,9 @@ public final class MainActivity extends Activity {
         strip.setPadding(dp(11), dp(2), dp(11), 0);
         strip.setGravity(Gravity.TOP);
         scroll.addView(strip);
-        Bitmap tiny = (previewSource != null && mode == Mode.LOOKS) ?
-                Bitmap.createScaledBitmap(previewSource, 120, 90, true) : null;
+        // Keep each preset preview at the image's original aspect ratio.
+        Bitmap tiny = (previewSource != null && mode == Mode.LOOKS)
+                ? aspectSafeLookSample(previewSource) : null;
         for (String name : names) {
             LinearLayout cell = new LinearLayout(this);
             cell.setOrientation(LinearLayout.VERTICAL);
@@ -425,7 +435,8 @@ public final class MainActivity extends Activity {
             if (tiny != null) {
                 ImageView swatch = new ImageView(this);
                 swatch.setImageBitmap(process(tiny, presetFor(name)));
-                swatch.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                swatch.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                swatch.setBackgroundColor(Color.rgb(15, 24, 36));
                 cell.addView(swatch, new LinearLayout.LayoutParams(dp(88), dp(75)));
             } else {
                 TextView glyph = label(mode == Mode.LOOKS ? "◉" : "⌗", 24,
@@ -1261,14 +1272,30 @@ public final class MainActivity extends Activity {
 
     // Album mode asks for read-only library access. The existing photo picker is still available.
     private void choosePhotoSource() {
-        new AlertDialog.Builder(this).setTitle("Open photographs")
-                .setItems(new String[]{
-                        "Browse an album · swipe through every photo",
-                        "Select individual photos · up to 24"
-                }, (dialog, selection) -> {
-                    if (selection == 0) browseAlbums();
-                    else openImage();
-                }).show();
+        // Keep the entry clean; the 24-photo selection picker remains available under More.
+        final android.app.Dialog dialog = new android.app.Dialog(this);
+        TextView entry = label("Browse album", 17, Color.WHITE);
+        entry.setTypeface(android.graphics.Typeface.create("sans-serif-medium", 0));
+        entry.setGravity(Gravity.CENTER);
+        GradientDrawable surface = new GradientDrawable();
+        surface.setColor(Color.argb(239, 18, 30, 45));
+        surface.setCornerRadius(dp(17));
+        surface.setStroke(dp(1), Color.rgb(60, 88, 119));
+        entry.setBackground(surface);
+        entry.setContentDescription("Browse album");
+        entry.setOnClickListener(v -> { dialog.dismiss(); browseAlbums(); });
+        dialog.setContentView(entry);
+        dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            android.view.WindowManager.LayoutParams params = window.getAttributes();
+            params.width = Math.min(getResources().getDisplayMetrics().widthPixels - dp(48), dp(370));
+            params.height = dp(70);
+            params.dimAmount = 0.40f;
+            window.setAttributes(params);
+        }
     }
 
     private void browseAlbums() {
@@ -1287,7 +1314,7 @@ public final class MainActivity extends Activity {
         }
         new AlertDialog.Builder(this)
                 .setTitle("Browse complete photo albums")
-                .setMessage("To browse a whole album and swipe between all of its pictures, Dennis Craft needs read-only access to your photos. Your originals are never changed. You can also keep using the individual photo picker without this permission.\n\nChoose Allow all photos when Android asks.")
+                .setMessage("To browse a whole album and swipe between all of its pictures, Craft Photo Studio needs read-only access to your photos. Your originals are never changed. You can also keep using the individual photo picker without this permission.\n\nChoose Allow all photos when Android asks.")
                 .setPositiveButton("Continue", (d, w) -> requestAlbumPermission())
                 .setNegativeButton("Use photo picker", (d, w) -> openImage())
                 .show();
@@ -1328,7 +1355,7 @@ public final class MainActivity extends Activity {
 
     private void explainPartialAlbumAccess() {
         new AlertDialog.Builder(this).setTitle("Selected photos only")
-                .setMessage("Android currently gives Dennis Craft access to selected photos only. For a complete album, change Photos and videos permission to Allow all in App info. You can also browse the accessible photos now.")
+                .setMessage("Android currently gives Craft Photo Studio access to selected photos only. For a complete album, change Photos and videos permission to Allow all in App info. You can also browse the accessible photos now.")
                 .setPositiveButton("Browse accessible", (d, w) -> showAlbumBrowser())
                 .setNeutralButton("App settings", (d, w) -> {
                     Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
@@ -1785,12 +1812,12 @@ public final class MainActivity extends Activity {
                 exportStatus(toLoad, "Saving · processing full-resolution image…");
                 result = noEdits(snapshot) ? original : process(original, snapshot);
                 exportStatus(toLoad, "Saving · encoding JPEG Q" + quality + "…");
-                String name = "DCS_" + new SimpleDateFormat("yyyyMMdd_HHmmss_SSS",
+                String name = "CRAFT_" + new SimpleDateFormat("yyyyMMdd_HHmmss_SSS",
                         Locale.US).format(new Date()) + ".jpg";
                 ContentValues values = new ContentValues();
                 values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
                 values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
-                values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Dennis Craft Mobile");
+                values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Craft Photo Studio");
                 values.put(MediaStore.Images.Media.IS_PENDING, 1);
                 saved = getContentResolver().insert(
                         MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
@@ -1808,7 +1835,7 @@ public final class MainActivity extends Activity {
                 ui.post(() -> {
                     if (toLoad.equals(input)) {
                         status.setText("Saved JPEG Q" + quality +
-                                " to Pictures/Dennis Craft Mobile");
+                                " to Pictures/Craft Photo Studio");
                     }
                     Toast.makeText(this, "Exported JPEG Q" + quality,
                             Toast.LENGTH_LONG).show();
@@ -1841,7 +1868,7 @@ public final class MainActivity extends Activity {
     private void more() {
         String[] options = {"Browse full photo album", "Modern photo picker", "Export / share",
                 "JPEG quality", "Reset edits", "About / limitations"};
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile")
+        new AlertDialog.Builder(this).setTitle("Craft Photo Studio")
                 .setItems(options, (dialog, which) -> {
                     if (which==0) browseAlbums();
                     if (which==1) openImage();
@@ -1855,7 +1882,7 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Dennis Craft Mobile · v0.6.16 ALBUM BROWSING")
+        new AlertDialog.Builder(this).setTitle("Craft Photo Studio · v0.6.17")
                 .setMessage("Offline native Android editing prototype.\n\n" +
                         "Working: whole-album browsing and modern Android photo picker, JPEG/HEIC, styled looks, " +
                         "tone/colour adjustments, four-level Auto + structural region and deep-black safeguards, Auto WB, " +
