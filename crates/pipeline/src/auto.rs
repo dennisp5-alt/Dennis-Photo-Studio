@@ -722,7 +722,23 @@ pub fn photo_studio_auto_tone_report(
     // checks remain compatible with the LumaWorks UI.
     let mut audit=smart_auto_tone_report_mode(src,info,s,false);
     let (proposal,_) = crate::photo_studio_auto::analyse(src,info,s);
-    let guarded=preview_quality_guard_report(src,info,s,proposal);
+    let mut guarded=preview_quality_guard_report(src,info,s,proposal);
+    // Treat bright-subject exposure and highlight recovery as one proposal.
+    // If extra clipping vetoed the first EV, try progressively smaller
+    // *complete* rendered edits rather than reverting immediately to zero.
+    // This is deterministic and keeps every existing safety rule active.
+    if proposal.exposure>0.10 && guarded.tone.exposure<0.01 &&
+        guarded.reasons.contains(&"added_highlight_clipping") {
+        for fraction in [0.80,0.60,0.40,0.20] {
+            let mut alternate=proposal;
+            alternate.exposure=(proposal.exposure*fraction*100.0).floor()/100.0;
+            let quality=preview_quality_guard_report(src,info,s,alternate);
+            if quality.tone.exposure>0.01 {
+                guarded=quality;
+                break;
+            }
+        }
+    }
     audit.proposed=proposal;
     audit.final_tone=guarded.tone;
     audit.guard_reasons=guarded.reasons;
