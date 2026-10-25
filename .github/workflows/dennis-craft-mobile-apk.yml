@@ -21,6 +21,7 @@ on:
       - experiment/dennis-craft-mobile-v0.6.13-guided-straighten
       - experiment/dennis-craft-mobile-v0.6.14-crop-transform
       - experiment/dennis-craft-mobile-v0.6.15-structure-detection
+      - experiment/dennis-craft-mobile-v0.6.16-album-browser
     paths:
       - 'photocraft-mobile/**'
       - '.github/workflows/dennis-craft-mobile-apk.yml'
@@ -42,7 +43,7 @@ jobs:
         run: gradle -p photocraft-mobile --no-daemon assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: dennis-craft-mobile-v0.6.15-structure-detection-debug-apk
+          name: dennis-craft-mobile-v0.6.16-album-browser-debug-apk
           path: photocraft-mobile/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
