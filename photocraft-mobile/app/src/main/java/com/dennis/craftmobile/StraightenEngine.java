@@ -28,24 +28,31 @@ final class StraightenEngine {
         final float correction, confidence;
         final boolean reliable, alreadyLevel;
         final float observedAngle;
+        final boolean requiresConfirmation;
         Estimate(float correction,float confidence,boolean reliable,
                  boolean alreadyLevel,float observedAngle) {
+            this(correction,confidence,reliable,alreadyLevel,observedAngle,false);
+        }
+        Estimate(float correction,float confidence,boolean reliable,
+                 boolean alreadyLevel,float observedAngle,boolean requiresConfirmation) {
             this.correction=correction;
             this.confidence=confidence;
             this.reliable=reliable;
             this.alreadyLevel=alreadyLevel;
             this.observedAngle=observedAngle;
+            this.requiresConfirmation=requiresConfirmation;
         }
     }
 
     private static final class AxisScore {
         final int bestBin;
-        final float best, baseline, quality;
+        final float best, baseline, quality, prominence;
         final boolean valid;
-        AxisScore(int bin,float best,float baseline,boolean valid) {
+        AxisScore(int bin,float best,float baseline,float secondPeak,boolean valid) {
             bestBin=bin;
             this.best=best;this.baseline=baseline;
             quality=best/Math.max(100f,baseline);
+            prominence=best/Math.max(100f,secondPeak);
             this.valid=valid;
         }
     }
@@ -76,6 +83,9 @@ final class StraightenEngine {
             // vertical structure can disagree in perspective photographs.
             int rhoBins=(Math.max(w,h)+400)/RHO_STEP+3;
             float[][][] votes=new float[2][BINS][rhoBins];
+            // Independent left/right supports help reject converging rooflines,
+            // driveways and perspective rather than mistaking them for roll.
+            float[][][] halves=new float[2][2][BINS];
             short[][][] spanMin=new short[2][BINS][rhoBins];
             short[][][] spanMax=new short[2][BINS][rhoBins];
             for(int axis=0;axis<2;axis++)
@@ -114,6 +124,7 @@ final class StraightenEngine {
                         int cell=(int)Math.round((rho+RHO_OFFSET)/RHO_STEP);
                         if(cell<0||cell>=rhoBins)continue;
                         votes[axis][k][cell]+=contribution;
+                        halves[axis][x < w/2 ? 0 : 1][k]+=contribution;
                         short at=(short)(axis==0?x:y);
                         if(at<spanMin[axis][k][cell])spanMin[axis][k][cell]=at;
                         if(at>spanMax[axis][k][cell])spanMax[axis][k][cell]=at;
@@ -138,14 +149,10 @@ final class StraightenEngine {
                     float hWeight=horizontal.quality,vWeight=vertical.quality;
                     angle=(hAngle*hWeight+vAngle*vWeight)/(hWeight+vWeight);
                     chosen=horizontal.quality>=vertical.quality?horizontal:vertical;
-                } else if(horizontal.quality>vertical.quality*1.4f) {
-                    // Strong roofs/landscape horizon despite perspective poles.
-                    chosen=horizontal; angle=hAngle;
-                } else if(vertical.quality>horizontal.quality*1.5f) {
-                    chosen=vertical; angle=vAngle;
                 } else {
-                    // Different high-confidence architectural axes could mean
-                    // perspective or converging lines, not camera roll.
+                    // Previously one axis could override a contradictory
+                    // second axis. This caused confident but wrong rotation
+                    // in perspective-heavy outdoor photographs. Abstain.
                     return new Estimate(0f,0f,false,false,0f);
                 }
             } else {
@@ -157,13 +164,57 @@ final class StraightenEngine {
 
             if(Math.abs(angle)>AUTO_MAX)
                 return new Estimate(0f,0f,false,false,angle);
-            // ±0.8° is usually visually already level, and tiny rotations
-            // would only crop the image without meaningful improvement.
+
+            // Reject converging perspective: camera roll should be broadly
+            // consistent between independent left/right halves. An absent or
+            // noisy side is not allowed to certify a large angle automatically.
+            int chosenAxis=chosen==horizontal?0:1;
+            HalfOrientation left=halfOrientation(halves[chosenAxis][0]);
+            HalfOrientation right=halfOrientation(halves[chosenAxis][1]);
+            boolean halvesAgree=left.supported && right.supported &&
+                    Math.abs(left.angle-right.angle)<=2.0f &&
+                    Math.abs(left.angle-angle)<=2.5f &&
+                    Math.abs(right.angle-angle)<=2.5f;
+            boolean halvesConflict=left.supported && right.supported &&
+                    (Math.abs(left.angle-right.angle)>3.5f ||
+                     (Math.abs(left.angle-angle)>3.5f &&
+                      Math.abs(right.angle-angle)>3.5f));
+            if(halvesConflict)
+                return new Estimate(0f,0f,false,false,angle);
+
+            // Distinct long lines, not just several fragments of one roof,
+            // must support the same angle.
+            int independent=independentLines(
+                    votes[chosenAxis][chosen.bestBin],
+                    spanMin[chosenAxis][chosen.bestBin],
+                    spanMax[chosenAxis][chosen.bestBin],
+                    chosenAxis==0?w:h);
+
             boolean alreadyLevel=Math.abs(angle)<.8f;
-            float confidence=Math.min(1f,Math.max(0f,
-                    (chosen.quality-1.6f)/4f));
-            return new Estimate(alreadyLevel?0f:-angle,confidence,
-                    true,alreadyLevel,angle);
+            float confidence=Math.max(0f,Math.min(1f,
+                    (chosen.prominence-1.05f)/1.8f));
+
+            boolean strongConsensus=independent>=2 &&
+                    chosen.prominence>=1.28f && halvesAgree;
+            // Even strong candidates beyond 1.5° need user confirmation:
+            // one wrong 4° rotation removes photographic framing and crops.
+            boolean automatic=strongConsensus &&
+                    Math.abs(angle)<=1.5f;
+
+            if(alreadyLevel && (strongConsensus ||
+                    (independent>=2 && chosen.prominence>=1.45f))) {
+                return new Estimate(0f,confidence,true,true,angle);
+            }
+            if(automatic)
+                return new Estimate(-angle,confidence,true,false,angle);
+
+            // A plausible but less certain angle can be shown as a
+            // *suggestion* and must never silently alter the image.
+            if(independent>=2 && chosen.prominence>=1.12f &&
+                    Math.abs(angle)>=.8f) {
+                return new Estimate(-angle,confidence,false,false,angle,true);
+            }
+            return new Estimate(0f,confidence,false,false,angle);
         } finally {
             if(small!=source && !small.isRecycled())small.recycle();
         }
@@ -207,9 +258,61 @@ final class StraightenEngine {
         // more than thousands of weak individual diagonal pixel edges.
         float minScore=Math.max(4000f,12000f*
                 Math.min(1f,extent/800f));
+        float second=0f;
+        for(int a=1;a<BINS-1;a++) {
+            if(Math.abs(a-best)>3)second=Math.max(second,scores[a]);
+        }
         boolean valid=scores[best]>minScore &&
-                scores[best]>baseline*1.85f;
-        return new AxisScore(best,scores[best],baseline,valid);
+                scores[best]>baseline*1.85f &&
+                scores[best]>second*1.10f;
+        return new AxisScore(best,scores[best],baseline,second,valid);
+    }
+
+    private static final class HalfOrientation {
+        final float angle;
+        final boolean supported;
+        HalfOrientation(float angle,boolean supported) {
+            this.angle=angle;this.supported=supported;
+        }
+    }
+
+    private static HalfOrientation halfOrientation(float[] histogram) {
+        float total=0f;
+        for(float v:histogram)total+=v;
+        if(total<2000f)return new HalfOrientation(0f,false);
+        int best=1;
+        float max=0f;
+        for(int b=1;b<BINS-1;b++) {
+            float sum=histogram[b-1]+histogram[b]+histogram[b+1];
+            if(sum>max){max=sum;best=b;}
+        }
+        if(max/total<.11f)return new HalfOrientation(0f,false);
+        return new HalfOrientation(best*BIN_STEP-12f,true);
+    }
+
+    private static int independentLines(float[] lineVotes,short[] starts,
+                                        short[] ends,int extent) {
+        int found=0;
+        boolean[] taken=new boolean[lineVotes.length];
+        float highest=0f;
+        int minimumSpan=Math.max(36,(int)(extent*.08f));
+        for(int r=0;r<lineVotes.length;r++)
+            if(ends[r]-starts[r]>=minimumSpan)
+                highest=Math.max(highest,lineVotes[r]);
+        if(highest<=0f)return 0;
+        for(int iteration=0;iteration<4;iteration++) {
+            int best=-1;
+            float score=0f;
+            for(int r=0;r<lineVotes.length;r++) {
+                if(taken[r]||ends[r]-starts[r]<minimumSpan)continue;
+                if(lineVotes[r]>score){score=lineVotes[r];best=r;}
+            }
+            if(best<0||score<Math.max(1000f,highest*.17f))break;
+            found++;
+            for(int r=Math.max(0,best-3);r<Math.min(lineVotes.length,best+4);r++)
+                taken[r]=true;
+        }
+        return found;
     }
 
     private static float refinedAngle(float[][] votes,short[][] mins,
