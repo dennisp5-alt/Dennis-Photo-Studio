@@ -255,3 +255,20 @@ New **Crop → GUIDED LEVEL** allows the user to choose a reference instead:
 Current Auto Straighten remains unchanged and conservative, including review dialogs for uncertain large corrections. The 0.1 degree manual slider remains.
 
 The user should test the bathroom by tapping two endpoints of one shower-frame or window-frame vertical (not one point on each). These choose different perspective references, so the best angle is partly a compositional preference. The feature is an experimental quality-of-life fallback until an optional full perspective transform is developed.
+
+
+## v0.6.14 — Crop & Transform (experimental, non-AI)
+
+**Source:** verified checkpoint/dennis-craft-v0.6.13-before-transform SHA 242b1bac8c6fa13216e44eb7f456f56d05d7e49b. New code isolated on experiment/dennis-craft-mobile-v0.6.14-crop-transform. Absolutely no AI restoration models, no 128/256 analysis experiment, and no changes to the original four-level 4×4/8×8/16×16/64×64 Auto, WB, detail algorithms or full-resolution JPEG export quality.
+
+Crop bottom navigation now contains three sub-tabs: Crop / Straighten / Transform.
+- **Crop:** Original, 1:1, 4:5, 16:9, Rotate 90°. Existing capabilities preserved.
+- **Straighten:** Existing conservative Auto Straighten, two-tap Guided Level, ±15° manual slider and reset angle. Existing behaviour intentionally unchanged.
+- **Transform:** independent Vertical Skew and Horizontal Skew sliders (each ±25.0), 3×3 alignment grid, RESET, **Balanced Auto** and **Full Auto** (always preview/confirm before applying). These are pure deterministic projective transforms, *not* neural Auto photo understanding.
+- Auto suggestions use existing StraightenEngine and an additional downsampled Sobel edge-orientation analysis requiring converging slope evidence in opposite sides of the frame; otherwise abstain. Balanced uses up to 8 control units and attenuated intensity; Full uses up to 18. Photo with unresolvable perspective may still need manual control. A confirmation dialog displays all proposed values and prevents incorrect automatic destructive rotations.
+- The new TransformEngine uses Android Matrix.setPolyToPoly (4-point projective mapping) and combines roll + vertical + horizontal skew into **one bitmap re-sampling pass**. The existing discrete Rotate-90 operation (if used) remains a prior separate operation. Coverage zoom is binary-searched so the output doesn't show black corners, sacrificing frame edges instead. A second aspect-ratio crop and existing unchanged DetailEngine processing follow geometry.
+- All geometry settings are part of Edit.copy, undo/redo, photo-swiping session edits and applied to full-resolution export and quick/full previews. Looks preserve the geometry settings.
+- A 3×3 grid overlay is visual only; never burned into exports. No new Android permissions or dependencies.
+- This is a candidate to evaluate with bathroom verticals, street rooflines, the playground structure and natural landscapes. If Auto does not find reliable lines, use manual skew or Guided Level. One perspective correction cannot flatten 3D perspective differences across different objects without compromises.
+
+Known performance: Projective bitmap transformation requires one additional filtered bitmap allocation when geometric transforms are nonzero; full-resolution images may be slower to save, especially extreme adjustments. Watch GPU/CPU memory and image quality on the Samsung Galaxy S23 Ultra before promoting v0.6.14.
