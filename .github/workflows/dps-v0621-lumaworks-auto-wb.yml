@@ -202,7 +202,7 @@ jobs:
           model=json.loads(Path('crates/pipeline/models/optionc_pilot_v1.json').read_text())
           assert len(model['trees']) == 64
           assert len(model['features']) == 22
-          assert 'Experimental Assertive Auto:' in vm
+          assert 'Protected Smart Auto uses the original camera-colour' in vm
           assert 'Warm ambient light preserved' in vm
           assert 'AutoCandidatePreviewDialog' in p
           assert 'Auto settings already match this photo.' in p
