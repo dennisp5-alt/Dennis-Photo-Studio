@@ -8,6 +8,9 @@ import android.provider.Settings;
 import android.content.ContentValues;
 import android.content.ClipData;
 import android.content.Intent;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.IntentFilter;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.ImageDecoder;
@@ -58,7 +61,8 @@ public final class MainActivity extends Activity {
     private static final int ACCENT = Color.rgb(36, 136, 255);
 
     private enum Mode { LOOKS, ADJUST, CROP }
-    private static final class Edit {
+    static final class Edit implements java.io.Serializable {
+        private static final long serialVersionUID=1L;
         float exposure, contrast, highlights, shadows, saturation, warmth, tint;
         float ratio = 0f;
         int rotation = 0;
@@ -111,8 +115,6 @@ public final class MainActivity extends Activity {
             1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
     private final ThreadPoolExecutor openingWork = new ThreadPoolExecutor(
             1,1,0L,TimeUnit.MILLISECONDS,new LinkedBlockingQueue<>());
-    private final ExecutorService savingWork = Executors.newSingleThreadExecutor();
-    private final AtomicBoolean saving = new AtomicBoolean(false);
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final AtomicInteger generation = new AtomicInteger();
     private Runnable pendingSliderRender;
@@ -143,6 +145,44 @@ public final class MainActivity extends Activity {
     private static final String[] PRESENCE_FIELDS =
             {"Clarity","Texture","Dehaze"};
     private int jpegQuality = 95;
+    private boolean exportReceiverRegistered;
+    private boolean editingFromAnotherApp;
+    private final BroadcastReceiver exportReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent event) {
+            if(!PhotoExportService.ACTION_FINISHED.equals(event.getAction())) return;
+            Uri source=Build.VERSION.SDK_INT>=33 ?
+                    event.getParcelableExtra(PhotoExportService.EXTRA_SOURCE,Uri.class) :
+                    event.getParcelableExtra(PhotoExportService.EXTRA_SOURCE);
+            Uri saved=Build.VERSION.SDK_INT>=33 ?
+                    event.getParcelableExtra(PhotoExportService.EXTRA_RESULT,Uri.class) :
+                    event.getParcelableExtra(PhotoExportService.EXTRA_RESULT);
+            String error=event.getStringExtra(PhotoExportService.EXTRA_ERROR);
+            boolean share=event.getBooleanExtra(PhotoExportService.EXTRA_SHARE,false);
+            long seconds=event.getLongExtra(PhotoExportService.EXTRA_SECONDS,0);
+            if(error!=null) {
+                if(source!=null && source.equals(input)) status.setText("Export failed: "+error);
+                Toast.makeText(MainActivity.this,"Save failed: "+error,Toast.LENGTH_LONG).show();
+            } else if(saved!=null) {
+                if(source!=null && source.equals(input)) {
+                    status.setText("Saved JPEG to Pictures/Photo Studio · "+seconds+"s");
+                    if(editingFromAnotherApp) {
+                        Intent data=new Intent().setDataAndType(saved,"image/jpeg")
+                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        setResult(RESULT_OK,data);
+                    }
+                }
+                Toast.makeText(MainActivity.this,"JPEG saved in Gallery",Toast.LENGTH_LONG).show();
+                if(share) {
+                    Intent send=new Intent(Intent.ACTION_SEND);
+                    send.setType("image/jpeg");
+                    send.putExtra(Intent.EXTRA_STREAM,saved);
+                    send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    send.setClipData(ClipData.newUri(getContentResolver(),"Saved image",saved));
+                    startActivity(Intent.createChooser(send,"Share edited photo"));
+                }
+            }
+        }
+    };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -151,6 +191,58 @@ public final class MainActivity extends Activity {
         w.setNavigationBarColor(Color.BLACK);
         w.getDecorView().setSystemUiVisibility(0);
         buildLayout();
+        handleIncomingImage(getIntent());
+    }
+
+    @Override protected void onStart() {
+        super.onStart();
+        if(!exportReceiverRegistered) {
+            IntentFilter filter=new IntentFilter(PhotoExportService.ACTION_FINISHED);
+            if(Build.VERSION.SDK_INT>=33)
+                registerReceiver(exportReceiver,filter,Context.RECEIVER_NOT_EXPORTED);
+            else registerReceiver(exportReceiver,filter);
+            exportReceiverRegistered=true;
+        }
+    }
+
+    @Override protected void onStop() {
+        if(exportReceiverRegistered) {
+            unregisterReceiver(exportReceiver);
+            exportReceiverRegistered=false;
+        }
+        super.onStop();
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIncomingImage(intent);
+    }
+
+    // Android Gallery / Files / Share-sheet integration: only accepted image data.
+    private void handleIncomingImage(Intent intent) {
+        if(intent==null)return;
+        String action=intent.getAction();
+        if(!Intent.ACTION_EDIT.equals(action)&&!Intent.ACTION_SEND.equals(action))return;
+        if(intent.getType()!=null&&!intent.getType().startsWith("image/"))return;
+        Uri uri=Intent.ACTION_EDIT.equals(action)?intent.getData():
+                (Build.VERSION.SDK_INT>=33 ?
+                        intent.getParcelableExtra(Intent.EXTRA_STREAM,Uri.class) :
+                        intent.getParcelableExtra(Intent.EXTRA_STREAM));
+        if(uri==null && intent.getClipData()!=null &&
+                intent.getClipData().getItemCount()>0)
+            uri=intent.getClipData().getItemAt(0).getUri();
+        if(uri==null || !"content".equals(uri.getScheme())) {
+            Toast.makeText(this,"Unsupported source image",Toast.LENGTH_LONG).show();
+            return;
+        }
+        editingFromAnotherApp=true;
+        photoSelection.clear();
+        photoSelection.add(uri);
+        activeAlbumName="";
+        editsByPhoto.clear();
+        photoIndex=0;
+        loadChosenPhoto(uri);
     }
 
     private int dp(float value) { return (int) (getResources().getDisplayMetrics().density * value + .5f); }
@@ -1585,9 +1677,20 @@ public final class MainActivity extends Activity {
     }
 
     private Bitmap decode(Uri uri, int dimension, long pixelLimit) throws Exception {
-        ImageDecoder.Source src = ImageDecoder.createSource(getContentResolver(), uri);
+        return decodeBitmap(this,uri,dimension,pixelLimit,false);
+    }
+
+    static Bitmap decodeForExport(Context context,Uri uri,int dimension,long pixelLimit)
+            throws Exception {
+        return decodeBitmap(context,uri,dimension,pixelLimit,true);
+    }
+
+    private static Bitmap decodeBitmap(Context context,Uri uri,int dimension,long pixelLimit,
+                                       boolean mutable) throws Exception {
+        ImageDecoder.Source src = ImageDecoder.createSource(context.getContentResolver(), uri);
         return ImageDecoder.decodeBitmap(src, (decoder, info, source) -> {
             decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
+            if(mutable)decoder.setMutableRequired(true);
             int w = info.getSize().getWidth(), h = info.getSize().getHeight();
             double s = Math.min(1.0, Math.min((double)dimension / Math.max(w,h),
                     Math.sqrt((double)pixelLimit / ((double)w*h))));
@@ -1684,8 +1787,18 @@ public final class MainActivity extends Activity {
     }
 
     private static Bitmap process(Bitmap src, Edit e, BooleanSupplier cancelled) {
+        return process(src,e,cancelled,false);
+    }
+    static Bitmap processForExport(Bitmap src,Edit edit) {
+        // The global colour/tone pass reads a complete source row before
+        // writing it. Reusing mutable decoded pixels is algorithmically
+        // identical but avoids allocating a second 50MP ARGB bitmap.
+        if(!src.isMutable())throw new IllegalArgumentException("Export bitmap must be mutable");
+        return process(src,edit,()->Thread.currentThread().isInterrupted(),true);
+    }
+    private static Bitmap process(Bitmap src,Edit e,BooleanSupplier cancelled,boolean reuse) {
         int w = src.getWidth(), h = src.getHeight();
-        Bitmap output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        Bitmap output = reuse ? src : Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);
         int[] pixels = new int[w];
         float multiplier = (float)Math.pow(2, e.exposure);
         float contrast = 1f + e.contrast / 100f * .85f;
@@ -1831,6 +1944,7 @@ public final class MainActivity extends Activity {
         return cropped;
     }
 
+    static boolean hasNoEdits(Edit e) { return noEdits(e); }
     private static boolean noEdits(Edit e) {
         return e.rotation == 0 && Math.abs(e.straightenAngle)<.015f &&
                 Math.abs(e.perspectiveVertical)<.015f &&
@@ -1842,85 +1956,22 @@ public final class MainActivity extends Activity {
                 !detailSettings(e).enabled();
     }
 
-    private void exportStatus(Uri source, String message) {
-        ui.post(() -> {
-            // An export of the previous file should not overwrite the status
-            // of a newly chosen photograph.
-            if (source.equals(input)) status.setText(message);
-        });
-    }
-
     private void save(boolean share) {
-        if (input == null) { choosePhotoSource(); return; }
-        if (!saving.compareAndSet(false, true)) {
-            Toast.makeText(this, "A photo is already being saved", Toast.LENGTH_SHORT).show();
+        if(input==null) {choosePhotoSource();return;}
+        if(PhotoExportService.isBusy()) {
+            Toast.makeText(this,"A JPEG export is already processing",Toast.LENGTH_SHORT).show();
             return;
         }
-        final Uri toLoad = input;
-        final Edit snapshot = edit.copy();
-        final int quality = jpegQuality;
-        status.setText("Saving · reading original photo…");
-        savingWork.execute(() -> {
-            Uri saved = null;
-            Bitmap original = null, result = null;
-            try {
-                // Full-resolution export is intentionally preserved. It runs
-                // independently of preview work to avoid locking up photo opening.
-                original = decode(toLoad, 8192, 50_000_000);
-                exportStatus(toLoad, "Saving · processing full-resolution image…");
-                result = noEdits(snapshot) ? original : process(original, snapshot);
-                exportStatus(toLoad, "Saving · encoding JPEG Q" + quality + "…");
-                String name = "CRAFT_" + new SimpleDateFormat("yyyyMMdd_HHmmss_SSS",
-                        Locale.US).format(new Date()) + ".jpg";
-                ContentValues values = new ContentValues();
-                values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
-                values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
-                values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Photo Studio");
-                values.put(MediaStore.Images.Media.IS_PENDING, 1);
-                saved = getContentResolver().insert(
-                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
-                if (saved == null) throw new IllegalStateException("MediaStore create failed");
-                try (OutputStream stream = getContentResolver().openOutputStream(saved)) {
-                    if (stream == null ||
-                            !result.compress(Bitmap.CompressFormat.JPEG, quality, stream)) {
-                        throw new IllegalStateException("JPEG encoding failed");
-                    }
-                }
-                values.clear();
-                values.put(MediaStore.Images.Media.IS_PENDING, 0);
-                getContentResolver().update(saved, values, null, null);
-                Uri finished = saved;
-                ui.post(() -> {
-                    if (toLoad.equals(input)) {
-                        status.setText("Saved JPEG Q" + quality +
-                                " to Pictures/Photo Studio");
-                    }
-                    Toast.makeText(this, "Exported JPEG Q" + quality,
-                            Toast.LENGTH_LONG).show();
-                    if (share && !isFinishing()) {
-                        Intent shareIntent = new Intent(Intent.ACTION_SEND);
-                        shareIntent.setType("image/jpeg");
-                        shareIntent.putExtra(Intent.EXTRA_STREAM, finished);
-                        shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                        startActivity(Intent.createChooser(shareIntent, "Share photo"));
-                    }
-                });
-            } catch (Exception | OutOfMemoryError ex) {
-                if (saved != null) getContentResolver().delete(saved, null, null);
-                final String reason = ex.getMessage();
-                ui.post(() -> {
-                    if (toLoad.equals(input)) status.setText("Export failed: " + reason);
-                    Toast.makeText(this, "Export failed: " + reason,
-                            Toast.LENGTH_LONG).show();
-                });
-            } finally {
-                if (result != null && result != original && !result.isRecycled()) {
-                    result.recycle();
-                }
-                if (original != null && !original.isRecycled()) original.recycle();
-                saving.set(false);
-            }
-        });
+        Uri source=input;
+        Edit snapshot=edit.copy();
+        boolean started=PhotoExportService.begin(this,source,snapshot,jpegQuality,share);
+        if(!started) {
+            Toast.makeText(this,"Could not start export; try again",Toast.LENGTH_LONG).show();
+            return;
+        }
+        status.setText("Saving in background · full-resolution JPEG Q"+jpegQuality);
+        Toast.makeText(this,"Export started · safe to switch apps or lock screen",
+                Toast.LENGTH_SHORT).show();
     }
 
     private void more() {
@@ -1940,9 +1991,9 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Photo Studio · v0.6.19")
+        new AlertDialog.Builder(this).setTitle("Photo Studio · v0.6.20")
                 .setMessage("Offline native Android editing prototype.\n\n" +
-                        "Working: neutral-point WB picker, pinch zoom, double-tap inspection and pan, whole-album browsing, modern Android photo picker, JPEG/HEIC, styled looks, " +
+                        "Working: background JPEG exports and Edit/Share integration, neutral-point WB picker, pinch zoom, double-tap inspection and pan, whole-album browsing, modern Android photo picker, JPEG/HEIC, styled looks, " +
                         "tone/colour adjustments, four-level Auto + structural region and deep-black safeguards, Auto WB, " +
                         "luminance/chroma NR, sharpening, " +
                         "clarity, texture, contrast dehaze, centre crop, rotate 90°, " +
@@ -1969,7 +2020,7 @@ public final class MainActivity extends Activity {
         generation.incrementAndGet();
         if (pendingSliderRender != null) ui.removeCallbacks(pendingSliderRender);
         if (albumBrowser != null) albumBrowser.close();
-        previewWork.shutdownNow(); openingWork.shutdownNow(); savingWork.shutdownNow();
+        previewWork.shutdownNow(); openingWork.shutdownNow();
         super.onDestroy();
     }
 }
