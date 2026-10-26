@@ -1,0 +1,37 @@
+name: MIRRAN Android Debug APK
+
+on:
+  push:
+    branches:
+      - experiment/mirran-v0.1.0
+    paths:
+      - 'mirran/**'
+      - '.github/workflows/mirran-android.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+      - name: Install Android SDK 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Syntax check private bridge
+        run: node --check mirran/server/index.mjs
+      - name: Build MIRRAN
+        working-directory: mirran
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+      - name: Upload MIRRAN debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MIRRAN-v0.1.0-debug-apk
+          path: mirran/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
