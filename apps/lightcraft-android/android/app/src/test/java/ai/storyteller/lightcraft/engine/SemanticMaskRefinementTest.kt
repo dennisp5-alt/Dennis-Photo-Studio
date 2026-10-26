@@ -68,4 +68,35 @@ class SemanticMaskRefinementTest {
         val px = IntArray(32 * 32) { 0xFF808080.toInt() }
         assertTrue(SemanticMaskRefinement.refine(input, 8, px, 32, 32).all { it.toInt() < 0 })
     }
+
+    @Test fun existingSkyRefinementIsUnchanged() {
+        val n=8
+        val model=FloatArray(n*n){ i -> if(i/n<4)3.5f else -3.5f }
+        val pixels=IntArray(32*32){ i -> if(i/32<16) 0xFFACD3F1.toInt() else 0xFF536A42.toInt() }
+        val before=SemanticMaskRefinement.refine(model,n,pixels,32,32)
+        val after=SemanticMaskRefinement.refine(model,n,pixels,32,32,subjectBoundary=false)
+        assertTrue("Sky path must stay identical",before.contentEquals(after))
+    }
+
+    @Test fun subjectRefinementRespectsContrastingBackground() {
+        val model=8
+        val pxSide=32
+        val margin=FloatArray(model*model){i-> if(i%model<4) 2.4f else -2.4f }
+        val pixels=IntArray(pxSide*pxSide){i->
+            if(i%pxSide<pxSide/2) 0xFFAB7557.toInt() else 0xFF7CC7FA.toInt()
+        }
+        val subject=SemanticMaskRefinement.refine(margin,model,pixels,pxSide,32,subjectBoundary=true)
+        assertTrue("centre of subject must remain selected",subject[16*32+8].toInt()>0)
+        assertTrue("background must remain excluded",subject[16*32+23].toInt()<0)
+    }
+
+    @Test fun subjectRefinementDoesNotPunchHolesInHairTexture() {
+        val model=8
+        val margin=FloatArray(model*model) { 4f }
+        val px=IntArray(32*32){ i ->
+            if((i+i/32)%4==0) 0xFF191A1C.toInt() else 0xFF48424B.toInt()
+        }
+        val result=SemanticMaskRefinement.refine(margin,model,px,32,32,subjectBoundary=true)
+        assertTrue(result.all{it.toInt()>0})
+    }
 }
