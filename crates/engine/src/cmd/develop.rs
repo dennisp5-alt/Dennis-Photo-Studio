@@ -315,64 +315,33 @@ pub fn specs() -> Vec<CommandSpec> {
         // Rendering these serialized settings must not create an undo step.
         // A future trained Option C model must remain explicitly unavailable
         // until validated inference is actually connected.
+        // Identical combined rendered-auto plan for preview and one-tap.
         cmd!("develop.autoPreview", "Smart Auto Preview", ["Photo"], None, "{}", has_active, |s, _p| {
             let id=active(s,"develop.autoPreview")?;
             let src=s.source_now(id,SourceLevel::Preview)
                 .map_err(|e|bad("develop.autoPreview",e))?;
             let info=s.source_info(id);
             let current=s.develop_of(id).unwrap_or_default();
-            // Use the production render-quality guard, NOT the old test-only
-            // all-guards-off experiment. These settings are actually applied.
-            let tone_audit=lightcraft_pipeline::auto::classic_auto_tone_report(&src,&info,&current);
+            let plan=lightcraft_pipeline::classic_guard::plan(&src,&info,&current);
+            let proposed=plan.settings;
+            let tone_audit=plan.tone;
             let tone=tone_audit.final_tone;
-            // Respect a consciously chosen neutral reference or manual WB.
-            // Dedicated WB Auto remains available to replace it explicitly.
-            let manual_wb=current.wb.mode==WbMode::Custom;
-            let wb=(!manual_wb).then(||lightcraft_pipeline::auto::auto_wb_report_balanced(&src,&info));
-            let mut proposal=(*current).clone();
-            proposal.light.exposure=tone.exposure;
-            proposal.light.contrast=tone.contrast;
-            proposal.light.highlights=tone.highlights;
-            proposal.light.shadows=tone.shadows;
-            proposal.light.whites=tone.whites;
-            proposal.light.blacks=tone.blacks;
-            proposal.color.vibrance=tone.vibrance;
-            proposal.color.saturation=tone.saturation;
-            proposal.curve.shadows=tone.curve_shadows;
-            proposal.curve.darks=tone.curve_darks;
-            proposal.curve.lights=tone.curve_lights;
-            proposal.curve.highlights=tone.curve_highlights;
-            if let Some(report)=wb.as_ref() {
-                proposal.wb.mode=WbMode::Auto;
-                proposal.wb.temp=report.temp;
-                proposal.wb.tint=report.tint;
-            }
-            // Judge any Dehaze on the proposed full tone/WB rendering,
-            // not the original pixels before the other Auto adjustments.
-            let scene=lightcraft_pipeline::scene_auto::evaluate(&src,&info,&proposal);
-            if current.effects.dehaze.abs()<0.001 && scene.dehaze>0.0 {
-                proposal.effects.dehaze=scene.dehaze;
-            }
-            // Compare complete current/proposed settings; zero recommendations
-            // can still reset nonzero manual Light/Colour controls.
-            let no_change=proposal==*current;
-            let model=json!({"status":"disabled","reason":"Restored Auto uses original editable engine controls, not the Option C pilot."});
+            let wb=plan.white_balance;
+            let scene=plan.scene;
+            let guard=plan.guard;
+            let manual_wb=plan.preset_preserved;
+            let wb_changed=proposed.wb!=current.wb;
+            let no_change=proposed==*current;
             Ok(json!({
-                "sourceSettings":current,
-                "previewSettings":proposal,
-                "tone":tone,
-                "toneAudit":tone_audit,
-                "scene":scene,
-                "whiteBalance":wb,
-                "manualWbPreserved":manual_wb,
-                "noChangeRecommended":no_change,
-                "model":model
+                "sourceSettings":current,"previewSettings":proposed,
+                "tone":tone,"toneAudit":tone_audit,"scene":scene,"combinedGuard":guard,
+                "whiteBalance":wb,"manualWbPreserved":manual_wb,
+                "whiteBalanceChanged":wb_changed,"noChangeRecommended":no_change,
+                "model":{"status":"disabled","reason":"Classical photographic analysis; no learned tone model"}
             }))
         }),
-        // Apply EXACTLY the settings compared in Auto Preview. Recomputing
-        // can produce a different image if source/edit state has changed.
-        // The request is validated against the original edit and limited
-        // to the same light/colour/curve/WB settings Auto is allowed to edit.
+        // Recompute and verify the same safe full-render result on Apply.
+        // A stale or modified preview cannot bypass the final RGB checks.
         cmd!("develop.autoApplyPreview", "Apply Previewed Smart Auto", ["Photo"], None,
             "{sourceSettings, previewSettings}", has_active, |s,p| {
             let id=active(s,"develop.autoApplyPreview")?;
@@ -387,112 +356,54 @@ pub fn specs() -> Vec<CommandSpec> {
             let current=s.develop_of(id).unwrap_or_default();
             if *current!=source {
                 return Err(bad("develop.autoApplyPreview",
-                    "The photograph changed after the preview; inspect Auto again"));
+                    "Photo changed after preview; inspect Classic Auto again"));
             }
-            let mut allowed=source.clone();
-            allowed.light.exposure=proposed.light.exposure;
-            allowed.light.contrast=proposed.light.contrast;
-            allowed.light.highlights=proposed.light.highlights;
-            allowed.light.shadows=proposed.light.shadows;
-            allowed.light.whites=proposed.light.whites;
-            allowed.light.blacks=proposed.light.blacks;
-            allowed.color.vibrance=proposed.color.vibrance;
-            allowed.color.saturation=proposed.color.saturation;
-            allowed.curve.shadows=proposed.curve.shadows;
-            allowed.curve.darks=proposed.curve.darks;
-            allowed.curve.lights=proposed.curve.lights;
-            allowed.curve.highlights=proposed.curve.highlights;
-            // White balance is part of the verified finished rendering.
-            allowed.wb=proposed.wb.clone();
-            // Auto may add only a scene-verified Dehaze. Validate the
-            // proposal against the current image, not just its slider bound.
-            // Nonzero manual effects are never overwritten by Smart Auto.
-            if source.effects.dehaze.abs()<0.001 {
-                if proposed.effects.dehaze>0.0 {
-                    let proxy=s.source_now(id,SourceLevel::Preview)
-                        .map_err(|e|bad("develop.autoApplyPreview",e))?;
-                    let info=s.source_info(id);
-                    let verified=lightcraft_pipeline::scene_auto::evaluate(
-                        &proxy,&info,&allowed);
-                    if proposed.effects.dehaze>12.0 ||
-                        (verified.dehaze-proposed.effects.dehaze).abs()>0.01 {
-                        return Err(bad("develop.autoApplyPreview",
-                            "Scene Dehaze differs from the verified preview"));
-                    }
-                }
-                allowed.effects.dehaze=proposed.effects.dehaze;
-            }
-            // Smart Auto respects manual Custom WB via its preview.
-            if allowed!=proposed {
+            let src=s.source_now(id,SourceLevel::Preview)
+                .map_err(|e|bad("develop.autoApplyPreview",e))?;
+            let info=s.source_info(id);
+            let verified=lightcraft_pipeline::classic_guard::plan(&src,&info,&current);
+            if verified.settings!=proposed {
                 return Err(bad("develop.autoApplyPreview",
-                    "Only Auto tone/curve/colour/WB and scene-approved Dehaze can be applied from preview"));
+                    "Proposed image does not match the validated combined Auto preview"));
             }
-            edit(s,"develop.autoApplyPreview","Smart Auto",|d|{
+            if proposed==*current {
+                return Ok(json!({"appliedSettings":proposed,"matchesPreview":true,"noChangeApplied":true}));
+            }
+            edit(s,"develop.autoApplyPreview","Classic Auto",|d|{
                 *d=proposed.clone();
                 Ok(())
             })?;
-            Ok(json!({"appliedSettings":proposed,"matchesPreview":true}))
+            Ok(json!({"appliedSettings":proposed,"matchesPreview":true,"noChangeApplied":false}))
         }),
         cmd!("develop.auto", "Smart Auto", ["Photo"], Some("Shift+A"), "{}", has_active, |s, _p| {
             let id=active(s,"develop.auto")?;
             let src=s.source_now(id,SourceLevel::Preview)
                 .map_err(|e|bad("develop.auto",e))?;
             let info=s.source_info(id);
-            let d=s.develop_of(id).unwrap_or_default();
-            // Normal one-tap Auto must apply the same protected decision as
-            // the read-only preview. Do not route experimental unrestricted
-            // tone or WB candidates to production commands.
-            let tone_audit=lightcraft_pipeline::auto::classic_auto_tone_report(&src,&info,&d);
-            let a=tone_audit.final_tone;
-            let manual_wb=d.wb.mode==WbMode::Custom;
-            let wb=(!manual_wb).then(||lightcraft_pipeline::auto::auto_wb_report_balanced(&src,&info));
-            let mut planned=(*d).clone();
-            planned.light.exposure=a.exposure;
-            planned.light.contrast=a.contrast;
-            planned.light.highlights=a.highlights;
-            planned.light.shadows=a.shadows;
-            planned.light.whites=a.whites;
-            planned.light.blacks=a.blacks;
-            planned.color.vibrance=a.vibrance;
-            planned.color.saturation=a.saturation;
-            planned.curve.shadows=a.curve_shadows;
-            planned.curve.darks=a.curve_darks;
-            planned.curve.lights=a.curve_lights;
-            planned.curve.highlights=a.curve_highlights;
-            if let Some(report)=wb.as_ref() {
-                planned.wb.mode=WbMode::Auto;
-                planned.wb.temp=report.temp;
-                planned.wb.tint=report.tint;
+            let current=s.develop_of(id).unwrap_or_default();
+            let plan=lightcraft_pipeline::classic_guard::plan(&src,&info,&current);
+            let proposed=plan.settings;
+            let tone_audit=plan.tone;
+            let tone=tone_audit.final_tone;
+            let wb=plan.white_balance;
+            let scene=plan.scene;
+            let guard=plan.guard;
+            let manual_wb=plan.preset_preserved;
+            let wb_changed=proposed.wb!=current.wb;
+            let no_change=proposed==*current;
+            // Do not commit a second undo step for unchanged settings.
+            if !no_change {
+                edit(s,"develop.auto","Classic Auto",|d|{
+                    *d=proposed.clone();
+                    Ok(())
+                })?;
             }
-            let scene=lightcraft_pipeline::scene_auto::evaluate(&src,&info,&planned);
-            edit(s,"develop.auto","Smart Auto",|d|{
-                d.light.exposure=a.exposure;
-                d.light.contrast=a.contrast;
-                d.light.highlights=a.highlights;
-                d.light.shadows=a.shadows;
-                d.light.whites=a.whites;
-                d.light.blacks=a.blacks;
-                d.color.vibrance=a.vibrance;
-                d.color.saturation=a.saturation;
-                // Parametric curves make recoverable shadow/midtone detail
-                // visible while leaving flame cores and white clouds bright.
-                d.curve.shadows=a.curve_shadows;
-                d.curve.darks=a.curve_darks;
-                d.curve.lights=a.curve_lights;
-                d.curve.highlights=a.curve_highlights;
-                if d.effects.dehaze.abs()<0.001 && scene.dehaze>0.0 {
-                    d.effects.dehaze=scene.dehaze;
-                }
-                // Existing user RGB point-curve edits are deliberately
-                // retained; Auto only replaces its four parametric regions.
-                if let Some(report)=wb {
-                    d.wb.mode=WbMode::Auto;
-                    d.wb.temp=report.temp;
-                    d.wb.tint=report.tint;
-                }
-                Ok(())
-            })?;
-            Ok(json!({"tone":a,"toneAudit":tone_audit,"scene":scene,"whiteBalance":wb,"manualWbPreserved":manual_wb}))
+            Ok(json!({
+                "tone":tone,"toneAudit":tone_audit,
+                "whiteBalance":wb,"whiteBalanceChanged":wb_changed,
+                "manualWbPreserved":manual_wb,"noChangeApplied":no_change,
+                "combinedGuard":guard,"scene":scene
+            }))
         }),
         cmd!("develop.autoDetail", "Auto Detail & Noise", ["Photo"], None, "{}", has_active, |s, _p| {
             let id=active(s,"develop.autoDetail")?;
