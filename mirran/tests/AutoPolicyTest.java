@@ -17,8 +17,8 @@ public final class AutoPolicyTest {
         for(int y=0;y<20;y++)for(int x=0;x<100;x++)water.setPixel(x,y,0xff4b5155);
         for(int y=80;y<100;y++)for(int x=0;x<100;x++)water.setPixel(x,y,0xffada99c);
         EditRecipe landscape=AutoAnalyzer.suggest(AutoAnalyzer.measure(water));
-        check(landscape.contrast>=.09f && landscape.contrast<=.18f,
-            "Muted midtones should gain restrained positive contrast");
+        check(landscape.contrast>=.12f && landscape.contrast<=.23f,
+            "Muted midtones should gain noticeable but bounded positive contrast");
         check(landscape.shadows<=.16f,"Shadow safety cap regressed");
         check(landscape.vibrance>0f && landscape.vibrance<=.17f,
             "Vibrance not in expected safe range");
