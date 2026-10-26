@@ -190,7 +190,7 @@ pub fn plan(src:&Rgb32f,info:&SourceInfo,current:&DevelopSettings)->ClassicPlan 
             wanted.wb.mode=WbMode::Auto;wanted.wb.temp=r.temp;wanted.wb.tint=r.tint;
         }
     }
-    let finish=crate::classic_finish::refine(src,info,current,&mut wanted);
+    let mut finish=crate::classic_finish::refine(src,info,current,&mut wanted);
     let mut scene=crate::scene_auto::evaluate(src,info,&wanted);
     if current.effects.dehaze.abs()<0.001 && scene.dehaze>0.0 {
         wanted.effects.dehaze=scene.dehaze;
@@ -211,6 +211,18 @@ pub fn plan(src:&Rgb32f,info:&SourceInfo,current:&DevelopSettings)->ClassicPlan 
         applied=checked;guard=second;
         guard.reasons.push("dehaze_revalidated_after_tone_change");
     }
+    // Report only the selective changes that survived render validation.
+    finish.local_subject_lift &= applied.masks.iter().any(|m|
+        m.name=="Classic Auto · Backlit Subject"
+        && !current.masks.iter().any(|existing| existing.id==m.id));
+    if !finish.local_subject_lift {finish.backlit_subject_confidence=0.0;}
+    finish.red_highlight_protection &= applied.mixer.red!=current.mixer.red
+        || applied.mixer.magenta!=current.mixer.magenta;
+    finish.white_highlight_protection &=
+        applied.light.whites<current.light.whites
+        || applied.light.highlights<current.light.highlights;
+    finish.twilight_colour_protection &= applied.mixer.green!=current.mixer.green
+        || applied.mixer.yellow!=current.mixer.yellow;
     audit.final_tone=tone(&applied);
     audit.guard_reasons=guard.reasons.clone();
     audit.new_white_clip_fraction=guard.white_clipping;
