@@ -632,6 +632,9 @@ pub struct AutoToneAuditReport {
     pub new_black_clip_fraction:f64,
     pub comparison_exposure_ev:f64,
     pub quality_guard_skipped_for_emission:bool,
+    /// Production Smart Auto's global exposure correction (stage 1), already
+    /// included in `proposed`; 0 for normally exposed or protected scenes.
+    pub exposure_correction_ev:f64,
 }
 
 /// Production audit: retain all established output-quality protections.
@@ -642,9 +645,12 @@ pub fn smart_auto_tone_report(src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings)
 
 /// LumaWorks v0.6.32 production Smart Auto (one tap, Preview and Apply).
 ///
-/// The same scene analysis and the same two estimates as v0.6.22–v0.6.30
-/// (the protected proposal blended with the less restricted one), with four
-/// corrections to how the result is limited:
+/// Stage 1 corrects a clearly under- or overexposed photograph globally
+/// ([`exposure_correction`]): v0.6.30 corrected only about a third of a
+/// −1.3 EV error and never darkened. Stage 2 is the same scene analysis and
+/// the same two estimates as v0.6.22–v0.6.30 (the protected proposal blended
+/// with the less restricted one), made on the photograph as it looks after
+/// stage 1, with these corrections to how the result is limited:
 ///
 /// * the photograph is analysed, and the safety render is made, under the
 ///   white balance Smart Auto will actually apply (`planned_wb`), so the
@@ -675,9 +681,26 @@ pub fn smart_auto_tone_report_balanced_with_wb(
     // correction changes luminance and colourfulness as well as hue.
     let mut analysis=s.clone();
     if let Some(wb)=planned_wb {analysis.wb=wb;}
-    let evidence=tone_evidence(src,info,&analysis);
-    let (basic,_)=smart_auto_candidate(src,info,&analysis);
-    let (active,_)=smart_auto_candidate_mode(src,info,&analysis,true);
+    let measured=tone_evidence(src,info,&analysis);
+    // Stage 1: the global exposure correction the photograph's tones call for.
+    let (basic_as_shot,emissive)=smart_auto_candidate(src,info,&analysis);
+    let base_ev=exposure_correction(&measured,emissive);
+    // Stage 2: the established Smart Auto develops the photograph as it looks
+    // at that exposure. Without a correction this is exactly v0.6.30's input.
+    let exposed=(base_ev!=0.0).then(||{
+        let mut proxy=lightcraft_raster::resample::fit(
+            src,512,512,lightcraft_raster::resample::Filter::Box);
+        let gain=2f32.powf(base_ev as f32);
+        for c in &mut proxy.data {
+            for v in c.iter_mut() {*v*=gain;}
+        }
+        proxy
+    });
+    let (scene,evidence,basic)=match &exposed {
+        Some(img)=>(img,tone_evidence(img,info,&analysis),smart_auto_candidate(img,info,&analysis).0),
+        None=>(src,measured.clone(),basic_as_shot),
+    };
+    let (active,_)=smart_auto_candidate_mode(scene,info,&analysis,true);
     let blend=|safe:f64, assertive:f64, weight:f64| {
         safe*(1.0-weight)+assertive*weight
     };
@@ -718,11 +741,16 @@ pub fn smart_auto_tone_report_balanced_with_wb(
         proposed.exposure=proposed.exposure.min(0.12);
         proposed.shadows=proposed.shadows.min(10.0);
     }
-    proposed=crate::auto_finish::refine(src,info,&analysis,ev,proposed);
+    proposed=crate::auto_finish::refine(scene,info,&analysis,ev,proposed);
+    // Stage 2 refines a stage-1 darkening but may not undo it (its usual
+    // small positive finish would give back a third of it).
+    if base_ev<0.0 {proposed.exposure=proposed.exposure.min(0.0);}
     // After the finish, whose small-highlight "sparkle" rule assumes no
     // exposure lift: protect the bright areas in proportion to the lift.
     // Up to +0.05 EV (the old cap) the finish's own values are kept, and the
-    // protection starts where the sparkle rule's floor (−10) is.
+    // protection starts where the sparkle rule's floor (−10) is. Stage 1
+    // never takes the brightest tones past TARGET_P995_EV, so only stage 2's
+    // own lift needs protecting here.
     if bright_areas && proposed.exposure>0.05 {
         let lift=proposed.exposure-0.05;
         proposed.highlights=proposed.highlights.min(-(10.0+50.0*lift).min(40.0));
@@ -730,16 +758,66 @@ pub fn smart_auto_tone_report_balanced_with_wb(
             proposed.whites=proposed.whites.min(-(2.0+12.0*lift));
         }
     }
+    proposed.exposure=(base_ev+proposed.exposure)
+        .clamp(-MAX_AUTO_EXPOSURE_EV,MAX_AUTO_EXPOSURE_EV);
     round_to_slider_precision(&mut proposed);
+    // The safety render always uses the real photograph and the full edit.
     let quality=production_quality_guard(src,info,s,planned_wb,proposed);
     AutoToneAuditReport {
-        evidence, proposed, final_tone:quality.tone,
+        evidence:measured, proposed, final_tone:quality.tone,
         guard_reasons:quality.reasons,
         new_white_clip_fraction:quality.white_clip_change,
         new_black_clip_fraction:quality.black_clip_change,
         comparison_exposure_ev:s.light.exposure,
         quality_guard_skipped_for_emission:false,
+        exposure_correction_ev:base_ev,
     }
+}
+
+/// Where the tones of a normally exposed photograph sit, in EV from middle
+/// grey (medians over the Kodak reference photographs): the median, the
+/// brightest 0.5% and the darkest 5%.
+const TARGET_MEDIAN_EV:f64=-0.45;
+const TARGET_P995_EV:f64=2.20;
+const TARGET_P05_EV:f64=-2.50;
+/// Largest total exposure change production Smart Auto makes either way.
+pub const MAX_AUTO_EXPOSURE_EV:f64=2.0;
+
+/// Stage 1 of production Smart Auto: the global exposure correction the
+/// photograph's own tones call for, or 0 when it is normally exposed or a
+/// protected scene (firelight, a white subject on dark, flat night,
+/// intentional darkness, isolated lights, high key).
+///
+/// Too dark: lift the median toward a normal placement, but never further
+/// than the brightest tones can go without reaching white. A photograph with
+/// a bright highlight therefore keeps its mood; one where nothing is bright
+/// is treated as underexposed. Too bright: highlights already at white,
+/// shadows lifted away from black, and not high key.
+fn exposure_correction(ev:&AutoToneEvidence,emissive:bool)->f64 {
+    let flat_night=ev.dark_fraction>0.80 && ev.recoverable_fraction<0.07
+        && ev.bright_fraction<0.02;
+    // The same definitions the photographic finish uses (auto_finish).
+    let intentional_dark=(ev.median_ev< -2.3 && ev.dark_fraction>0.60)
+        || (ev.median_ev< -1.65 && ev.dark_fraction>0.72 && ev.bright_fraction<0.055);
+    let isolated_lights=ev.median_ev< -1.7 && ev.dark_fraction>0.56
+        && ev.p995_ev>1.2 && ev.bright_fraction<0.055;
+    if emissive || ev.zonal.nano.neutral_white_subject || flat_night
+        || intentional_dark || isolated_lights {
+        return 0.0;
+    }
+    let lift=(TARGET_MEDIAN_EV-ev.median_ev).min(TARGET_P995_EV-ev.p995_ev);
+    if lift>=0.35 {
+        return (lift.min(1.5)*100.0).round()/100.0;
+    }
+    let high_key=ev.median_ev>0.75 && ev.bright_fraction>0.22;
+    let lifted_blacks=ev.p05_ev-TARGET_P05_EV;
+    if ev.p995_ev>=2.30 && !high_key && lifted_blacks>0.35 {
+        let darken=0.85*(ev.median_ev-TARGET_MEDIAN_EV).min(lifted_blacks);
+        if darken>=0.20 {
+            return -(darken.min(1.2)*100.0).round()/100.0;
+        }
+    }
+    0.0
 }
 
 /// The scene measurements every Smart Auto report carries (256px proxy,
@@ -1156,6 +1234,7 @@ fn smart_auto_tone_report_mode(
         new_black_clip_fraction:guarded.black_clip_change,
         comparison_exposure_ev:s.light.exposure,
         quality_guard_skipped_for_emission:emissive,
+        exposure_correction_ev:0.0,
     }
 }
 
@@ -3099,7 +3178,9 @@ mod lumaworks_balanced_auto_wb_regressions {
         let a=report.final_tone;
         assert!(a.exposure>0.05 || a.shadows>3.0 || a.curve_darks>3.0,
             "Moderately dark textured photo got no useful Auto edit: {a:?}");
-        assert!(a.exposure<=0.90);
+        // v0.6.32: bounded by the production limit (was the old 0.90 clamp,
+        // which left a −1.3 EV photograph about two thirds underexposed).
+        assert!(a.exposure<=MAX_AUTO_EXPOSURE_EV);
     }
 
     #[test]
@@ -3566,6 +3647,74 @@ mod lumaworks_v0632_production_auto {
         let b = smart_auto_tone_report_balanced(&img, &SourceInfo::default(), &DevelopSettings::default());
         assert_eq!(a.final_tone, b.final_tone);
         assert_eq!(a.guard_reasons, b.guard_reasons);
+    }
+
+    /// A textured, normally exposed scene: tones from `black` to near white
+    /// (median about −0.5 to −0.8 EV, brightest 0.5% about +2.4 EV), times
+    /// `k`, clipped at white like a camera JPEG. 256×192 so the 256px
+    /// evidence proxy measures it without resampling.
+    fn exposed_scene(k: f32, black: f32) -> Rgb32f {
+        Rgb32f::from_fn(256, 192, |x, y| {
+            let u = ((x * 13 + y * 7) % 97) as f32 / 96.0;
+            let v = ((black + (0.95 - black) * u.powf(3.2)) * k).min(1.0);
+            [v * 1.02, v, v * 0.97]
+        })
+    }
+
+    #[test]
+    fn underexposed_photo_without_highlights_is_corrected_most_of_the_way() {
+        let (info, s) = (SourceInfo::default(), DevelopSettings::default());
+        let dark = exposed_scene(2f32.powf(-1.3), 0.003);
+        let new = smart_auto_tone_report_balanced(&dark, &info, &s);
+        let old = smart_auto_tone_report_balanced_v0630(&dark, &info, &s);
+        assert!(new.exposure_correction_ev >= 0.8, "{new:?}");
+        assert!(new.final_tone.exposure >= 0.9, "a −1.3 EV photo must get most of it back: {new:?}");
+        assert!(new.final_tone.exposure >= old.final_tone.exposure + 0.3,
+            "v0.6.30 {:?} vs v0.6.32 {:?}", old.final_tone, new.final_tone);
+        assert!(new.new_white_clip_fraction <= NEW_HIGHLIGHT_CLIP_LIMIT + 0.003, "{new:?}");
+    }
+
+    #[test]
+    fn overexposed_photo_is_darkened() {
+        let (info, s) = (SourceInfo::default(), DevelopSettings::default());
+        let bright = exposed_scene(2f32.powf(0.8), 0.03);
+        let r = smart_auto_tone_report_balanced(&bright, &info, &s);
+        assert!(r.exposure_correction_ev <= -0.4, "{r:?}");
+        assert!(r.final_tone.exposure <= -0.4, "an overexposed photo must be darkened: {r:?}");
+    }
+
+    #[test]
+    fn normally_exposed_photo_gets_no_global_correction() {
+        let (info, s) = (SourceInfo::default(), DevelopSettings::default());
+        for scene in [exposed_scene(1.0, 0.003), exposed_scene(1.0, 0.03)] {
+            let r = smart_auto_tone_report_balanced(&scene, &info, &s);
+            assert_eq!(r.exposure_correction_ev, 0.0, "{:?}", r.evidence);
+        }
+    }
+
+    #[test]
+    fn protected_scenes_get_no_global_correction() {
+        let ev = |img: &Rgb32f| tone_evidence(img, &SourceInfo::default(), &DevelopSettings::default());
+        // Moon on black sky, night street with one lamp, white flower on dark
+        // foliage: all dark, all with a bright reference.
+        let moon = Rgb32f::from_fn(512, 384, |x, y| {
+            let (dx, dy) = (x as f32 - 256.0, y as f32 - 192.0);
+            if dx * dx + dy * dy < 46.0 * 46.0 { [0.93, 0.93, 0.92] } else { [0.006, 0.007, 0.012] }
+        });
+        let night = Rgb32f::from_fn(512, 384, |x, y| {
+            if ((x as f32 - 400.0).powi(2) + (y as f32 - 60.0).powi(2)).sqrt() < 12.0 { [0.97, 0.80, 0.45] }
+            else { let t = ((x * 3 + y * 5) % 23) as f32 * 0.0008; [0.010 + t, 0.009 + t, 0.008 + t] }
+        });
+        let flower = Rgb32f::from_fn(512, 384, |x, y| {
+            let (dx, dy) = (x as f32 - 256.0, y as f32 - 192.0);
+            if dx * dx + dy * dy < 70.0 * 70.0 { [0.90, 0.91, 0.88] }
+            else { let t = ((x * 7 + y * 13) % 17) as f32 * 0.003; [0.02 + t, 0.07 + t, 0.02 + t] }
+        });
+        for (name, img) in [("moon", moon), ("night", night), ("flower", flower)] {
+            assert_eq!(exposure_correction(&ev(&img), false), 0.0, "{name}");
+        }
+        // Firelight is protected by the candidate's emitter detection.
+        assert_eq!(exposure_correction(&ev(&exposed_scene(0.2, 0.003)), true), 0.0);
     }
 
     #[test]

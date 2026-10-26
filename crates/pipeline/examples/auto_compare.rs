@@ -176,11 +176,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             "old": {"proposed": tone_json(&old.proposed), "final": tone_json(&old.final_tone), "guard": old.guard_reasons,
                     "white": w1, "black": b1, "mean_luma": l1},
             "new": {"proposed": tone_json(&new.proposed), "final": tone_json(&new.final_tone), "guard": new.guard_reasons,
+                    "exposure_correction": new.exposure_correction_ev,
                     "white": w2, "black": b2, "mean_luma": l2},
             "original": {"white": w0, "black": b0, "mean_luma": l0},
         });
-        println!("{name}: luma {l0:.0} -> old {l1:.0} / new {l2:.0}; EV old {:+.2} new {:+.2}; white% {:.2}/{:.2}/{:.2}; guard old {:?} new {:?}",
-            old.final_tone.exposure, new.final_tone.exposure, w0 * 100.0, w1 * 100.0, w2 * 100.0,
+        println!("{name}: luma {l0:.0} -> old {l1:.0} / new {l2:.0}; EV old {:+.2} new {:+.2} (stage 1 {:+.2}); white% {:.2}/{:.2}/{:.2}; black% {:.2}/{:.2}/{:.2}; guard old {:?} new {:?}",
+            old.final_tone.exposure, new.final_tone.exposure, new.exposure_correction_ev,
+            w0 * 100.0, w1 * 100.0, w2 * 100.0, b0 * 100.0, b1 * 100.0, b2 * 100.0,
             old.guard_reasons, new.guard_reasons);
         rows.push(row);
     }
