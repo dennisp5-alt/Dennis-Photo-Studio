@@ -43,6 +43,21 @@ public final class AutoAnalyzer {
     public static EditRecipe suggest(Metrics m) {
         EditRecipe r=new EditRecipe();
         float range=m.p90-m.p10;
+        // A predominantly black scene with a small luminous subject is intentional,
+        // not an underexposed daylight photograph. Fire, night lights and stars
+        // should not trigger broad exposure and shadow corrections.
+        boolean lowKey=m.shadowShare>.72f && m.avgLuma<.20f && m.p90<.40f;
+        if(lowKey) {
+            r.exposure=0f;
+            r.highlights=-.06f;
+            r.shadows=0f;
+            r.contrast=.025f;
+            r.vibrance=0f;
+            r.warmth=0f;
+            r.clarity=.025f;
+            r.summary="Local tonal assessment • low-key scene protected. Preserved dark atmosphere, black background and luminous subject.";
+            return r;
+        }
         // Deliberately restrained, scene-dependent and deterministic. Not semantic AI.
         if(m.avgLuma<.32f)r.exposure=EditRecipe.clamp((.4f-m.avgLuma)*1.5f,0,.34f);
         else if(m.avgLuma>.68f)r.exposure=EditRecipe.clamp((.55f-m.avgLuma)*1.1f,-.22f,0);
@@ -50,12 +65,16 @@ public final class AutoAnalyzer {
         // Preserve the photograph's natural shadow depth. Sparse dark pixels should not
         // trigger a blanket lift; even heavily shadowed scenes have a restrained cap.
         r.shadows=EditRecipe.clamp(.025f+Math.max(0f,m.shadowShare-.09f)*.38f,0,.16f);
-        r.contrast=EditRecipe.clamp((.60f-range)*.22f,-.08f,.16f);
-        r.vibrance=m.avgSat<.30f?.15f:.055f;
+        // A small scene-aware midtone punch. Preserve established highlight/shadow
+        // protections and never compensate for broad range by flattening contrast.
+        r.contrast=EditRecipe.clamp(.105f+(.55f-range)*.20f,.045f,.18f);
+        // Vibrance adapts to existing colour. Naturally saturated flowers need
+        // much less added colour than muted water/landscapes.
+        r.vibrance=EditRecipe.clamp(.225f-.30f*m.avgSat,.04f,.17f);
         r.warmth=EditRecipe.clamp(-m.redBias*.14f,-.09f,.09f);
         r.clarity=range<.43f?.13f:.075f;
         r.summary=String.format(java.util.Locale.US,
-            "Local tonal assessment • %s light, %s tonal range. Gentle shadow lift protects dark depth and natural colour.",
+            "Local tonal assessment • %s light, %s tonal range. Added restrained midtone contrast and adaptive vibrance while protecting dark depth.",
             m.avgLuma<.37?"low":m.avgLuma>.64?"bright":"balanced",
             range<.43?"compressed":"good");
         return r;

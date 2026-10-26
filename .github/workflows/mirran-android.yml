@@ -3,7 +3,7 @@ name: MIRRAN Android Debug APK
 on:
   push:
     branches:
-      - experiment/mirran-v0.1.1-shadow-navigation
+      - experiment/mirran-v0.1.2-natural-punch
     paths:
       - 'mirran/**'
       - '.github/workflows/mirran-android.yml'
@@ -26,12 +26,24 @@ jobs:
           gradle-version: '8.11.1'
       - name: Syntax check private bridge
         run: node --check mirran/server/index.mjs
+      - name: Test local Auto tonal policy
+        working-directory: mirran
+        run: |
+          mkdir -p build/local-tests
+          javac -d build/local-tests \
+            tests/stubs/android/graphics/Bitmap.java \
+            tests/stubs/org/json/JSONObject.java \
+            app/src/main/java/com/mirran/photo/EditRecipe.java \
+            app/src/main/java/com/mirran/photo/AutoAnalyzer.java \
+            app/src/main/java/com/mirran/photo/ToneEngine.java \
+            tests/AutoPolicyTest.java
+          java -cp build/local-tests com.mirran.photo.AutoPolicyTest
       - name: Build MIRRAN
         working-directory: mirran
         run: gradle --no-daemon --stacktrace :app:assembleDebug
       - name: Upload MIRRAN debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: MIRRAN-v0.1.1-debug-apk
+          name: MIRRAN-v0.1.2-debug-apk
           path: mirran/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14

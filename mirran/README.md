@@ -1,6 +1,15 @@
-# MIRRAN — Intelligent Photo Studio (v0.1.1 experimental)
+# MIRRAN — Intelligent Photo Studio (v0.1.2 experimental)
 
 Native Java Android project, fully separate from approved Dennis Craft Mobile, LumaWorks, and other production editors. Main branch and all approved branches are left unchanged.
+
+## v0.1.2 changes
+
+- Slightly stronger midtone contrast (approximately +5 to +18 local Auto) without another shadow lift.
+- Adaptive vibrance: muted scenes receive more, highly saturated images receive less.
+- Low-key night / fire protection: no automatic exposure boost, shadow lift, or artificial colour boost when the image is intentionally near black.
+- JVM regression tests for natural midtone punch, fire protection, saturation limits and true-black output.
+- Existing v0.1.1 new-photo control and shadow safeguards preserved.
+- Only local Auto's recipe changed. No AI server settings, image picker, manual control scale, or other existing app touched.
 
 ## v0.1.1 changes
 
