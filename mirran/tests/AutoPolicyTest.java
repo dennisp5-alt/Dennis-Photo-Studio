@@ -76,6 +76,14 @@ public final class AutoPolicyTest {
         check(noiseM.noiseIndex>.0135f,"Noise proxy missed fine granular pattern");
         EditRecipe grained=AutoAnalyzer.suggest(noiseM);
         check(grained.clarity==0f,"Auto must not sharpen obvious grain");
-        System.out.println("MIRRAN tonal policy: all 11 tests passed.");
+        // Per-channel headroom safeguard: a saturated red highlight must
+        // remain below clipping after moderate, positive midtone contrast.
+        Bitmap red=solid(20,20,0xfff32036);
+        EditRecipe strong=new EditRecipe();
+        strong.contrast=.185f;strong.vibrance=.09f;
+        ToneEngine.applyInPlace(red,strong);
+        check(((red.getPixel(10,10)>>16)&255)<255,
+            "Bright saturated red channel clipped after editing");
+        System.out.println("MIRRAN tonal policy: all 12 tests passed.");
     }
 }

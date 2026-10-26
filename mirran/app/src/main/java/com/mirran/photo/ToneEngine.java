@@ -49,6 +49,11 @@ public final class ToneEngine {
                 // Apply exposure once, then adjust the new luminance by the tone curve.
                 // Avoid double-boosting exposure and clipping bright colours.
                 float delta=target-clip(lum*gain);
+                // Positive tonal changes must not create new blown RGB
+                // channels on bright clothing, sunlit skin, or saturated skies.
+                float channelPeak=Math.max(r,Math.max(g,bl))*gain;
+                if(delta>0f && channelPeak>.82f)
+                    delta*=1f-smoothstep(.82f,.98f,channelPeak);
                 r=clip(r*gain + delta);
                 g=clip(g*gain + delta);
                 bl=clip(bl*gain + delta);
@@ -61,7 +66,7 @@ public final class ToneEngine {
                 boolean skin=r>g && g>bl && r-g>.04 && g-bl>.025 && r<.92;
                 // Bright saturated petals and illuminated skin must not clip
                 // further when the overall scene needs extra colour presence.
-                float highlightGuard=1f-.75f*smoothstep(.90f,.99f,max);
+                float highlightGuard=1f-smoothstep(.88f,.98f,max);
                 float vibGain=1+vibrance*(1-sat)*(skin?.43f:1f)*highlightGuard;
                 r=clip(grey+(r-grey)*vibGain);g=clip(grey+(g-grey)*vibGain);
                 bl=clip(grey+(bl-grey)*vibGain);
