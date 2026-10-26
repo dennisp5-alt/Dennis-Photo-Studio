@@ -298,7 +298,7 @@ mod tests {
     #[test]
     fn strong_daylight_dimming_is_not_rewarded() {
         let original=Rgba8::from_fn(80,64,|_,y|{
-            if y<30 {[65,170,238,255]} else {[88,128,79,255]}
+            if y<30 {[164,236,250,255]} else {[88,128,79,255]}
         });
         let dim=Rgba8::from_fn(80,64,|_,y|{
             if y<30 {[38,125,184,255]} else {[61,93,51,255]}
