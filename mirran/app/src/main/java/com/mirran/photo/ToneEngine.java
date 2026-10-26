@@ -23,7 +23,9 @@ public final class ToneEngine {
         final float contrast=EditRecipe.clamp(e.contrast*2.65f,-.82f,.82f);
         final float shadows=e.shadows*.40f, highs=e.highlights*.48f;
         final float vibrance=e.vibrance*.90f, warmth=e.warmth*.085f;
-        final float clarity=e.clarity*.28f;
+        // Clarity is a restrained microcontrast adjustment, not noise removal.
+        // Local Auto suppresses it when image statistics suggest visible grain.
+        final float clarity=e.clarity*.20f;
         int[] prev=new int[w],cur=new int[w],next=new int[w];
         b.getPixels(cur,0,w,0,0,w,1);
         if(h>1)b.getPixels(next,0,w,0,1,w,1);
@@ -69,7 +71,11 @@ public final class ToneEngine {
                     int b1=cur[x-2],b2=cur[x+2];
                     int d1=next[x-2],d2=next[x],d3=next[x+2];
                     float avg=(yi(a1)+yi(a2)+yi(a3)+yi(b1)+yi(c)+yi(b2)+yi(d1)+yi(d2)+yi(d3))/9f;
-                    float diff=(lum-avg)*clarity;
+                    // Avoid adding granular texture to already dark or nearly
+                    // clipped areas; the original pixels stay unblurred.
+                    float textureGuard=smoothstep(.14f,.34f,lum)*
+                        (1f-.62f*smoothstep(.78f,.97f,lum));
+                    float diff=(lum-avg)*clarity*textureGuard;
                     r=clip(r+diff);g=clip(g+diff);bl=clip(bl+diff);
                 }
                 out[x]=(a<<24)|((int)(r*255+.5f)<<16)|((int)(g*255+.5f)<<8)|(int)(bl*255+.5f);

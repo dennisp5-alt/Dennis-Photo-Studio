@@ -1,6 +1,21 @@
-# MIRRAN — Intelligent Photo Studio (v0.1.4 experimental)
+# MIRRAN — Intelligent Photo Studio (v0.1.5 experimental)
 
 Native Java Android project, fully separate from approved Dennis Craft Mobile, LumaWorks, and other production editors. Main branch and all approved branches are left unchanged.
+
+## v0.1.5 scene-quality audit
+
+Audited user-provided daytime portrait, duck/water, two outdoor family scenes, and low-light flower. Private reference images are **not** committed to the repository.
+
+- Replaced the flat mean-only decision model with mean + global percentiles, central brightness and central upper quartile, per-channel clipping, blue-area share, neutral-pixel fraction, and a cautious high-frequency noise proxy. Sampling remains fast and entirely offline.
+- Dark-background / bright-subject detection protects a well-lit flower from inappropriate global exposure/black lift. Existing low-key/night/fire safety is preserved.
+- Neutral-area-gated warmth eliminates global R-minus-B false positives from blue skies or water. It does **not** claim semantic or colour-calibrated white balance.
+- High blue share / channel clipping restrict extra vibrance; highlight roll-off remains conservative.
+- Avoids amplifying existing JPEG grain: noisy samples turn off Auto Clarity; pixel-level Clarity now includes deep-shadow/highlight guards. No claim of denoising.
+- Reduced overly broad default contrast and vibrance on already punchy JPEGs, without removing manual controls.
+- Synthetic regression tests cover 11 scenarios including bright-subject background, saturated sky, clipped channels, fine noise, shadows and midtones.
+- Intentionally **unchanged**: album swipe, native photo picker, private AI endpoint, original-comparison gestures, JPEG encoder quality 100 and original-dimension export.
+
+Limits: These improvements use statistics and heuristics, **not actual subject masks or neural visual understanding**. No full-resolution image was device-rendered or colour-managed by these tests. Already clipped channels and baked JPEG sharpening are not recoverable. Additional on-device A/B testing is required.
 
 ## v0.1.4 changes
 

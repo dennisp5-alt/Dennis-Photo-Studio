@@ -48,6 +48,34 @@ public final class AutoPolicyTest {
         ToneEngine.applyInPlace(nearWhite,punch);
         int high=nearWhite.getPixel(5,5)&255;
         check(high>=246 && high<=252,"White highlight needs protection: "+high);
-        System.out.println("MIRRAN tonal policy: all 7 tests passed.");
+        // A dark backdrop must not fool local Auto into brightening a
+        // separately illuminated centre subject (dark mulch, pale petals).
+        Bitmap darkFlower=solid(100,100,0xff17151b);
+        for(int y=25;y<75;y++)for(int x=25;x<75;x++)
+            darkFlower.setPixel(x,y,0xffe5d9a8);
+        AutoAnalyzer.Metrics darkMetrics=AutoAnalyzer.measure(darkFlower);
+        EditRecipe subject=AutoAnalyzer.suggest(darkMetrics);
+        check(subject.exposure==0f,"Bright subject must not be overexposed");
+        check(subject.shadows<=.0451f,"Dark flower background must be preserved");
+        check(subject.clarity<=.0251f,"Noise/subject protection lost");
+        // Large blue areas are not a white-balance reference.
+        Bitmap sky=solid(100,100,0xff0875f8);
+        EditRecipe blue=AutoAnalyzer.suggest(AutoAnalyzer.measure(sky));
+        check(blue.warmth==0f,"Sky must not dictate white balance");
+        check(blue.vibrance<=.0251f,"Blue saturation limit missing");
+        // Channel clipping may exist even when the luminance histogram
+        // looks normal (electric-blue skies and brightly coloured clothing).
+        Bitmap blueClip=solid(100,100,0xff1984ff);
+        EditRecipe clipped=AutoAnalyzer.suggest(AutoAnalyzer.measure(blueClip));
+        check(clipped.vibrance<=.0201f,"Blue channel clipping not protected");
+        // Alternating fine texture should not be amplified by Auto Clarity.
+        Bitmap noisy=solid(100,100,0xff707070);
+        for(int y=0;y<100;y++)for(int x=0;x<100;x++)
+            noisy.setPixel(x,y,(x+y)%2==0?0xff686868:0xff787878);
+        AutoAnalyzer.Metrics noiseM=AutoAnalyzer.measure(noisy);
+        check(noiseM.noiseIndex>.0135f,"Noise proxy missed fine granular pattern");
+        EditRecipe grained=AutoAnalyzer.suggest(noiseM);
+        check(grained.clarity==0f,"Auto must not sharpen obvious grain");
+        System.out.println("MIRRAN tonal policy: all 11 tests passed.");
     }
 }
