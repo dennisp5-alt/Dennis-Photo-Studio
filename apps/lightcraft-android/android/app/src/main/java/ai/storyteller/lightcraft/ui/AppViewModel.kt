@@ -2999,12 +2999,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val contrast=t.optDouble("contrast",0.0).toInt()
                 val shadow=t.optDouble("shadows",0.0).toInt()
                 val highlight=t.optDouble("highlights",0.0).toInt()
+                val whites=t.optDouble("whites",0.0).toInt()
+                val blacks=t.optDouble("blacks",0.0).toInt()
+                val saturation=t.optDouble("saturation",0.0).toInt()
                 val lights=t.optDouble("curve_lights",0.0).toInt()
                 val vibrance=t.optDouble("vibrance",0.0).toInt()
                 val darks=t.optDouble("curve_darks",0.0).toInt()
                 val wb=result.optJSONObject("whiteBalance")
                 val wbStatus=if(result.optBoolean("manualWbPreserved",false)) {
-                    "Your manually chosen white balance remains unchanged."
+                    "Your selected white balance preset is preserved."
+                } else if (!result.optBoolean("whiteBalanceApplied",false)) {
+                    "Existing white balance preserved; no verified correction applied."
                 } else when(wb?.optString("decision")) {
                     "warm_light_preserved" -> "Warm ambient light preserved; Auto WB unchanged."
                     "corrected" -> "White balance: evidence-supported correction proposed."
@@ -3077,7 +3082,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 ed.autoPreview=AutoPreviewData(
                     original=original,
                     candidate=candidate,
-                    summary="Exposure $ev EV • Contrast $contrast • Highlights $highlight • Shadows $shadow • Vibrance $vibrance • Curves D$darks/L$lights",
+                    summary="Exposure $ev EV • Contrast $contrast • Highlights $highlight • Shadows $shadow • Whites $whites • Blacks $blacks • Vibrance $vibrance • Saturation $saturation • Curves D$darks/L$lights",
                     unchanged=result.optBoolean("noChangeRecommended",false),
                     modelStatus=modelExplanation,
                     sourceSettings=oldSettings,
@@ -3119,10 +3124,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private var smartAutoInFlight = false
+
     fun applySmartAuto() {
         val ed = editor ?: return
         val e = engine ?: return
+        if (smartAutoInFlight) return
+        smartAutoInFlight = true
         viewModelScope.launch {
+            try {
             runCatching {
                 e.command {
                     val result = JSONObject(execute("develop.auto", "{}"))
@@ -3130,6 +3140,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }.onSuccess { (snapshot, result) ->
                 ed.update(snapshot)
+                if (result.optBoolean("noChange",false)) {
+                    say("Smart Auto • settings already current; no extra edit", brief = true)
+                    return@onSuccess
+                }
                 // If Curves is already displayed, refresh the same engine
                 // samples which the image renderer uses; never invent a shape.
                 if (ed.sub == "curve") refreshCurve()
@@ -3138,7 +3152,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val wb = result.optJSONObject("whiteBalance")
                 val decision = wb?.optString("decision") ?: "manual"
                 ed.wbAutoStatus = if (result.optBoolean("manualWbPreserved",false)) {
-                    "Your manually set white balance was preserved. Choose WB → Auto to request a new correction."
+                    "Your chosen white balance preset was preserved. Choose WB → Auto to correct it explicitly."
+                } else if (!result.optBoolean("whiteBalanceApplied",false)) {
+                    "Existing white balance retained; no trustworthy combined correction applied."
                 } else when (decision) {
                     "corrected" -> "Smart Auto also adjusted white balance using spatially consistent neutral areas."
                     "already_neutral" -> "White balance is already near neutral; no change needed."
@@ -3156,6 +3172,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     " • Saturation " + sat.toInt() +
                     " • Curves D" + curveDarks.toInt() + "/L" + curveLights.toInt(), brief = true)
             }.onFailure { say(it.message) }
+            } finally {
+                smartAutoInFlight = false
+            }
         }
     }
 
