@@ -5,6 +5,9 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Rect
 import android.util.Base64
 import org.json.JSONObject
 import java.nio.ByteBuffer
@@ -49,7 +52,21 @@ internal object SemanticMasker {
     fun segment(context: Context, original: Bitmap, kind: String): JSONObject {
         require(kind in setOf("subject", "background", "sky")) { "Unknown semantic selection" }
         require(original.width > 0 && original.height > 0) { "Empty photograph" }
-        val resized = Bitmap.createScaledBitmap(original, INPUT, INPUT, true)
+        // Preserve proportions only for Subject. Previously all portrait
+        // photographs were distorted into a square before classification.
+        // Sky and Background deliberately retain their approved legacy path.
+        val subjectFit = if (kind == "subject")
+            SubjectAspectMapper.fit(original.width, original.height, INPUT) else null
+        val resized = if (subjectFit != null) {
+            val square = Bitmap.createBitmap(INPUT, INPUT, Bitmap.Config.ARGB_8888)
+            Canvas(square).apply {
+                drawColor(0xFF777777.toInt())
+                drawBitmap(original, null, Rect(subjectFit.left, subjectFit.top,
+                    subjectFit.left + subjectFit.width,
+                    subjectFit.top + subjectFit.height), Paint(Paint.FILTER_BITMAP_FLAG))
+            }
+            square
+        } else Bitmap.createScaledBitmap(original, INPUT, INPUT, true)
         val pixels = IntArray(INPUT * INPUT)
         resized.getPixels(pixels, 0, INPUT, 0, 0, INPUT, INPUT)
         if (resized !== original) resized.recycle()
@@ -78,6 +95,10 @@ internal object SemanticMasker {
         val w = scores[0][0].size
         require(h == w && h in 16..1024) { "Unsupported mask resolution ${w}×${h}" }
         val side = h
+        // Reproject the model's letterboxed Subject logits into the editor's
+        // normalized 128x128 coordinates. This happens BEFORE class ranking,
+        // so padding can never be mistaken for part of the photograph.
+        val subjectMap = subjectFit?.let { SubjectAspectMapper.SampleMap(side, it, INPUT) }
         val bestClass = IntArray(side * side)
         val bestScore = FloatArray(side * side) { Float.NEGATIVE_INFINITY }
         val runnerUp = FloatArray(side * side) { Float.NEGATIVE_INFINITY }
@@ -86,7 +107,7 @@ internal object SemanticMasker {
         for (label in scores.indices) {
             for (y in 0 until side) for (x in 0 until side) {
                 val i = y * side + x
-                val value = scores[label][y][x]
+                val value = subjectMap?.at(scores[label], x, y) ?: scores[label][y][x]
                 if (value > bestScore[i]) {
                     runnerUp[i] = bestScore[i]
                     bestScore[i] = value
@@ -130,9 +151,11 @@ internal object SemanticMasker {
         val margins = FloatArray(side * side)
         for (y in 0 until side) for (x in 0 until side) {
             val i = y * side + x
-            val chosen = scores[label][y][x]
+            val chosen = subjectMap?.at(scores[label], x, y) ?: scores[label][y][x]
             var other = Float.NEGATIVE_INFINITY
-            for (c in scores.indices) if (c != label) other = max(other, scores[c][y][x])
+            for (c in scores.indices) if (c != label) {
+                other = max(other, subjectMap?.at(scores[c], x, y) ?: scores[c][y][x])
+            }
             margins[i] = (chosen - other).coerceIn(-12.0f, 12.0f)
         }
         val outSide: Int
@@ -148,7 +171,18 @@ internal object SemanticMasker {
             val evidence = if (kind == "sky")
                 SemanticMaskRefinement.retainSkyRegions(margins, side)
             else margins
-            mask = SemanticMaskRefinement.refine(evidence, side, pixels, INPUT, outSide)
+            val guidePixels = if (kind == "subject") {
+                // Upsampling guidance must use the original image coordinates,
+                // never the letterboxed model input or its grey padding.
+                val guide = Bitmap.createScaledBitmap(original, INPUT, INPUT, true)
+                val p = IntArray(INPUT * INPUT)
+                guide.getPixels(p, 0, INPUT, 0, 0, INPUT, INPUT)
+                if (guide !== original) guide.recycle()
+                p
+            } else pixels
+            mask = SemanticMaskRefinement.refine(
+                evidence, side, guidePixels, INPUT, outSide,
+                subjectBoundary = kind == "subject")
         }
         val deflater = Deflater(8, true) // raw DEFLATE, matching miniz_oxide::compress_to_vec
         val packed = try {
