@@ -271,6 +271,7 @@ class EditorState(val photoId: ULong, info: PhotoInfo, val device: DeviceOrigin?
     var showingBefore by mutableStateOf(false)
     var autoPreview by mutableStateOf<AutoPreviewData?>(null)
     var autoPreviewLoading by mutableStateOf(false)
+    var classicAutoApplying = false
 
     /** View options' sheet is open over the editor. */
     var viewOptions by mutableStateOf(false)
@@ -3004,12 +3005,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val darks=t.optDouble("curve_darks",0.0).toInt()
                 val wb=result.optJSONObject("whiteBalance")
                 val wbStatus=if(result.optBoolean("manualWbPreserved",false)) {
-                    "Your manually chosen white balance remains unchanged."
+                    "Your selected white-balance preset was preserved."
+                } else if(result.optBoolean("whiteBalanceChanged",false)) {
+                    "White balance: neutral-region correction included and validated."
                 } else when(wb?.optString("decision")) {
-                    "warm_light_preserved" -> "Warm ambient light preserved; Auto WB unchanged."
-                    "corrected" -> "White balance: evidence-supported correction proposed."
-                    "already_neutral" -> "White balance: unchanged; no sufficiently reliable improvement."
-                    else -> "White balance: camera setting retained."
+                    "warm_light_preserved" -> "Original warm lighting preserved."
+                    "already_neutral" -> "Camera white balance retained: already near neutral."
+                    "ambiguous" -> "Original white balance retained: neutral regions disagree."
+                    "no_neutral" -> "Original white balance retained: no trustworthy neutral surface."
+                    else -> "Original white balance retained."
                 }
                 val toneAudit=result.optJSONObject("toneAudit")
                 val evidence=toneAudit?.optJSONObject("evidence")
@@ -3077,7 +3081,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 ed.autoPreview=AutoPreviewData(
                     original=original,
                     candidate=candidate,
-                    summary="Exposure $ev EV • Contrast $contrast • Highlights $highlight • Shadows $shadow • Vibrance $vibrance • Curves D$darks/L$lights",
+                    summary="Exposure $ev EV • Contrast $contrast • Highlights $highlight • Shadows $shadow • Whites ${t.optDouble("whites",0.0).toInt()} • Blacks ${t.optDouble("blacks",0.0).toInt()} • Vibrance $vibrance • Saturation ${t.optDouble("saturation",0.0).toInt()} • Curves D$darks/L$lights",
                     unchanged=result.optBoolean("noChangeRecommended",false),
                     modelStatus=modelExplanation,
                     sourceSettings=oldSettings,
@@ -3096,6 +3100,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val ed=editor ?: return
         val e=engine ?: return
         val approved=ed.autoPreview ?: return
+        if (ed.classicAutoApplying) return
+        ed.classicAutoApplying=true
         ed.autoPreview=null
         viewModelScope.launch {
             runCatching {
@@ -3116,12 +3122,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }.onFailure {
                 say("Auto preview not applied: ${it.message}")
             }
+            ed.classicAutoApplying=false
         }
     }
 
     fun applySmartAuto() {
         val ed = editor ?: return
         val e = engine ?: return
+        if (ed.classicAutoApplying) return
+        ed.classicAutoApplying=true
         viewModelScope.launch {
             runCatching {
                 e.command {
@@ -3130,6 +3139,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }.onSuccess { (snapshot, result) ->
                 ed.update(snapshot)
+                if (result.optBoolean("noChangeApplied",false)) {
+                    say("Classic Auto • no further safe correction", brief=true)
+                    return@onSuccess
+                }
                 // If Curves is already displayed, refresh the same engine
                 // samples which the image renderer uses; never invent a shape.
                 if (ed.sub == "curve") refreshCurve()
@@ -3138,13 +3151,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val wb = result.optJSONObject("whiteBalance")
                 val decision = wb?.optString("decision") ?: "manual"
                 ed.wbAutoStatus = if (result.optBoolean("manualWbPreserved",false)) {
-                    "Your manually set white balance was preserved. Choose WB → Auto to request a new correction."
+                    "Your selected white-balance preset was preserved."
+                } else if (result.optBoolean("whiteBalanceChanged",false)) {
+                    "Classic Auto corrected white balance using reliable neutral areas."
                 } else when (decision) {
-                    "corrected" -> "Smart Auto also adjusted white balance using spatially consistent neutral areas."
-                    "already_neutral" -> "White balance is already near neutral; no change needed."
-                    "ambiguous" -> "White balance was left unchanged: neutral-looking regions disagree."
-                    "no_neutral" -> "White balance was left unchanged: no reliable neutral surfaces found."
-                    else -> null
+                    "warm_light_preserved" -> "Warm ambient lighting preserved."
+                    "already_neutral" -> "Original WB retained: already near neutral."
+                    "ambiguous" -> "Original WB retained: neutral regions disagree."
+                    "no_neutral" -> "Original WB retained: no reliable neutral surface."
+                    else -> "Original white balance preserved."
                 }
                 val ev = tone?.optDouble("exposure", 0.0) ?: 0.0
                 val vib = tone?.optDouble("vibrance", 0.0) ?: 0.0
@@ -3156,6 +3171,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     " • Saturation " + sat.toInt() +
                     " • Curves D" + curveDarks.toInt() + "/L" + curveLights.toInt(), brief = true)
             }.onFailure { say(it.message) }
+            ed.classicAutoApplying=false
         }
     }
 
