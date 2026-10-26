@@ -10,7 +10,11 @@ It installs alongside the other test builds.
   photos unchanged) but that the real weakness is exposure strength in both versions:
   −1.3 EV photos got only about +0.5 EV, −2 EV photos about +0.5 EV, and overexposed photos
   got no correction at all.
-- beta.2: adds a stage-1 global exposure correction (below). Pending CI.
+- beta.2 (`20857fe`, run 40402665616): adds a stage-1 global exposure correction (below).
+  CI green (all tests, APK). A/B: 17 normal photos unchanged except kodim02 (+0.27 → +0.48);
+  −1.3 EV photos now +0.86…+1.53 (mean luma 92–121 vs originals 83–124; v0.6.30 69–97);
+  −2 EV +1.68/+1.80; overexposed −0.23/−0.67; Moon, night, fire, white flower unchanged.
+  Handed to Dennis for testing on his phone.
 - CI (`.github/workflows/dps-v0632-lumaworks-smart-auto-fixes.yml`):
   - job 1: `auto_compare` A/B renders → branch `eval/lumaworks-v0632-auto-compare`
     (original | v0.6.30 | v0.6.32 per photo, plus `results.json`, `summary.txt`),
@@ -19,7 +23,7 @@ It installs alongside the other test builds.
 - Other branches from 26 Oct also work on Auto: `experiment/lumaworks-v0.6.31-smart-auto-reliability`
   and `experiment/lumaworks-v0.6.32-classic-auto-repairs`. This branch is independent of them.
 
-## Next steps when resuming
+## Next steps (if resuming)
 1. Check the run: `gh api repos/dennisp5-alt/Dennis-Photo-Studio/actions/runs?branch=experiment/lumaworks-v0.6.32-smart-auto-fixes`.
 2. Fix any test failures, then `git fetch origin eval/lumaworks-v0632-auto-compare` and look
    at `b_under13_*`, `c_under20_*`, `e_over08_*` and the 17 `a_orig_*` (should be unchanged
