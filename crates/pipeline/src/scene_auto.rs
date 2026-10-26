@@ -190,7 +190,7 @@ mod tests {
     #[test] fn manual_white_balance_is_not_changed(){
         let i=src(|_,_|[0.27,0.33,0.35]);
         let mut s=DevelopSettings::default();s.effects.dehaze=5.0;
-        let old=s.wb;
+        let old=s.wb.clone();
         let _=evaluate(&i,&SourceInfo::default(),&s);
         assert_eq!(s.wb,old);
     }
