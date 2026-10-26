@@ -3076,7 +3076,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     ". WB decision " + (wb?.optString("reason","unknown") ?: "manual") +
                     ". Source " + (if(evidence?.optBoolean("source_raw",false)==true) "RAW" else "rendered") +
                     "."
-                val modelExplanation="Protected Smart Auto uses the original camera-colour, highlight and low-light safeguards. $wbStatus " +
+                val finishing=result.optJSONObject("photoFinish")
+                val finishingNotes=listOfNotNull(
+                    "Local backlit-subject recovery".takeIf { finishing?.optBoolean("local_subject_lift",false)==true },
+                    "Red highlight protection".takeIf { finishing?.optBoolean("red_highlight_protection",false)==true },
+                    "White flower detail protection".takeIf { finishing?.optBoolean("white_highlight_protection",false)==true },
+                    "Twilight colour protection".takeIf { finishing?.optBoolean("twilight_colour_protection",false)==true },
+                ).joinToString(", ").ifEmpty { "No extra selective correction warranted" }
+                val modelExplanation="Classic Photo Refinement: $finishingNotes. $wbStatus " +
                     "Compare Original and Suggested before applying."
                 ed.autoPreview=AutoPreviewData(
                     original=original,
@@ -3086,7 +3093,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     modelStatus=modelExplanation,
                     sourceSettings=oldSettings,
                     previewSettings=newSettings,
-                    auditDetails=auditDetails,
+                    auditDetails=auditDetails + " Classic Photo Refinement: " + finishingNotes + ".",
                 )
             } catch (ex: Exception) {
                 say("Smart Auto preview unavailable: ${ex.message}")
