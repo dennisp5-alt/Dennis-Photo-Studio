@@ -84,10 +84,14 @@ fn candidate(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> SceneRepor
     let clipped_fraction=all.clipped as f64/n;
     // In particular: don't call any bright-background portrait, flower,
     // moon/fire or flat night a hazy landscape.
+    // Bright water, textured fur/feathers and indoor pale walls often
+    // mimic haze by colour alone. A low-texture top region plus absence
+    // of significant warm subject area are independent requirements.
     if top.sky_like()<0.34 || mid.sky_like()<0.16
+        || top.textured()>0.10
         || bottom.textured()<0.08 || bottom.useful<350
-        || warm_fraction>0.12 || emitter_fraction>0.01
-        || dark_fraction>0.32 || clipped_fraction>0.045 {
+        || warm_fraction>0.06 || emitter_fraction>0.01
+        || dark_fraction>0.24 || clipped_fraction>0.045 {
         return SceneReport {scene:"protected_or_unconfirmed",evidence:"scene_evidence_insufficient",..Default::default()};
     }
     let top_score=((top.sky_like()-0.34)/0.32).clamp(0.0,1.0);
@@ -175,6 +179,34 @@ mod tests {
         let i=src(|x,y|if x>80&&x<260&&y>30&&y<220
             {[0.72,0.024,0.23]}else{[0.04,0.24,0.05]});
         assert_eq!(check(&i).dehaze,0.0);
+    }
+    #[test] fn bright_reflective_water_not_classified_as_haze(){
+        let i=src(|x,y|{
+            let t=((x*7+y*11)%37) as f32*0.009;
+            if y<100 {[0.19+t,0.25+t,0.29+t]}
+            else {[0.10+t,0.20+t,0.17+t]}
+        });
+        assert_eq!(check(&i).dehaze,0.0);
+    }
+    #[test] fn warm_subject_in_soft_background_is_protected(){
+        let i=src(|x,y| {
+            if x>110 && x<220 && y>35 && y<220 {[0.49,0.30,0.20]}
+            else if y<85 {[0.34,0.39,0.44]}
+            else {[0.14+((x+y)%17) as f32*0.008,0.27,0.13]}
+        });
+        assert_eq!(check(&i).dehaze,0.0);
+    }
+    #[test] fn smooth_distant_haze_is_at_least_considered(){
+        let i=src(|x,y|{
+            if y<80 {[0.35,0.42,0.50]}
+            else if y<160 {[0.28,0.37,0.40]}
+            else {
+                let t=((x*17+y*13)%23) as f32*0.008;
+                [0.12+t,0.19+t,0.27+t]
+            }
+        });
+        let report=candidate(&i,&SourceInfo::default(),&DevelopSettings::default());
+        assert!(report.confidence>0.0,"scene evidence missing: {report:?}");
     }
     #[test] fn manual_dehaze_is_preserved(){
         let i=src(|_,_|[0.3,0.32,0.35]);
