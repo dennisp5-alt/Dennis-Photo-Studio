@@ -46,6 +46,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     adjusted.curve.darks=t.curve_darks;
     adjusted.curve.lights=t.curve_lights;
     adjusted.curve.highlights=t.curve_highlights;
+    if scene.dehaze>0.0 { adjusted.effects.dehaze=scene.dehaze; }
     let req=RenderRequest::fit(1024,1024);
     let before=lightcraft_pipeline::render(&src,&info,&base,&req).image;
     let after=lightcraft_pipeline::render(&src,&info,&adjusted,&req).image;
