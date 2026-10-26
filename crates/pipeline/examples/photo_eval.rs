@@ -30,23 +30,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     });
     let info=SourceInfo::default();
     let base=DevelopSettings::default();
-    let audit=lightcraft_pipeline::auto::smart_auto_tone_report_balanced(&src,&info,&base);
-    let t=audit.final_tone;
-     let mut adjusted=base.clone();
-    adjusted.light.exposure=t.exposure;
-    adjusted.light.contrast=t.contrast;
-    adjusted.light.highlights=t.highlights;
-    adjusted.light.shadows=t.shadows;
-    adjusted.light.whites=t.whites;
-    adjusted.light.blacks=t.blacks;
-    adjusted.color.vibrance=t.vibrance;
-    adjusted.color.saturation=t.saturation;
-    adjusted.curve.shadows=t.curve_shadows;
-    adjusted.curve.darks=t.curve_darks;
-    adjusted.curve.lights=t.curve_lights;
-    adjusted.curve.highlights=t.curve_highlights;
-    let scene=lightcraft_pipeline::scene_auto::evaluate(&src,&info,&adjusted);
-    if scene.dehaze>0.0 { adjusted.effects.dehaze=scene.dehaze; }
+    // Match the EXACT native Smart Auto settings used by both Android
+    // Preview and Apply, including the final combined-render safety search.
+    let plan=lightcraft_pipeline::auto_reliability::plan(&src,&info,&base);
+    let audit=plan.tone_audit;
+    let scene=plan.scene;
+    let adjusted=plan.settings;
     let req=RenderRequest::fit(1024,1024);
     let before=lightcraft_pipeline::render(&src,&info,&base,&req).image;
     let after=lightcraft_pipeline::render(&src,&info,&adjusted,&req).image;
