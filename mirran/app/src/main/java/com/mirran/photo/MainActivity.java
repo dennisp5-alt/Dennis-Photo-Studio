@@ -41,14 +41,7 @@ public class MainActivity extends Activity {
     private int albumIndex=-1,loadSerial=0;
     private float touchX,touchY;
     private boolean showingCompare=false;
-    private final Runnable showCompare=()->{
-        if(originalPreview!=null && !busy && !showingCompare){
-            showingCompare=true;
-            photograph.setImageBitmap(originalPreview);
-            stageTag.setText("ORIGINAL · RELEASE TO COMPARE");
-            stageTag.setVisibility(View.VISIBLE);
-        }
-    };
+    private final Runnable showCompare=this::displayOriginalOnHold;
     private String activeTab="Light";
     private int renderGeneration=0;
     private boolean busy=false;
@@ -265,6 +258,14 @@ public class MainActivity extends Activity {
         albumStatus.setText(albumIndex>=0 && !albumPhotos.isEmpty()
             ? albumName.toUpperCase(Locale.US)+"  ·  "+(albumIndex+1)+" / "+albumPhotos.size()
             : "OPEN AN ALBUM FOR SWIPE NAVIGATION");
+    }
+    private void displayOriginalOnHold(){
+        if(originalPreview!=null && !busy && !showingCompare){
+            showingCompare=true;
+            photograph.setImageBitmap(originalPreview);
+            stageTag.setText("ORIGINAL · RELEASE TO COMPARE");
+            stageTag.setVisibility(View.VISIBLE);
+        }
     }
     private void restoreEdited(){
         if(showingCompare){
