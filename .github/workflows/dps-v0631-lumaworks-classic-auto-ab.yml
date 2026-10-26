@@ -357,12 +357,12 @@ jobs:
                          'imageGuidancePlacesBoundaryAcrossColorTransition',
                          'softRegionHasNoTextureDrivenHoles'):
               assert needle in test, needle
-          # Visible naming only. Keep package/application ID and existing library files.
+          # Isolated Classic Auto trial changes only its package/application identity and name.
           strings=Path('apps/lightcraft-android/android/app/src/main/res/values/strings.xml').read_text()
           drawer=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/LibrarySheets.kt').read_text()
           pages=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/DrawerPages.kt').read_text()
           gradle=Path('apps/lightcraft-android/android/app/build.gradle.kts').read_text()
-          assert '<string name="app_name">LumaWorks</string>' in strings
+          assert '<string name="app_name">LumaWorks Classic</string>' in strings
           assert 'Text("LumaWorks"' in drawer
           assert '"About LumaWorks"' in drawer and pages
           assert '"com.dennis.lumaworks.classic.v0631"' in gradle, 'Package identity must remain unchanged'
