@@ -3167,11 +3167,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val a = result.optJSONObject("result")
                 val texture = a?.optDouble("texture", 0.0) ?: 0.0
                 val clarity = a?.optDouble("clarity", 0.0) ?: 0.0
-                if (texture == 0.0 && clarity == 0.0) {
-                    say("Auto Effects • no additional texture or clarity recommended", brief = true)
+                val scene = result.optJSONObject("scene")
+                val dehaze = scene?.optDouble("dehaze", 0.0) ?: 0.0
+                if (texture == 0.0 && clarity == 0.0 && dehaze == 0.0) {
+                    say("Auto Effects • no additional correction; manual Dehaze preserved", brief = true)
                 } else {
                     say("Auto Effects • Texture " + texture.toInt() +
-                        " • Clarity " + clarity.toInt(), brief = true)
+                        " • Clarity " + clarity.toInt() +
+                        " • Dehaze " + dehaze.toInt(), brief = true)
                 }
             }.onFailure { say(it.message) }
         }
