@@ -24,6 +24,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod auto;
+pub mod auto_reliability;
 mod auto_finish;
 pub mod scene;
 pub mod scene_auto;
