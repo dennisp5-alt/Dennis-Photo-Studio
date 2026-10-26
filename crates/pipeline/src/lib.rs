@@ -26,6 +26,7 @@
 pub mod auto;
 mod auto_finish;
 pub mod scene;
+pub mod scene_auto;
 pub mod optionc;
 pub mod colorops;
 pub mod cull;
