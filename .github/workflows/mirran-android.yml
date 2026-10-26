@@ -3,7 +3,7 @@ name: MIRRAN Android Debug APK
 on:
   push:
     branches:
-      - experiment/mirran-v0.1.2-natural-punch
+      - experiment/mirran-v0.1.3-modern-picker-stronger-auto
     paths:
       - 'mirran/**'
       - '.github/workflows/mirran-android.yml'
@@ -44,6 +44,6 @@ jobs:
       - name: Upload MIRRAN debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: MIRRAN-v0.1.2-debug-apk
+          name: MIRRAN-v0.1.3-debug-apk
           path: mirran/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14

@@ -17,9 +17,12 @@ public final class ToneEngine {
     public static void applyInPlace(Bitmap b, EditRecipe e) {
         int w=b.getWidth(),h=b.getHeight();
         final float gain=(float)Math.pow(2,e.exposure*.9f);
-        final float contrast=e.contrast*.9f;
+        // In v0.1.2 this factor was just .9 and Auto's +10 contrast hardly
+        // moved real pixels. Make the adjustment genuinely visible but keep the
+        // manual control bounded to a monotonic, reversible tone curve.
+        final float contrast=EditRecipe.clamp(e.contrast*2.65f,-.82f,.82f);
         final float shadows=e.shadows*.40f, highs=e.highlights*.48f;
-        final float vibrance=e.vibrance*.68f, warmth=e.warmth*.085f;
+        final float vibrance=e.vibrance*.90f, warmth=e.warmth*.085f;
         final float clarity=e.clarity*.28f;
         int[] prev=new int[w],cur=new int[w],next=new int[w];
         b.getPixels(cur,0,w,0,0,w,1);
@@ -37,7 +40,10 @@ public final class ToneEngine {
                 float highWeight=target*target;
                 target+=shadows*shadowWeight*(1-target);
                 target+=highs*highWeight*target;
-                target=sigmoid(clip(target),contrast);
+                // A midtone-centred S-curve: no grey toe or white highlight surge.
+                float contrastGuard=smoothstep(.04f,.18f,target)*
+                    (1f-.76f*smoothstep(.70f,.96f,target));
+                target=sigmoid(clip(target),contrast*contrastGuard);
                 // Apply exposure once, then adjust the new luminance by the tone curve.
                 // Avoid double-boosting exposure and clipping bright colours.
                 float delta=target-clip(lum*gain);
@@ -51,7 +57,10 @@ public final class ToneEngine {
                 float max=Math.max(r,Math.max(g,bl)),min=Math.min(r,Math.min(g,bl));
                 float sat=max-min;
                 boolean skin=r>g && g>bl && r-g>.04 && g-bl>.025 && r<.92;
-                float vibGain=1+vibrance*(1-sat)*(skin?.43f:1f);
+                // Bright saturated petals and illuminated skin must not clip
+                // further when the overall scene needs extra colour presence.
+                float highlightGuard=1f-.75f*smoothstep(.90f,.99f,max);
+                float vibGain=1+vibrance*(1-sat)*(skin?.43f:1f)*highlightGuard;
                 r=clip(grey+(r-grey)*vibGain);g=clip(grey+(g-grey)*vibGain);
                 bl=clip(grey+(bl-grey)*vibGain);
                 if(clarity!=0f&&x>1&&x<w-2&&y>0&&y<h-1) {

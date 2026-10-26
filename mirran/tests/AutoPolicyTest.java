@@ -31,6 +31,23 @@ public final class AutoPolicyTest {
         EditRecipe manual=new EditRecipe();manual.shadows=.16f;manual.contrast=.18f;
         ToneEngine.applyInPlace(deep,manual);
         check(deep.getPixel(10,10)==0xff000000,"Deep black pixel changed");
-        System.out.println("MIRRAN tonal policy: all 4 tests passed.");
+        // The new contrast transfer must be visibly stronger than v0.1.2,
+        // without blowing out highlights or lifting dark pixels.
+        Bitmap mid=solid(10,10,0xff404040);
+        EditRecipe punch=new EditRecipe();punch.contrast=.18f;
+        ToneEngine.applyInPlace(mid,punch);
+        int darkResult=mid.getPixel(5,5)&255;
+        check(darkResult<=58 && darkResult>=43,
+            "Midtone contrast needs to be perceptible but bounded: "+darkResult);
+        Bitmap bright=solid(10,10,0xffc0c0c0);
+        ToneEngine.applyInPlace(bright,punch);
+        int brightResult=bright.getPixel(5,5)&255;
+        check(brightResult>=197 && brightResult<=213,
+            "Upper midtone contrast should not clip: "+brightResult);
+        Bitmap nearWhite=solid(10,10,0xfff8f8f8);
+        ToneEngine.applyInPlace(nearWhite,punch);
+        int high=nearWhite.getPixel(5,5)&255;
+        check(high>=246 && high<=252,"White highlight needs protection: "+high);
+        System.out.println("MIRRAN tonal policy: all 7 tests passed.");
     }
 }

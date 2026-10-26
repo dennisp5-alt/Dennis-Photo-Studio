@@ -61,20 +61,23 @@ public final class AutoAnalyzer {
         // Deliberately restrained, scene-dependent and deterministic. Not semantic AI.
         if(m.avgLuma<.32f)r.exposure=EditRecipe.clamp((.4f-m.avgLuma)*1.5f,0,.34f);
         else if(m.avgLuma>.68f)r.exposure=EditRecipe.clamp((.55f-m.avgLuma)*1.1f,-.22f,0);
-        r.highlights=-EditRecipe.clamp(m.highlightShare*1.7f+.08f,0,.42f);
+        // Modest shoulder protection, including pale scenes with high p90 even
+        // when few pixels cross the strict 240/255 clipping threshold.
+        r.highlights=-EditRecipe.clamp(.08f+m.highlightShare*1.55f+
+            Math.max(0f,m.p90-.82f)*.55f,.06f,.34f);
         // Preserve the photograph's natural shadow depth. Sparse dark pixels should not
         // trigger a blanket lift; even heavily shadowed scenes have a restrained cap.
         r.shadows=EditRecipe.clamp(.025f+Math.max(0f,m.shadowShare-.09f)*.38f,0,.16f);
         // A small scene-aware midtone punch. Preserve established highlight/shadow
         // protections and never compensate for broad range by flattening contrast.
-        r.contrast=EditRecipe.clamp(.105f+(.55f-range)*.20f,.045f,.18f);
+        r.contrast=EditRecipe.clamp(.145f+(.60f-range)*.25f,.08f,.23f);
         // Vibrance adapts to existing colour. Naturally saturated flowers need
         // much less added colour than muted water/landscapes.
-        r.vibrance=EditRecipe.clamp(.225f-.30f*m.avgSat,.04f,.17f);
+        r.vibrance=EditRecipe.clamp(.25f-.33f*m.avgSat,.045f,.17f);
         r.warmth=EditRecipe.clamp(-m.redBias*.14f,-.09f,.09f);
         r.clarity=range<.43f?.13f:.075f;
         r.summary=String.format(java.util.Locale.US,
-            "Local tonal assessment • %s light, %s tonal range. Added restrained midtone contrast and adaptive vibrance while protecting dark depth.",
+            "Local tonal assessment • %s light, %s tonal range. Stronger midtone definition, guarded bright colours and protected shadow depth.",
             m.avgLuma<.37?"low":m.avgLuma>.64?"bright":"balanced",
             range<.43?"compressed":"good");
         return r;

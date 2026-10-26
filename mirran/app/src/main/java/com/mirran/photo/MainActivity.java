@@ -197,8 +197,25 @@ public class MainActivity extends Activity {
     }
     private void openPhoto(){
         if(busy)return;
-        Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("image/*");intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        // Android 13+ offers a modern Photos / Albums gallery with system-controlled
+        // read-only access; no broad storage permission is necessary.
+        if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.TIRAMISU){
+            Intent picker=new Intent(MediaStore.ACTION_PICK_IMAGES);
+            picker.setType("image/*");
+            picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            if(picker.resolveActivity(getPackageManager())!=null){
+                try {
+                    startActivityForResult(picker,10);
+                    return;
+                } catch(ActivityNotFoundException ignored) {
+                    // Gracefully fall back to the system document picker.
+                }
+            }
+        }
+        Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("image/*");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         startActivityForResult(intent,10);
     }
     @Override protected void onActivityResult(int request,int result,Intent data) {

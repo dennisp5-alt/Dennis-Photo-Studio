@@ -1,6 +1,17 @@
-# MIRRAN — Intelligent Photo Studio (v0.1.2 experimental)
+# MIRRAN — Intelligent Photo Studio (v0.1.3 experimental)
 
 Native Java Android project, fully separate from approved Dennis Craft Mobile, LumaWorks, and other production editors. Main branch and all approved branches are left unchanged.
+
+## v0.1.3 changes
+
+- Replaced the older file-based primary picker with Android's native Photo Picker on Android 13+, showing Photos and Albums. A system document picker fallback remains for unsupported devices.
+- No storage/gallery permission is requested: the picker grants read access only to the selected item. Cancel keeps the current photograph.
+- Increased the **effective pixel-level Auto contrast** substantially rather than only inflating displayed slider numbers.
+- Midtone-focused S-curve protects blacks, near-white highlights and bright skin; conservative night/fire handling unchanged.
+- Slightly stronger adaptive vibrance with additional near-clipping protection on saturated highlights.
+- Photo-tested analysis based on the user-supplied portrait capture and red/orange flowers; on-device visual confirmation is still required.
+- Expanded the deterministic regression suite to seven checks of shadow protection, midtone separation, vivid colour, and upper-highlight headroom.
+- Preserved the separate server-backed AI architecture and existing full-resolution JPEG export.
 
 ## v0.1.2 changes
 
