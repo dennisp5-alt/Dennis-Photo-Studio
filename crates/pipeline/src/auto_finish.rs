@@ -152,10 +152,13 @@ fn refine_reference_tone(ev: &AutoToneEvidence, a: &mut AutoTone) {
     // An isolated bright subject plus deep surroundings is not a globally
     // underexposed image: preserve the low-key atmosphere instead of using
     // a +0.3 EV lift or blanket Shadows correction.
-    if ev.median_ev < -1.50 && ev.p95_ev > 1.30
+    if ev.median_ev < -1.50 && ev.median_ev > -1.95
+        && ev.p05_ev > -5.20 && ev.p95_ev > 1.30
+        && ev.p995_ev < 2.10
         && ev.p95_ev - ev.median_ev > 2.90
-        && ev.bright_fraction < 0.025 && ev.dark_fraction > 0.19
-        && ev.recoverable_fraction > 0.15 {
+        && ev.bright_fraction < 0.010
+        && ev.dark_fraction > 0.19 && ev.dark_fraction < 0.36
+        && ev.recoverable_fraction > 0.32 {
         a.exposure = a.exposure.min(0.07);
         a.shadows = a.shadows.min(8.0);
         a.curve_shadows = a.curve_shadows.min(5.0);
@@ -177,13 +180,17 @@ fn refine_reference_tone(ev: &AutoToneEvidence, a: &mut AutoTone) {
     // A naturally well-exposed daylit image may need a subtle positive
     // upper-midtone finish, not blanket Shadows/HDR. This is not a face
     // detector and cannot change intentional colour grading.
-    if ev.median_ev > 0.15 && ev.median_ev < 0.64
-        && ev.p95_ev > 1.45 && ev.p995_ev < 2.27
-        && ev.dark_fraction < 0.22 && ev.bright_fraction < 0.045
+    // Require genuine dark midtone structure as well as a modest key.
+    // Bright, already-clipped flower petals and shiny subjects must not get
+    // extra global exposure merely because their histograms include shade.
+    if ev.median_ev > 0.15 && ev.median_ev < 0.59
+        && ev.p95_ev > 1.45 && ev.p995_ev < 2.20
+        && ev.dark_fraction > 0.075 && ev.dark_fraction < 0.20
+        && ev.bright_fraction < 0.025
         && ev.recoverable_fraction > 0.28 {
-        a.curve_lights = a.curve_lights.max(4.0);
-        a.exposure = a.exposure.max(0.04);
-        a.highlights = a.highlights.max(-8.0);
+        a.curve_lights = a.curve_lights.max(3.0);
+        a.exposure = a.exposure.max(0.02);
+        a.highlights = a.highlights.max(-9.0);
     }
 }
 
@@ -232,7 +239,42 @@ mod tests {
         e.recoverable_fraction=0.382;
         let mut a=AutoTone {exposure:-0.01, highlights:-13.0, ..AutoTone::default()};
         refine_reference_tone(&e,&mut a);
-        assert!(a.exposure>=0.04 && a.curve_lights>=4.0 && a.highlights>=-8.0);
+        assert!(a.exposure>=0.02 && a.curve_lights>=3.0 && a.highlights>=-9.0);
+    }
+    #[test]
+    fn bright_orange_flower_does_not_get_global_exposure() {
+        let mut e=sample_evidence();
+        e.median_ev=0.598; e.p05_ev=-2.13; e.p95_ev=1.74; e.p995_ev=2.16;
+        e.bright_fraction=0.015; e.dark_fraction=0.034;
+        e.recoverable_fraction=0.468;
+        let mut a=AutoTone {exposure:-0.03, highlights:0.0, ..AutoTone::default()};
+        refine_reference_tone(&e,&mut a);
+        assert_eq!(a.exposure,-0.03);
+        assert_eq!(a.curve_lights,0.0);
+    }
+    #[test]
+    fn misty_park_is_not_a_single_white_subject() {
+        let mut e=sample_evidence();
+        e.median_ev=-1.645; e.p05_ev=-6.565;
+        e.p95_ev=1.45; e.p995_ev=1.95;
+        e.bright_fraction=0.004; e.dark_fraction=0.302;
+        e.recoverable_fraction=0.471;
+        let mut a=AutoTone {exposure:0.54, shadows:18.0, ..AutoTone::default()};
+        refine_reference_tone(&e,&mut a);
+        assert_eq!(a.exposure,0.54);
+        assert_eq!(a.shadows,18.0);
+    }
+    #[test]
+    fn dark_foliage_does_not_force_extra_clipping() {
+        let mut e=sample_evidence();
+        e.median_ev=-2.036; e.p05_ev=-7.412;
+        e.p95_ev=1.601; e.p995_ev=2.202;
+        e.bright_fraction=0.015; e.dark_fraction=0.458;
+        e.recoverable_fraction=0.330;
+        let mut a=AutoTone {exposure:0.0, shadows:13.0, ..AutoTone::default()};
+        refine_reference_tone(&e,&mut a);
+        assert_eq!(a.exposure,0.0);
+        assert_eq!(a.shadows,13.0);
     }
     #[test]
     fn severe_highlights_and_night_remain_protected() {
