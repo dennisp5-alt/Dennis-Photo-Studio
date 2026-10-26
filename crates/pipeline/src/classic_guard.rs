@@ -21,6 +21,7 @@ pub struct ClassicPlan {
     pub scene:SceneReport,
     pub guard:ClassicValidation,
     pub preset_preserved:bool,
+    pub finish:crate::classic_finish::FinishEvidence,
 }
 fn tone(d:&DevelopSettings)->AutoTone {
     AutoTone {
@@ -48,6 +49,26 @@ fn scaled(base:&DevelopSettings,proposed:&DevelopSettings,t:f64,w:f64,h:f64)->De
     d.curve.lights=mix(base.curve.lights,proposed.curve.lights,t);
     d.curve.highlights=mix(base.curve.highlights,proposed.curve.highlights,t);
     d.effects.dehaze=mix(base.effects.dehaze,proposed.effects.dehaze,h);
+    // New automatic colour-mixer values are non-destructive and fade with
+    // the same photometric safety factor as the tone change.
+    d.mixer.red.sat=mix(base.mixer.red.sat,proposed.mixer.red.sat,t);
+    d.mixer.red.lum=mix(base.mixer.red.lum,proposed.mixer.red.lum,t);
+    d.mixer.magenta.sat=mix(base.mixer.magenta.sat,proposed.mixer.magenta.sat,t);
+    d.mixer.yellow.sat=mix(base.mixer.yellow.sat,proposed.mixer.yellow.sat,t);
+    d.mixer.green.sat=mix(base.mixer.green.sat,proposed.mixer.green.sat,t);
+    // Existing masks are retained untouched. A new confidence-gated local
+    // mask is included only as part of the full, safety-checked render.
+    if t>=0.08 {
+        for mask in &proposed.masks {
+            if !base.masks.iter().any(|existing|existing.id==mask.id) {
+                let mut m=mask.clone();
+                m.adjust.exposure*=t;
+                m.adjust.shadows*=t;
+                m.adjust.highlights*=t;
+                d.masks.push(m);
+            }
+        }
+    }
     if base.wb!=proposed.wb && w>0.09 {
         let old=1e6/base.wb.temp.clamp(2000.0,50000.0);
         let new=1e6/proposed.wb.temp.clamp(2000.0,50000.0);
@@ -61,16 +82,26 @@ fn y(p:&[u8;4])->f64 {
     (54.0*f64::from(p[0])+183.0*f64::from(p[1])+19.0*f64::from(p[2]))/256.0
 }
 #[derive(Default)]
-struct Score {white:f64,black:f64,dark:f64,neutral:f64,contrast:f64}
+struct Score {white:f64,black:f64,dark:f64,neutral:f64,contrast:f64,
+    red_near_clip_growth:f64,white_near_clip_growth:f64}
 fn score(original:&[[u8;4]],candidate:&[[u8;4]],width:usize)->Score {
     let mut s=Score::default();
     let(mut white,mut black,mut dark_n,mut neutral_n)=(0usize,0usize,0usize,0usize);
+    let(mut red_near,mut pale_near)=(0usize,0usize);
     let(mut dark_sum,mut drift,mut grad0,mut grad1)=(0.0f64,0.0f64,0.0f64,0.0f64);
     for(i,(a,b)) in original.iter().zip(candidate).enumerate() {
         for ch in 0..3{
             if a[ch]<254 && b[ch]>=254{white+=1;}
             if a[ch]>1 && b[ch]<=1{black+=1;}
         }
+        // Track newly crushed highlight tones before hard clipping. Source
+        // JPEG clipping alone must not count as a new Auto regression.
+        let vivid_red_before=a[0]>a[1].saturating_add(58) && a[0]>a[2].saturating_add(58);
+        let vivid_red_after=b[0]>b[1].saturating_add(58) && b[0]>b[2].saturating_add(58);
+        if vivid_red_after && vivid_red_before && a[0]<248 && b[0]>=250 {red_near+=1;}
+        let white_after=b[..3].iter().all(|ch|*ch>=246);
+        let white_before=a[..3].iter().all(|ch|*ch>=246);
+        if white_after && !white_before {pale_near+=1;}
         let y0=y(a);let y1=y(b);
         if (5.0..68.0).contains(&y0){dark_n+=1;dark_sum+=(y1-y0).max(0.0);}
         if (42.0..215.0).contains(&y0){
@@ -92,6 +123,8 @@ fn score(original:&[[u8;4]],candidate:&[[u8;4]],width:usize)->Score {
     s.dark=if dark_n>150{dark_sum/dark_n as f64}else{0.0};
     s.neutral=drift/neutral_n.max(1) as f64;
     s.contrast=if grad0>1000.0{grad1/grad0}else{1.0};
+    s.red_near_clip_growth=red_near as f64/original.len().max(1) as f64;
+    s.white_near_clip_growth=pale_near as f64/original.len().max(1) as f64;
     s
 }
 /// Each candidate is compared against the CURRENT picture, including WB,
@@ -119,7 +152,10 @@ pub fn validate(src:&Rgb32f,info:&SourceInfo,current:&DevelopSettings,
         let too_lift=sc.dark>34.0; // Tested regardless of positive/negative EV.
         let hue_drift=current.wb!=wanted.wb && sc.neutral>13.0;
         let flat=sc.contrast<0.63;
-        if !too_white && !too_black && !too_lift && !hue_drift && !flat {
+        let red_crush=sc.red_near_clip_growth>0.008;
+        let white_crush=sc.white_near_clip_growth>0.011;
+        if !too_white && !too_black && !too_lift && !hue_drift && !flat
+            && !red_crush && !white_crush {
             a.passed=true;a.strength=t;
             if iteration>0{a.reasons.push("reduced_and_revalidated");}
             return(trial,a);
@@ -129,6 +165,8 @@ pub fn validate(src:&Rgb32f,info:&SourceInfo,current:&DevelopSettings,
         if too_lift{t*=0.75;a.reasons.push("dark_lift_reduction");}
         if hue_drift{w*=0.70;a.reasons.push("white_balance_colour_guard");}
         if flat{t*=0.78;a.reasons.push("texture_guard");}
+        if red_crush{t*=0.79;a.reasons.push("saturated_red_highlight_guard");}
+        if white_crush{t*=0.81;a.reasons.push("near_white_texture_guard");}
     }
     a.reasons.push("original_retained_no_safe_candidate");
     (current.clone(),a)
@@ -152,6 +190,7 @@ pub fn plan(src:&Rgb32f,info:&SourceInfo,current:&DevelopSettings)->ClassicPlan 
             wanted.wb.mode=WbMode::Auto;wanted.wb.temp=r.temp;wanted.wb.tint=r.tint;
         }
     }
+    let finish=crate::classic_finish::refine(src,info,current,&mut wanted);
     let mut scene=crate::scene_auto::evaluate(src,info,&wanted);
     if current.effects.dehaze.abs()<0.001 && scene.dehaze>0.0 {
         wanted.effects.dehaze=scene.dehaze;
@@ -176,7 +215,7 @@ pub fn plan(src:&Rgb32f,info:&SourceInfo,current:&DevelopSettings)->ClassicPlan 
     audit.guard_reasons=guard.reasons.clone();
     audit.new_white_clip_fraction=guard.white_clipping;
     audit.new_black_clip_fraction=guard.black_clipping;
-    ClassicPlan{settings:applied,tone:audit,white_balance:wb,scene,guard,preset_preserved}
+    ClassicPlan{settings:applied,tone:audit,white_balance:wb,scene,guard,preset_preserved,finish}
 }
 
 #[cfg(test)]
