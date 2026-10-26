@@ -99,7 +99,9 @@ pub fn refine(src:&Rgb32f,info:&SourceInfo,current:&DevelopSettings,
 
     // Work through Lightroom-compatible existing mixer bands, rather than
     // altering the global saturation setting and therefore skin/sky.
-    if e.bright_red_fraction>0.035 {
+    // Do not reinterpret orange flame cores in otherwise black pictures as
+    // oversaturated red petals; those nights are intentionally uncorrected.
+    if e.bright_red_fraction>0.035 && top_mean>0.20 {
         let strength=((e.bright_red_fraction-0.035)*42.0+3.0).clamp(3.0,8.0);
         if wanted.mixer.red==Hsl::default() && current.mixer.red==Hsl::default(){
             wanted.mixer.red.sat=-strength;
