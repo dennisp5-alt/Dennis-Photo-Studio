@@ -335,6 +335,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 "scene":plan.scene,
                 "whiteBalance":plan.white_balance,
                 "manualWbPreserved":plan.manual_wb_preserved,
+                "whiteBalanceApplied":plan.settings.wb!=current.wb,
                 "noChangeRecommended":plan.no_change,
                 "safety":plan.safety,
                 "model":model
@@ -394,6 +395,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 "scene":plan.scene,
                 "whiteBalance":plan.white_balance,
                 "manualWbPreserved":plan.manual_wb_preserved,
+                "whiteBalanceApplied":plan.settings.wb!=current.wb,
                 "noChange":plan.no_change,
                 "safety":plan.safety
             }))
