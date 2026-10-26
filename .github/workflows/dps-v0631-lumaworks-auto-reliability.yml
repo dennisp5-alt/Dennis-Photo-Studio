@@ -357,7 +357,8 @@ jobs:
           drawer=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/LibrarySheets.kt').read_text()
           pages=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/DrawerPages.kt').read_text()
           gradle=Path('apps/lightcraft-android/android/app/build.gradle.kts').read_text()
-          assert '<string name="app_name">LumaWorks</string>' in strings
+          assert '<string name="app_name">LumaWorks Auto Trial</string>' in strings
+          assert 'applicationIdSuffix = ".autoreliability0631"' in gradle, 'Beta must install beside previous LumaWorks builds'
           assert 'Text("LumaWorks"' in drawer
           assert '"About LumaWorks"' in drawer and pages
           assert '"com.dennis.photostudio.assertive.v0612"' in gradle, 'Package identity must remain unchanged'
