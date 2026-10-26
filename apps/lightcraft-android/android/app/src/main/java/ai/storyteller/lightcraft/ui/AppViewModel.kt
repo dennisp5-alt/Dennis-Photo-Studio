@@ -3003,14 +3003,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val vibrance=t.optDouble("vibrance",0.0).toInt()
                 val darks=t.optDouble("curve_darks",0.0).toInt()
                 val wb=result.optJSONObject("whiteBalance")
-                val wbStatus=if(result.optBoolean("manualWbPreserved",false)) {
-                    "Your manually chosen white balance remains unchanged."
-                } else when(wb?.optString("decision")) {
-                    "warm_light_preserved" -> "Warm ambient light preserved; Auto WB unchanged."
-                    "corrected" -> "White balance: evidence-supported correction proposed."
-                    "already_neutral" -> "White balance: unchanged; no sufficiently reliable improvement."
-                    else -> "White balance: camera setting retained."
-                }
+                // Same wording as one-tap Smart Auto (Warm light preserved included).
+                val wbStatus=smartAutoWbStatus(result) ?: "White balance kept as shot."
                 val toneAudit=result.optJSONObject("toneAudit")
                 val evidence=toneAudit?.optJSONObject("evidence")
                 val proposedTone=toneAudit?.optJSONObject("proposed")
@@ -3077,7 +3071,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 ed.autoPreview=AutoPreviewData(
                     original=original,
                     candidate=candidate,
-                    summary="Exposure $ev EV • Contrast $contrast • Highlights $highlight • Shadows $shadow • Vibrance $vibrance • Curves D$darks/L$lights",
+                    summary="Exposure $ev EV • Contrast $contrast • Highlights $highlight • Shadows $shadow • " +
+                        "Whites ${t.optDouble("whites",0.0).toInt()} • Blacks ${t.optDouble("blacks",0.0).toInt()} • " +
+                        "Vibrance $vibrance • Saturation ${t.optDouble("saturation",0.0).toInt()} • Curves D$darks/L$lights",
                     unchanged=result.optBoolean("noChangeRecommended",false),
                     modelStatus=modelExplanation,
                     sourceSettings=oldSettings,
@@ -3119,44 +3115,80 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** True while a one-tap Smart Auto is running: a second tap (Auto button or
+     * the Auto section) is ignored instead of queueing a duplicate run and a
+     * duplicate undo step. */
+    private var smartAutoBusy = false
+
     fun applySmartAuto() {
         val ed = editor ?: return
         val e = engine ?: return
+        if (smartAutoBusy) return
+        smartAutoBusy = true
         viewModelScope.launch {
-            runCatching {
-                e.command {
-                    val result = JSONObject(execute("develop.auto", "{}"))
-                    snapshot(ed.photoId) to result
-                }
-            }.onSuccess { (snapshot, result) ->
-                ed.update(snapshot)
-                // If Curves is already displayed, refresh the same engine
-                // samples which the image renderer uses; never invent a shape.
-                if (ed.sub == "curve") refreshCurve()
-                requestView()
-                val tone = result.optJSONObject("tone")
-                val wb = result.optJSONObject("whiteBalance")
-                val decision = wb?.optString("decision") ?: "manual"
-                ed.wbAutoStatus = if (result.optBoolean("manualWbPreserved",false)) {
-                    "Your manually set white balance was preserved. Choose WB → Auto to request a new correction."
-                } else when (decision) {
-                    "corrected" -> "Smart Auto also adjusted white balance using spatially consistent neutral areas."
-                    "already_neutral" -> "White balance is already near neutral; no change needed."
-                    "ambiguous" -> "White balance was left unchanged: neutral-looking regions disagree."
-                    "no_neutral" -> "White balance was left unchanged: no reliable neutral surfaces found."
-                    else -> null
-                }
-                val ev = tone?.optDouble("exposure", 0.0) ?: 0.0
-                val vib = tone?.optDouble("vibrance", 0.0) ?: 0.0
-                val sat = tone?.optDouble("saturation", 0.0) ?: 0.0
-                val curveDarks = tone?.optDouble("curve_darks", 0.0) ?: 0.0
-                val curveLights = tone?.optDouble("curve_lights", 0.0) ?: 0.0
-                say("Smart Auto • " + "%.2f".format(ev) + " EV" +
-                    " • Vibrance " + vib.toInt() +
-                    " • Saturation " + sat.toInt() +
-                    " • Curves D" + curveDarks.toInt() + "/L" + curveLights.toInt(), brief = true)
-            }.onFailure { say(it.message) }
+            try {
+                runCatching {
+                    e.command {
+                        val result = JSONObject(execute("develop.auto", "{}"))
+                        snapshot(ed.photoId) to result
+                    }
+                }.onSuccess { (snapshot, result) ->
+                    // The user may have left this photo while Auto was working.
+                    if (editor !== ed) return@onSuccess
+                    ed.update(snapshot)
+                    // If Curves is already displayed, refresh the same engine
+                    // samples which the image renderer uses; never invent a shape.
+                    if (ed.sub == "curve") refreshCurve()
+                    requestView()
+                    ed.wbAutoStatus = smartAutoWbStatus(result)
+                    say("Smart Auto • " + smartAutoSummary(result), brief = true)
+                }.onFailure { say(it.message) }
+            } finally {
+                smartAutoBusy = false
+            }
         }
+    }
+
+    /** One wording for Smart Auto's white balance outcome, used by one-tap Auto
+     * and by the Auto preview, so the two never disagree. */
+    private fun smartAutoWbStatus(result: JSONObject): String? {
+        if (result.optBoolean("manualWbPreserved", false)) {
+            val mode = result.optString("preservedWbMode", "")
+            val chosen = if (mode.isBlank() || mode == "null" || mode == "Custom") "manually set" else mode
+            return "Your $chosen white balance was kept. Choose WB → Auto to ask for a new correction."
+        }
+        val wb = result.optJSONObject("whiteBalance") ?: return null
+        return when (wb.optString("decision")) {
+            "corrected" -> "Smart Auto also corrected white balance from neutral areas it could trust."
+            "already_neutral" -> "White balance is already close to neutral, so the camera's colour was kept."
+            "ambiguous" -> "White balance kept as shot: neutral-looking areas disagree with each other."
+            "warm_light_preserved" -> "Warm lamp or fire light detected, so its warmth was kept as shot."
+            else -> "White balance kept as shot: no reliable neutral surface was found."
+        }
+    }
+
+    /** What Smart Auto actually set: every Light control it changed, colour and
+     * curves, plus a note when the safety check had to hold something back. */
+    private fun smartAutoSummary(result: JSONObject): String {
+        val tone = result.optJSONObject("tone")
+        fun v(key: String) = tone?.optDouble(key, 0.0) ?: 0.0
+        fun signed(x: Int) = if (x > 0) "+$x" else "$x"
+        val parts = mutableListOf("Exposure " + String.format(java.util.Locale.US, "%+.2f", v("exposure")) + " EV")
+        listOf("contrast" to "Contrast", "highlights" to "Highlights", "shadows" to "Shadows",
+            "whites" to "Whites", "blacks" to "Blacks", "vibrance" to "Vibrance", "saturation" to "Saturation"
+        ).forEach { (key, label) ->
+            val x = v(key).toInt()
+            if (x != 0) parts += "$label ${signed(x)}"
+        }
+        val curves = listOf("curve_shadows" to "S", "curve_darks" to "D", "curve_lights" to "L", "curve_highlights" to "H")
+            .mapNotNull { (key, label) -> v(key).toInt().takeIf { it != 0 }?.let { "$label${signed(it)}" } }
+        if (curves.isNotEmpty()) parts += "Curve " + curves.joinToString(" ")
+        val reasons = result.optJSONObject("toneAudit")?.optJSONArray("guard_reasons")
+        val trimmed = reasons != null && (0 until reasons.length()).any {
+            reasons.optString(it) in setOf("added_highlight_clipping", "added_shadow_clipping",
+                "dark_region_overlift", "structural_contrast_loss")
+        }
+        return parts.joinToString(" • ") + if (trimmed) " • safety check held some back" else ""
     }
 
     /** Conservative image-specific non-destructive pixel-noise and sharpening settings. */
@@ -3725,6 +3757,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         "Auto WB found neutral surfaces; the camera colour is already balanced. No correction needed."
                     "ambiguous" ->
                         "Auto WB found some neutral-looking areas, but their colours disagree. Camera rendering preserved."
+                    "warm_light_preserved" ->
+                        "Auto WB detected warm lamp or fire light and kept its warmth. Use the eyedropper on a grey surface to neutralise it."
                     else ->
                         "Auto WB could not find a trustworthy neutral surface. Camera rendering preserved."
                 }
@@ -3732,6 +3766,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     "corrected" -> "Auto WB correction applied"
                     "already_neutral" -> "Auto WB: already neutral"
                     "ambiguous" -> "Auto WB: neutral areas disagree"
+                    "warm_light_preserved" -> "Auto WB: warm light kept"
                     else -> "Auto WB: no reliable neutral reference"
                 })
             }.onFailure { say(it.message) }

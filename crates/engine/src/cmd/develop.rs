@@ -321,14 +321,23 @@ pub fn specs() -> Vec<CommandSpec> {
                 .map_err(|e|bad("develop.autoPreview",e))?;
             let info=s.source_info(id);
             let current=s.develop_of(id).unwrap_or_default();
-            // Use the production render-quality guard, NOT the old test-only
-            // all-guards-off experiment. These settings are actually applied.
-            let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report_balanced(&src,&info,&current);
-            let tone=tone_audit.final_tone;
-            // Respect a consciously chosen neutral reference or manual WB.
-            // Dedicated WB Auto remains available to replace it explicitly.
-            let manual_wb=current.wb.mode==WbMode::Custom;
+            // Respect a consciously chosen white balance: a Custom/eyedropper
+            // value or a preset such as Daylight or Tungsten. Only As Shot and
+            // Auto may be replaced; WB → Auto remains available to replace any.
+            let manual_wb=!matches!(current.wb.mode,WbMode::AsShot|WbMode::Auto);
             let wb=(!manual_wb).then(||lightcraft_pipeline::auto::auto_wb_report_balanced(&src,&info));
+            let planned_wb=wb.as_ref().map(|report|{
+                let mut w=current.wb;
+                w.mode=WbMode::Auto;
+                w.temp=report.temp;
+                w.tint=report.tint;
+                w
+            });
+            // Production render-quality guard, checked under the white balance
+            // that will really be applied. These settings are actually applied.
+            let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report_balanced_with_wb(
+                &src,&info,&current,planned_wb);
+            let tone=tone_audit.final_tone;
             let mut proposal=(*current).clone();
             proposal.light.exposure=tone.exposure;
             proposal.light.contrast=tone.contrast;
@@ -365,6 +374,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 "scene":scene,
                 "whiteBalance":wb,
                 "manualWbPreserved":manual_wb,
+                "preservedWbMode":manual_wb.then(||current.wb.mode.label()),
                 "noChangeRecommended":no_change,
                 "model":model
             }))
@@ -442,10 +452,19 @@ pub fn specs() -> Vec<CommandSpec> {
             // Normal one-tap Auto must apply the same protected decision as
             // the read-only preview. Do not route experimental unrestricted
             // tone or WB candidates to production commands.
-            let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report_balanced(&src,&info,&d);
-            let a=tone_audit.final_tone;
-            let manual_wb=d.wb.mode==WbMode::Custom;
+            // A Custom/eyedropper white balance or a chosen preset is kept.
+            let manual_wb=!matches!(d.wb.mode,WbMode::AsShot|WbMode::Auto);
             let wb=(!manual_wb).then(||lightcraft_pipeline::auto::auto_wb_report_balanced(&src,&info));
+            let planned_wb=wb.as_ref().map(|report|{
+                let mut w=d.wb;
+                w.mode=WbMode::Auto;
+                w.temp=report.temp;
+                w.tint=report.tint;
+                w
+            });
+            let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report_balanced_with_wb(
+                &src,&info,&d,planned_wb);
+            let a=tone_audit.final_tone;
             let mut planned=(*d).clone();
             planned.light.exposure=a.exposure;
             planned.light.contrast=a.contrast;
@@ -492,7 +511,9 @@ pub fn specs() -> Vec<CommandSpec> {
                 }
                 Ok(())
             })?;
-            Ok(json!({"tone":a,"toneAudit":tone_audit,"scene":scene,"whiteBalance":wb,"manualWbPreserved":manual_wb}))
+            Ok(json!({"tone":a,"toneAudit":tone_audit,"scene":scene,"whiteBalance":wb,
+                "manualWbPreserved":manual_wb,
+                "preservedWbMode":manual_wb.then(||d.wb.mode.label())}))
         }),
         cmd!("develop.autoDetail", "Auto Detail & Noise", ["Photo"], None, "{}", has_active, |s, _p| {
             let id=active(s,"develop.autoDetail")?;

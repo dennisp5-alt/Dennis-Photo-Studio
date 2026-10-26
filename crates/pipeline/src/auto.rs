@@ -640,12 +640,377 @@ pub fn smart_auto_tone_report(src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings)
     smart_auto_tone_report_mode(src,info,s,true)
 }
 
-/// LumaWorks v0.6.22: a middle path between the nearly inert legacy
-/// conservative proposal and the old wholly unprotected experiment.
-/// Fine grids can propose recoverable structure, but the suggestion is
-/// deliberately attenuated and evaluated against rendered image pixels.
-/// This never changes the diagnostic-only 4/8/16 evidence.
+/// LumaWorks v0.6.32 production Smart Auto (one tap, Preview and Apply).
+///
+/// The same scene analysis and the same two estimates as v0.6.22–v0.6.30
+/// (the protected proposal blended with the less restricted one), with four
+/// corrections to how the result is limited:
+///
+/// * the photograph is analysed, and the safety render is made, under the
+///   white balance Smart Auto will actually apply (`planned_wb`), so the
+///   checked picture is the picture the user gets;
+/// * near-white areas (clouds, a white shirt, sunlit frost) and bright skies
+///   no longer hold Exposure to +0.05 / +0.18 EV regardless of the pixels
+///   (+0.5 EV at most now): Highlights/Whites protect them and the
+///   rendered-pixel guard decides how far Exposure can go;
+/// * the guard backs off only as far as it has to instead of resetting
+///   sliders to zero, then re-checks its own result;
+/// * slider bounds follow the editable ranges a photographer would use.
+///
+/// Isolated white subjects on dark backgrounds (the Moon, white flowers),
+/// flat night scenes and firelight keep their established protection.
 pub fn smart_auto_tone_report_balanced(
+    src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings
+) -> AutoToneAuditReport {
+    smart_auto_tone_report_balanced_with_wb(src,info,s,None)
+}
+
+/// [`smart_auto_tone_report_balanced`] for a photograph whose white balance
+/// Smart Auto is about to change to `planned_wb` in the same step.
+pub fn smart_auto_tone_report_balanced_with_wb(
+    src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings,
+    planned_wb:Option<lightcraft_develop::WhiteBalance>,
+) -> AutoToneAuditReport {
+    // Analyse under the white balance that will be applied: a colour
+    // correction changes luminance and colourfulness as well as hue.
+    let mut analysis=s.clone();
+    if let Some(wb)=planned_wb {analysis.wb=wb;}
+    let evidence=tone_evidence(src,info,&analysis);
+    let (basic,_)=smart_auto_candidate(src,info,&analysis);
+    let (active,_)=smart_auto_candidate_mode(src,info,&analysis,true);
+    let blend=|safe:f64, assertive:f64, weight:f64| {
+        safe*(1.0-weight)+assertive*weight
+    };
+    let mut proposed=AutoTone {
+        exposure:blend(basic.exposure,active.exposure,0.65).clamp(-1.5,1.5),
+        contrast:blend(basic.contrast,active.contrast,0.63).clamp(-15.0,25.0),
+        highlights:blend(basic.highlights,active.highlights,0.77).clamp(-60.0,15.0),
+        shadows:blend(basic.shadows,active.shadows,0.74).clamp(-25.0,50.0),
+        whites:blend(basic.whites,active.whites,0.67).clamp(-30.0,15.0),
+        blacks:blend(basic.blacks,active.blacks,0.62).clamp(-20.0,12.0),
+        vibrance:blend(basic.vibrance,active.vibrance,0.55).clamp(-12.0,20.0),
+        saturation:blend(basic.saturation,active.saturation,0.45).clamp(-6.0,8.0),
+        curve_shadows:blend(basic.curve_shadows,active.curve_shadows,0.66).clamp(-20.0,30.0),
+        curve_darks:blend(basic.curve_darks,active.curve_darks,0.72).clamp(-24.0,32.0),
+        curve_lights:blend(basic.curve_lights,active.curve_lights,0.62).clamp(-14.0,16.0),
+        curve_highlights:blend(basic.curve_highlights,active.curve_highlights,0.67).clamp(-25.0,10.0),
+    };
+    let ev=&evidence;
+    let white_subject=ev.zonal.nano.neutral_white_subject;
+    let bright_areas=!white_subject
+        && (ev.zonal.micro.neutral_white_subject || ev.bright_fraction>0.09);
+    if white_subject {
+        // A connected white subject against dark surroundings (the Moon,
+        // white petals on deep foliage) is its own exposure reference:
+        // the dark background is not evidence of underexposure.
+        proposed.exposure=proposed.exposure.min(0.05);
+        proposed.vibrance=proposed.vibrance.min(4.0);
+        proposed.saturation=proposed.saturation.min(2.0);
+    }else if bright_areas {
+        // Clouds, white clothing, sunlit frost or a bright sky: protect them
+        // with Highlights/Whites (below) rather than refusing to brighten the
+        // photograph. The rendered-pixel guard has the final say on clipping.
+        proposed.exposure=proposed.exposure.min(0.50);
+    }
+    // Flat, nearly black night scenes must not be made to look like daylight.
+    if ev.dark_fraction>0.80 && ev.recoverable_fraction<0.07 &&
+        ev.bright_fraction<0.02 {
+        proposed.exposure=proposed.exposure.min(0.12);
+        proposed.shadows=proposed.shadows.min(10.0);
+    }
+    proposed=crate::auto_finish::refine(src,info,&analysis,ev,proposed);
+    // After the finish, whose small-highlight "sparkle" rule assumes no
+    // exposure lift: protect the bright areas in proportion to the lift.
+    // Up to +0.05 EV (the old cap) the finish's own values are kept, and the
+    // protection starts where the sparkle rule's floor (−10) is.
+    if bright_areas && proposed.exposure>0.05 {
+        let lift=proposed.exposure-0.05;
+        proposed.highlights=proposed.highlights.min(-(10.0+50.0*lift).min(40.0));
+        if ev.p995_ev>2.0 {
+            proposed.whites=proposed.whites.min(-(2.0+12.0*lift));
+        }
+    }
+    round_to_slider_precision(&mut proposed);
+    let quality=production_quality_guard(src,info,s,planned_wb,proposed);
+    AutoToneAuditReport {
+        evidence, proposed, final_tone:quality.tone,
+        guard_reasons:quality.reasons,
+        new_white_clip_fraction:quality.white_clip_change,
+        new_black_clip_fraction:quality.black_clip_change,
+        comparison_exposure_ev:s.light.exposure,
+        quality_guard_skipped_for_emission:false,
+    }
+}
+
+/// The scene measurements every Smart Auto report carries (256px proxy,
+/// scene-linear under `s`'s white balance).
+fn tone_evidence(src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings)->AutoToneEvidence {
+    let proxy=lightcraft_raster::resample::fit(
+        src,256,256,lightcraft_raster::resample::Filter::Box);
+    let mut linear=proxy;
+    let analysis_base=DevelopSettings {wb:s.wb,..DevelopSettings::default()};
+    crate::local::scene_linear_pre(&mut linear,info,&analysis_base);
+    let mut ev:Vec<f32>=linear.data.iter().map(|c|
+        (luminance_2020(*c).max(1e-6)/0.18).log2()
+    ).collect();
+    let len=ev.len().max(1);
+    let dark=ev.iter().filter(|&&x|x< -2.68).count();
+    let bright=linear.data.iter()
+        .filter(|c|luminance_2020(**c)>0.70).count();
+    let recover=linear.data.iter().filter(|c|
+        (0.035..0.28).contains(&luminance_2020(**c))
+    ).count();
+    ev.sort_by(|a,b|a.total_cmp(b));
+    AutoToneEvidence {
+        source_raw:info.raw, as_shot_kelvin:info.as_shot_temp,
+        median_ev:percentile(&ev,0.50) as f64,
+        p05_ev:percentile(&ev,0.05) as f64,
+        p95_ev:percentile(&ev,0.95) as f64,
+        p995_ev:percentile(&ev,0.995) as f64,
+        dark_fraction:dark as f64/len as f64,
+        bright_fraction:bright as f64/len as f64,
+        recoverable_fraction:recover as f64/len as f64,
+        analysed_pixels:ev.len(),
+        zonal:crate::scene::analyse_linear(&linear),
+    }
+}
+
+fn round_to_slider_precision(a:&mut AutoTone) {
+    // `+ 0.0` turns a rounded −0 into 0 so the app never shows "−0".
+    a.exposure=(a.exposure*100.0).round()/100.0+0.0;
+    for v in [&mut a.contrast,&mut a.highlights,&mut a.shadows,&mut a.whites,
+        &mut a.blacks,&mut a.vibrance,&mut a.saturation,&mut a.curve_shadows,
+        &mut a.curve_darks,&mut a.curve_lights,&mut a.curve_highlights] {
+        *v=v.round()+0.0;
+    }
+}
+
+/// `settings` with Smart Auto's twelve controls set to `a`.
+fn with_tone(settings:&DevelopSettings,a:&AutoTone)->DevelopSettings {
+    let mut s=settings.clone();
+    s.light.exposure=a.exposure;
+    s.light.contrast=a.contrast;
+    s.light.highlights=a.highlights;
+    s.light.shadows=a.shadows;
+    s.light.whites=a.whites;
+    s.light.blacks=a.blacks;
+    s.color.vibrance=a.vibrance;
+    s.color.saturation=a.saturation;
+    s.curve.shadows=a.curve_shadows;
+    s.curve.darks=a.curve_darks;
+    s.curve.lights=a.curve_lights;
+    s.curve.highlights=a.curve_highlights;
+    s
+}
+
+/// Newly clipped RGB channels at most this fraction of the safety render
+/// (production guard). Stricter than the legacy 2.8% veto because the guard
+/// now only trims as much as it needs to rather than discarding the edit.
+const NEW_HIGHLIGHT_CLIP_LIMIT:f64=0.015;
+const NEW_SHADOW_CLIP_LIMIT:f64=0.020;
+const GUARD_EDGE:usize=192;
+
+/// `v` moved toward zero onto the slider's step (0.01 EV, or whole units),
+/// so a trimmed value never ends up stronger than the one that was checked.
+fn toward_zero(v:f64,step:f64)->f64 {
+    let n=((v/step).abs()+1e-6).floor();
+    if n==0.0 {0.0} else if v<0.0 {-n*step} else {n*step}
+}
+
+/// Scale the moves selected by `pick` (each value with the sign that `pick`
+/// says can cause the problem) by `k` in 0..=1, toward the slider's zero.
+/// Results land on slider steps, so the checked tone is the applied tone.
+fn scale_moves(a:&AutoTone,k:f64,pick:fn(&mut AutoTone,f64))->AutoTone {
+    let mut t=*a;
+    pick(&mut t,k);
+    t
+}
+fn scale_if(v:&mut f64,positive:bool,k:f64) {
+    if (positive && *v>0.0) || (!positive && *v<0.0) {*v=toward_zero(*v*k,1.0);}
+}
+fn scale_ev_if(v:&mut f64,positive:bool,k:f64) {
+    if (positive && *v>0.0) || (!positive && *v<0.0) {*v=toward_zero(*v*k,0.01);}
+}
+/// Moves that can push channels into white clipping.
+fn brightening(t:&mut AutoTone,k:f64) {
+    scale_ev_if(&mut t.exposure,true,k);
+    scale_if(&mut t.whites,true,k);
+    scale_if(&mut t.contrast,true,k);
+    scale_if(&mut t.vibrance,true,k);
+    scale_if(&mut t.saturation,true,k);
+    scale_if(&mut t.curve_lights,true,k);
+    scale_if(&mut t.curve_highlights,true,k);
+}
+/// Moves that can crush channels to black.
+fn darkening(t:&mut AutoTone,k:f64) {
+    scale_ev_if(&mut t.exposure,false,k);
+    scale_if(&mut t.blacks,false,k);
+    scale_if(&mut t.contrast,true,k);
+    scale_if(&mut t.curve_shadows,false,k);
+    scale_if(&mut t.curve_darks,false,k);
+}
+/// Moves that lift deep shadows.
+fn shadow_lifting(t:&mut AutoTone,k:f64) {
+    scale_if(&mut t.shadows,true,k);
+    scale_if(&mut t.blacks,true,k);
+    scale_if(&mut t.curve_shadows,true,k);
+    scale_if(&mut t.curve_darks,true,k);
+}
+/// Moves that compress local contrast (an "HDR-flat" look).
+fn flattening(t:&mut AutoTone,k:f64) {
+    scale_if(&mut t.shadows,true,k);
+    scale_if(&mut t.highlights,false,k);
+    scale_if(&mut t.contrast,false,k);
+    scale_if(&mut t.whites,false,k);
+    scale_if(&mut t.blacks,true,k);
+    scale_if(&mut t.curve_shadows,true,k);
+    scale_if(&mut t.curve_darks,true,k);
+    scale_if(&mut t.curve_lights,false,k);
+    scale_if(&mut t.curve_highlights,false,k);
+}
+
+/// Largest `k` in 0..=1 (to 1/32) for which `ok(k)` holds, given that
+/// `ok(1.0)` has already failed. Returns 0 when even `k = 0` fails.
+fn largest_passing_scale(mut ok:impl FnMut(f64)->bool)->f64 {
+    let (mut lo,mut hi)=(0.0f64,1.0f64);
+    if !ok(0.0) {return 0.0;}
+    for _ in 0..5 {
+        let mid=(lo+hi)*0.5;
+        if ok(mid) {lo=mid;} else {hi=mid;}
+    }
+    lo
+}
+
+fn luma8(p:&[u8;4])->f64 {
+    (54u32*p[0] as u32+183u32*p[1] as u32+19u32*p[2] as u32) as f64/256.0
+}
+/// Mean upward change of originally dark pixels (8-bit luma 4..67) and their count.
+fn dark_region_lift(before:&[[u8;4]],after:&[[u8;4]])->(f64,usize) {
+    let (mut sum,mut count)=(0.0,0usize);
+    for (b,a) in before.iter().zip(after) {
+        let y0=luma8(b);
+        if y0>4.0 && y0<67.0 {
+            count+=1;
+            sum+=(luma8(a)-y0).max(0.0);
+        }
+    }
+    (if count>0 {sum/count as f64} else {0.0},count)
+}
+/// Sum of horizontal luma differences: a cheap measure of visible structure.
+fn edge_energy(img:&[[u8;4]])->f64 {
+    img.windows(2).map(|w|(luma8(&w[1])-luma8(&w[0])).abs()).sum()
+}
+
+/// Production render guard. Renders the photograph as it is now and as Smart
+/// Auto would leave it (planned white balance included) on a small proxy, then
+/// trims only the moves that cause a measured problem, only as far as needed:
+/// collapsed structure, over-lifted dark regions (allowing for a justified
+/// exposure lift), new white clipping and new black clipping. Clipping comes
+/// last so it has the final say. Clipping that the corrected white balance
+/// causes on its own (a warm correction of a bright neutral, say) is accepted;
+/// the tone moves may add at most the limit on top of it.
+fn production_quality_guard(
+    src:&Rgb32f,info:&SourceInfo,current:&DevelopSettings,
+    planned_wb:Option<lightcraft_develop::WhiteBalance>,proposal:AutoTone,
+) -> GuardOutcome {
+    let mut reasons=Vec::new();
+    let strength=proposal.exposure.abs()+proposal.contrast.abs()
+        +proposal.highlights.abs()+proposal.shadows.abs()+proposal.whites.abs()
+        +proposal.blacks.abs()+proposal.vibrance.abs()+proposal.saturation.abs()
+        +proposal.curve_shadows.abs()+proposal.curve_darks.abs()
+        +proposal.curve_lights.abs()+proposal.curve_highlights.abs();
+    let wb_changes=planned_wb.is_some_and(|wb|wb!=current.wb);
+    if strength==0.0 && !wb_changes {
+        return GuardOutcome {tone:proposal,reasons,white_clip_change:0.0,black_clip_change:0.0};
+    }
+    let proxy=lightcraft_raster::resample::fit(
+        src,GUARD_EDGE,GUARD_EDGE,lightcraft_raster::resample::Filter::Box);
+    let req=crate::RenderRequest::fit(GUARD_EDGE,GUARD_EDGE);
+    let before=crate::render(&proxy,info,current,&req).image;
+    let mut target=current.clone();
+    if let Some(wb)=planned_wb {target.wb=wb;}
+    let render=|a:&AutoTone| crate::render(&proxy,info,&with_tone(&target,a),&req).image.data;
+    let mut a=proposal;
+    let mut after=render(&a);
+    if before.data.is_empty() || before.data.len()!=after.len() {
+        reasons.push("guard_render_failed");
+        return GuardOutcome {
+            tone:AutoTone::default(),reasons,
+            white_clip_change:0.0,black_clip_change:0.0
+        };
+    }
+    let before=before.data;
+    let whites=|img:&[[u8;4]]| newly_clipped_rgb_fraction(&before,img,true);
+    let blacks=|img:&[[u8;4]]| newly_clipped_rgb_fraction(&before,img,false);
+
+    // 1. Structure: a large collapse of visible edges means the edit
+    //    flattened the picture. Trim the flattening moves, keep exposure.
+    let g0=edge_energy(&before);
+    if g0>1000.0 && edge_energy(&after)<g0*0.61 {
+        let base=a;
+        let k=largest_passing_scale(|k| edge_energy(&render(&scale_moves(&base,k,flattening)))
+            >=g0*0.61);
+        a=scale_moves(&base,k,flattening);
+        if a!=base {reasons.push("structural_contrast_loss"); after=render(&a);}
+    }
+    // 2. Deep intentional shadows must not turn grey. A justified exposure
+    //    lift raises dark regions too, so it earns a proportionally larger
+    //    allowance; Shadows and the curve's dark regions are what get trimmed.
+    let lift_limit=24.0+30.0*a.exposure.max(0.0);
+    let (lift,dark_count)=dark_region_lift(&before,&after);
+    if dark_count>200 && lift>lift_limit {
+        let base=a;
+        let k=largest_passing_scale(|k| dark_region_lift(&before,
+            &render(&scale_moves(&base,k,shadow_lifting))).0<=lift_limit);
+        a=scale_moves(&base,k,shadow_lifting);
+        if a!=base {reasons.push("dark_region_overlift"); after=render(&a);}
+    }
+    // 3. New white clipping: recover highlights first, as a photographer
+    //    would, then reduce the brightening moves only as far as needed.
+    if whites(&after)>NEW_HIGHLIGHT_CLIP_LIMIT {
+        let start=a;
+        let protect=-(20.0+30.0*a.exposure.max(0.0)).min(55.0).round();
+        let recovered=AutoTone {
+            highlights:a.highlights.min(protect),
+            whites:a.whites.min(0.0),
+            curve_highlights:a.curve_highlights.min(0.0),
+            ..a
+        };
+        if recovered!=a {a=recovered; after=render(&a);}
+        let floor=whites(&render(&scale_moves(&a,0.0,brightening)));
+        let allowed=floor+NEW_HIGHLIGHT_CLIP_LIMIT;
+        if whites(&after)>allowed {
+            let base=a;
+            let k=largest_passing_scale(|k| whites(&render(&scale_moves(&base,k,brightening)))
+                <=allowed);
+            a=scale_moves(&base,k,brightening);
+            after=render(&a);
+        }
+        if a!=start {reasons.push("added_highlight_clipping");}
+    }
+    // 4. New black clipping, likewise beyond what the colour correction does.
+    if blacks(&after)>NEW_SHADOW_CLIP_LIMIT {
+        let floor=blacks(&render(&scale_moves(&a,0.0,darkening)));
+        let allowed=floor+NEW_SHADOW_CLIP_LIMIT;
+        if blacks(&after)>allowed {
+            let base=a;
+            let k=largest_passing_scale(|k| blacks(&render(&scale_moves(&base,k,darkening)))
+                <=allowed);
+            a=scale_moves(&base,k,darkening);
+            if a!=base {reasons.push("added_shadow_clipping"); after=render(&a);}
+        }
+    }
+    GuardOutcome {
+        tone:a,reasons,
+        white_clip_change:whites(&after),
+        black_clip_change:blacks(&after),
+    }
+}
+
+/// LumaWorks v0.6.22–v0.6.30 Smart Auto, kept unchanged for A/B comparison
+/// (`examples/auto_compare.rs`) and regression tests. Not used by the app.
+#[doc(hidden)]
+pub fn smart_auto_tone_report_balanced_v0630(
     src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings
 ) -> AutoToneAuditReport {
     let mut audit=smart_auto_tone_report(src,info,s);
@@ -794,6 +1159,7 @@ fn smart_auto_tone_report_mode(
     }
 }
 
+#[derive(Debug)]
 struct GuardOutcome {
     tone:AutoTone,
     reasons:Vec<&'static str>,
@@ -3108,5 +3474,108 @@ mod studio_v0612_assertive_test {
         let report=preview_quality_guard_report(
             &img,&SourceInfo::default(),&DevelopSettings::default(),proposal);
         assert_eq!(report.tone.whites,-10.0);
+    }
+}
+
+#[cfg(test)]
+mod lumaworks_v0632_production_auto {
+    use super::*;
+
+    /// Dark, textured ground with a modest near-white cloud patch: the kind
+    /// of underexposed landscape v0.6.30 refused to brighten (+0.05 EV cap).
+    fn underexposed_with_cloud() -> Rgb32f {
+        Rgb32f::from_fn(320, 240, |x, y| {
+            if (200..262).contains(&x) && (20..62).contains(&y) {
+                [0.835, 0.84, 0.845]
+            } else {
+                let t = ((x * 13 + y * 7) % 29) as f32 * 0.0022;
+                let v = 0.042 + t;
+                [v * 1.03, v, v * 0.95]
+            }
+        })
+    }
+
+    #[test]
+    fn cloud_patch_no_longer_vetoes_exposure_before_the_render_check() {
+        let img = underexposed_with_cloud();
+        let (info, s) = (SourceInfo::default(), DevelopSettings::default());
+        let old = smart_auto_tone_report_balanced_v0630(&img, &info, &s);
+        let new = smart_auto_tone_report(&img, &info, &s);
+        assert!(new.evidence.zonal.micro.neutral_white_subject,
+            "test scene must contain a near-white patch: {:?}", new.evidence.zonal.micro);
+        let new = smart_auto_tone_report_balanced(&img, &info, &s);
+        assert!(old.proposed.exposure <= 0.05, "v0.6.30 cap expected: {:?}", old.proposed);
+        assert!(new.proposed.exposure >= 0.20,
+            "an underexposed photo with a cloud must get a real exposure proposal: {:?}", new.proposed);
+        assert!(new.proposed.highlights <= -12.0, "the cloud must be protected: {:?}", new.proposed);
+        assert!(new.new_white_clip_fraction <= NEW_HIGHLIGHT_CLIP_LIMIT + 0.003,
+            "the applied result may not clip the cloud: {new:?}");
+    }
+
+    #[test]
+    fn guard_trims_only_as_far_as_needed() {
+        let img = Rgb32f::from_fn(192, 128, |x, _| if x < 96 { [0.70; 3] } else { [0.30; 3] });
+        let s = DevelopSettings::default();
+        let proposal = AutoTone { exposure: 0.9, ..Default::default() };
+        let legacy = preview_quality_guard(&img, &SourceInfo::default(), &s, proposal);
+        let outcome = production_quality_guard(&img, &SourceInfo::default(), &s, None, proposal);
+        assert_eq!(legacy.exposure, 0.0, "legacy veto behaviour unchanged");
+        assert!(outcome.tone.exposure > 0.0, "production guard must keep the safe part: {:?}", outcome.tone);
+        assert!(outcome.white_clip_change <= NEW_HIGHLIGHT_CLIP_LIMIT + 0.003, "{outcome:?}");
+        assert!(outcome.reasons.contains(&"added_highlight_clipping"));
+    }
+
+    #[test]
+    fn guard_checks_the_white_balance_that_will_be_applied() {
+        // A large bright neutral area: a strong warming WB alone clips red.
+        let img = Rgb32f::from_fn(192, 128, |x, _| if x < 110 { [0.94; 3] } else { [0.20; 3] });
+        let s = DevelopSettings::default();
+        let warm = lightcraft_develop::WhiteBalance {
+            mode: lightcraft_develop::WbMode::Auto, temp: 15000.0, tint: 0.0,
+        };
+        let without = production_quality_guard(&img, &SourceInfo::default(), &s, None, AutoTone::default());
+        let with = production_quality_guard(&img, &SourceInfo::default(), &s, Some(warm), AutoTone::default());
+        assert!(without.reasons.is_empty() && without.white_clip_change == 0.0, "{without:?}");
+        // Either the guard reacted (Highlights recovery) or it reports the
+        // colour correction's own clipping; both prove it rendered the new WB.
+        assert!(with.white_clip_change > 0.0 || !with.reasons.is_empty(),
+            "the planned white balance must be part of the checked render: {with:?}");
+        // Clipping caused by the colour correction alone never costs the
+        // photograph its tone moves.
+        let lift = AutoTone { exposure: 0.3, ..Default::default() };
+        let lifted = production_quality_guard(&img, &SourceInfo::default(), &s, Some(warm), lift);
+        assert!(lifted.tone.exposure > 0.0, "WB clipping must not veto the exposure lift: {lifted:?}");
+        assert!(lifted.white_clip_change <= with.white_clip_change + NEW_HIGHLIGHT_CLIP_LIMIT + 0.003,
+            "{lifted:?}");
+    }
+
+    #[test]
+    fn isolated_white_subject_on_dark_keeps_its_protection() {
+        let img = Rgb32f::from_fn(512, 384, |x, y| {
+            let (dx, dy) = (x as f32 - 256.0, y as f32 - 192.0);
+            if dx * dx + dy * dy < 46.0 * 46.0 { [0.93, 0.93, 0.92] } else { [0.006, 0.007, 0.012] }
+        });
+        let r = smart_auto_tone_report_balanced(&img, &SourceInfo::default(), &DevelopSettings::default());
+        assert!(r.final_tone.exposure <= 0.05, "Moon-like subject lifted: {:?}", r.final_tone);
+    }
+
+    #[test]
+    fn production_auto_is_deterministic() {
+        let img = underexposed_with_cloud();
+        let a = smart_auto_tone_report_balanced(&img, &SourceInfo::default(), &DevelopSettings::default());
+        let b = smart_auto_tone_report_balanced(&img, &SourceInfo::default(), &DevelopSettings::default());
+        assert_eq!(a.final_tone, b.final_tone);
+        assert_eq!(a.guard_reasons, b.guard_reasons);
+    }
+
+    #[test]
+    fn neutral_mid_grey_photo_is_left_almost_alone() {
+        let img = Rgb32f::from_fn(256, 192, |x, y| {
+            let v = 0.16 + ((x * 5 + y * 3) % 19) as f32 * 0.003;
+            [v, v, v]
+        });
+        let r = smart_auto_tone_report_balanced(&img, &SourceInfo::default(), &DevelopSettings::default());
+        assert!(r.final_tone.exposure.abs() <= 0.35, "{:?}", r.final_tone);
+        assert_eq!((r.final_tone.vibrance, r.final_tone.saturation), (0.0, 0.0));
     }
 }

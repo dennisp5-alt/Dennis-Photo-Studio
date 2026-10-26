@@ -1,0 +1,204 @@
+name: LumaWorks v0.6.32 — Smart Auto fixes
+
+on:
+  push:
+    branches: [experiment/lumaworks-v0.6.32-smart-auto-fixes]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lumaworks-v0632
+  cancel-in-progress: true
+
+jobs:
+  smart-auto-tests-and-ab:
+    name: Smart Auto tests and old-vs-new photo comparison
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit production wiring
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          a=Path('crates/pipeline/src/auto.rs').read_text()
+          e=Path('crates/engine/src/cmd/develop.rs').read_text()
+          vm=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/AppViewModel.kt').read_text()
+          assert 'pub fn smart_auto_tone_report_balanced_with_wb(' in a
+          assert 'pub fn smart_auto_tone_report_balanced_v0630(' in a
+          assert 'fn production_quality_guard(' in a
+          # Both production commands analyse and guard under the WB they apply.
+          assert e.count('smart_auto_tone_report_balanced_with_wb(')==2
+          assert e.count('let manual_wb=!matches!(')==2
+          assert e.count('"preservedWbMode"')==2
+          # The legacy all-or-nothing guard is untouched for its own tests.
+          assert 'if new_whites>0.028' in a and 'if new_blacks>0.028' in a
+          assert 'private var smartAutoBusy = false' in vm
+          assert 'fun smartAutoWbStatus(' in vm and 'fun smartAutoSummary(' in vm
+          g=Path('apps/lightcraft-android/android/gradle.properties').read_text()
+          assert 'lightcraft.version=0.6.32-beta' in g and 'lightcraft.versionCode=63201' in g
+          assert 'com.dennis.lumaworks.autofix.v0632' in Path(
+              'apps/lightcraft-android/android/app/build.gradle.kts').read_text()
+          print('Smart Auto v0.6.32 wiring: PASS')
+          PY
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          rustup default 1.99.0
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          cache-on-failure: true
+      - name: Build the old-vs-new comparison tool
+        run: cargo +1.99.0 build -p lightcraft-pipeline --example auto_compare --locked
+      - name: Fetch public test photographs and make exposure/colour variants
+        continue-on-error: true
+        run: |
+          set -u
+          mkdir -p eval/kodak eval/in
+          for n in 01 02 03 04 05 07 08 13 14 15 16 19 20 21 22 23 24; do
+            curl -fsSL --retry 4 --retry-delay 3 --connect-timeout 20 \
+              -o "eval/kodak/kodim$n.png" "https://r0k.us/graphics/kodak/kodak/kodim$n.png" \
+              || echo "could not fetch kodim$n"
+          done
+          ls eval/kodak | wc -l
+          python3 -m pip install --quiet pillow numpy
+          python3 - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          from PIL import Image
+          src=Path('eval/kodak'); out=Path('eval/in')
+          def lin(a):
+              a=a/255.0
+              return np.where(a<=0.04045,a/12.92,((a+0.055)/1.055)**2.4)
+          def enc(l):
+              l=np.clip(l,0,1)
+              s=np.where(l<=0.0031308,l*12.92,1.055*l**(1/2.4)-0.055)
+              return Image.fromarray((s*255+0.5).astype(np.uint8))
+          plan={
+            'a_orig':(['01','02','03','04','05','07','08','13','14','15','16','19','20','21','22','23','24'],None),
+            'b_under13':(['01','05','08','13','16','19','21','22','24'],lambda l:l*2**-1.3),
+            'c_under20':(['03','14'],lambda l:l*2**-2.0),
+            'd_warmcast':(['04','15','20','23'],lambda l:l*np.array([1.18,1.0,0.78])),
+            'e_over08':(['02','07'],lambda l:l*2**0.8),
+          }
+          for prefix,(ids,f) in plan.items():
+              for i in ids:
+                  p=src/f'kodim{i}.png'
+                  if not p.exists(): continue
+                  img=Image.open(p).convert('RGB')
+                  if f is None:
+                      img.save(out/f'{prefix}_kodim{i}.png')
+                  else:
+                      enc(f(lin(np.asarray(img,dtype=np.float64)))).save(out/f'{prefix}_kodim{i}.png')
+          # A flat, low-contrast copy (haze/fog-like) of two landscapes.
+          for i in ('13','21'):
+              p=src/f'kodim{i}.png'
+              if p.exists():
+                  a=np.asarray(Image.open(p).convert('RGB'),dtype=np.float64)
+                  Image.fromarray((0.55*a+0.45*150).astype(np.uint8)).save(out/f'f_flat_kodim{i}.png')
+          print(len(list(out.iterdir())),'test images')
+          PY
+      - name: Render old (v0.6.30) vs new (v0.6.32) Smart Auto
+        continue-on-error: true
+        run: |
+          mkdir -p eval/in eval/out
+          cargo +1.99.0 run -p lightcraft-pipeline --example auto_compare --locked -- eval/in eval/out | tee eval/out/summary.txt
+      - name: Publish the comparison to the eval branch
+        continue-on-error: true
+        env:
+          TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          cd eval/out
+          printf 'Smart Auto A/B for %s\n\nEach image: original | v0.6.30 Smart Auto | v0.6.32 Smart Auto (same Auto WB on both).\n' "$GITHUB_SHA" > README.md
+          git init -q -b eval
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "Smart Auto A/B ${GITHUB_SHA::7}"
+          git push -qf "https://x-access-token:${TOKEN}@github.com/${REPO}.git" eval:eval/lumaworks-v0632-auto-compare
+      - name: Smart Auto, colour and tone regression tests
+        run: cargo +1.99.0 test -p lightcraft-pipeline --locked --lib
+      - name: Engine Smart Auto command tests (preview equals one-tap, WB kept)
+        run: cargo +1.99.0 test -p lightcraft-engine --locked --lib smart_auto
+
+  apk:
+    name: ARM64 test APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Android SDK manager
+        run: |
+          MANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -1)"
+          test -x "$MANAGER"
+          echo "$(dirname "$MANAGER")" >> "$GITHUB_PATH"
+      - name: Android SDK 37.0 and NDK 29
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --channel=3 "platforms;android-37.0" "ndk;29.0.14206865"
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
+          if [ ! -e "$ANDROID_HOME/platforms/android-37" ]; then
+            ln -s "$ANDROID_HOME/platforms/android-37.0" "$ANDROID_HOME/platforms/android-37"
+          fi
+      - name: Rust toolchain and target
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal --target aarch64-linux-android
+          rustup default 1.99.0
+          cargo +1.99.0 install cargo-ndk --version 4.1.2 --locked
+      - name: Cache native Rust build and dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          cache-on-failure: true
+      - name: Type-check native engine and Android HEIC feature
+        run: |
+          cargo +1.99.0 check -p lightcraft-engine --features lightcraft-codecs/heif --locked
+          cargo +1.99.0 check -p lightcraft-android --features heic --locked
+      - name: Bundle checksum-verified offline ADE20K weights
+        run: |
+          set -euo pipefail
+          ASSETS=apps/lightcraft-android/android/app/src/main/assets
+          mkdir -p "$ASSETS"
+          curl --fail --location --retry 5 --retry-delay 4 --connect-timeout 30 \
+            "https://huggingface.co/Xenova/segformer-b0-finetuned-ade-512-512/resolve/main/onnx/model.onnx?download=true" \
+            --output "$ASSETS/segformer_b0_ade.onnx"
+          echo "3e5c18a4be395f16646438d54c42377ddc202edfa33d5eced0c9506de75c44c2  $ASSETS/segformer_b0_ade.onnx" | sha256sum --check
+          test "$(stat -c%s "$ASSETS/segformer_b0_ade.onnx")" -gt 10000000
+      - name: Kotlin unit tests
+        working-directory: apps/lightcraft-android/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace testDebugUnitTest -Plightcraft.abis=arm64-v8a
+      - name: Assemble ARM64 APK
+        working-directory: apps/lightcraft-android/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace assembleDebug -Plightcraft.abis=arm64-v8a
+      - name: Verify APK
+        run: |
+          APK=apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          ls -lh "$APK"
+      - name: Upload test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaWorks-v0.6.32-Smart-Auto-Fixes-ARM64
+          path: apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
