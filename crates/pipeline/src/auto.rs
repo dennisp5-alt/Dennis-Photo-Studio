@@ -760,18 +760,135 @@ pub fn smart_auto_tone_report_balanced_with_wb(
     }
     proposed.exposure=(base_ev+proposed.exposure)
         .clamp(-MAX_AUTO_EXPOSURE_EV,MAX_AUTO_EXPOSURE_EV);
+    // An ordinary photograph: not night, firelight, a white subject on dark
+    // or intentional darkness. Only these get the Lightroom-style finish.
+    let ordinary=!white_subject && !emissive && ev.median_ev> -1.6
+        && ev.dark_fraction<0.40
+        && !(ev.dark_fraction>0.80 && ev.recoverable_fraction<0.07);
+    // Lightroom's Auto gives ordinary colourful photographs a little more
+    // colour (measured on Dennis's reference photos: about +0.04 saturation
+    // over v0.6.32-beta.2). Vibrance protects skin and already-vivid colour.
+    if ordinary && colourful_fraction(scene,info,&analysis)>0.25 {
+        proposed.vibrance=proposed.vibrance.max(5.0);
+    }
     round_to_slider_precision(&mut proposed);
     // The safety render always uses the real photograph and the full edit.
     let quality=production_quality_guard(src,info,s,planned_wb,proposed);
+    let (final_tone,white_clip,black_clip)=if ordinary {
+        match_end_points(src,info,s,planned_wb,quality.tone)
+    }else{
+        (quality.tone,quality.white_clip_change,quality.black_clip_change)
+    };
     AutoToneAuditReport {
-        evidence:measured, proposed, final_tone:quality.tone,
+        evidence:measured, proposed, final_tone,
         guard_reasons:quality.reasons,
-        new_white_clip_fraction:quality.white_clip_change,
-        new_black_clip_fraction:quality.black_clip_change,
+        new_white_clip_fraction:white_clip,
+        new_black_clip_fraction:black_clip,
         comparison_exposure_ev:s.light.exposure,
         quality_guard_skipped_for_emission:false,
         exposure_correction_ev:base_ev,
     }
+}
+
+/// Share of visible pixels with noticeable colour (perceptual channel spread
+/// above 0.085), under the white balance being applied. 0 for greys.
+fn colourful_fraction(img:&Rgb32f,info:&SourceInfo,s:&DevelopSettings)->f64 {
+    let mut p=lightcraft_raster::resample::fit(
+        img,256,256,lightcraft_raster::resample::Filter::Box);
+    let base=DevelopSettings {wb:s.wb,..DevelopSettings::default()};
+    crate::local::scene_linear_pre(&mut p,info,&base);
+    let enc=|v:f32| (v.clamp(0.0,1.0) as f64).powf(1.0/2.2);
+    let (mut visible,mut coloured)=(0usize,0usize);
+    for c in &p.data {
+        if !(0.025..0.80).contains(&luminance_2020(*c)) {continue;}
+        visible+=1;
+        let (r,g,b)=(enc(c[0]),enc(c[1]),enc(c[2]));
+        let hi=r.max(g).max(b);
+        if (hi-r.min(g).min(b))/hi.max(1e-6)>0.085 {coloured+=1;}
+    }
+    if visible==0 {0.0} else {coloured as f64/visible as f64}
+}
+
+/// Rendered 8-bit black and white points Lightroom's Auto gives ordinary
+/// photographs (darkest / brightest 1% of luma, Dennis's reference photos).
+const TARGET_BLACK_LEVEL:f64=10.0;
+const TARGET_WHITE_LEVEL:f64=238.0;
+
+fn luma_percentile(img:&[[u8;4]],q:f64)->f64 {
+    let mut v:Vec<f64>=img.iter().map(luma8).collect();
+    if v.is_empty() {return 0.0;}
+    v.sort_by(f64::total_cmp);
+    v[((v.len()-1) as f64*q) as usize]
+}
+
+/// Smallest k in 0..=1 (to 1/32) with `reached(k)`, or 1 when even 1 does not reach.
+fn smallest_reaching_scale(mut reached:impl FnMut(f64)->bool)->f64 {
+    if !reached(1.0) {return 1.0;}
+    let (mut lo,mut hi)=(0.0f64,1.0f64);
+    for _ in 0..5 {
+        let mid=(lo+hi)*0.5;
+        if reached(mid) {hi=mid;} else {lo=mid;}
+    }
+    hi
+}
+
+/// Lightroom-style finish on the rendered result: deepen a lifted black point
+/// and raise a dull white point toward the reference levels, as far as needed
+/// and never adding more clipping than the guard allows. The display tone
+/// map's Blacks/Whites sliders barely move the end points of a JPEG, so the
+/// tone curve's Shadows/Highlights regions do most of the work. Returns the
+/// tone and its new white/black clip fractions.
+fn match_end_points(
+    src:&Rgb32f,info:&SourceInfo,current:&DevelopSettings,
+    planned_wb:Option<lightcraft_develop::WhiteBalance>,tone:AutoTone,
+) -> (AutoTone,f64,f64) {
+    let proxy=lightcraft_raster::resample::fit(
+        src,GUARD_EDGE,GUARD_EDGE,lightcraft_raster::resample::Filter::Box);
+    let req=crate::RenderRequest::fit(GUARD_EDGE,GUARD_EDGE);
+    let before=crate::render(&proxy,info,current,&req).image.data;
+    let mut target=current.clone();
+    if let Some(wb)=planned_wb {target.wb=wb;}
+    let render=|a:&AutoTone| crate::render(&proxy,info,&with_tone(&target,a),&req).image.data;
+    let start=render(&tone);
+    let whites=|img:&[[u8;4]]| newly_clipped_rgb_fraction(&before,img,true);
+    let blacks=|img:&[[u8;4]]| newly_clipped_rgb_fraction(&before,img,false);
+    if before.is_empty() || before.len()!=start.len() {
+        return (tone,whites(&start),blacks(&start));
+    }
+    let white_cap=whites(&start).max(NEW_HIGHLIGHT_CLIP_LIMIT);
+    let black_cap=blacks(&start).max(NEW_SHADOW_CLIP_LIMIT);
+    let mut a=tone;
+
+    // Black point: a mildly lifted one (very flat haze is left alone).
+    let p1=luma_percentile(&start,0.01);
+    if p1>TARGET_BLACK_LEVEL+3.0 && p1<=60.0 {
+        let base=a;
+        let deepen=move |k:f64| AutoTone {
+            curve_shadows:(base.curve_shadows-30.0*k).max(-30.0).round()+0.0,
+            blacks:(base.blacks-30.0*k).max(-40.0).round()+0.0,
+            ..base
+        };
+        let k=smallest_reaching_scale(|k| luma_percentile(&render(&deepen(k)),0.01)<=TARGET_BLACK_LEVEL+1.0);
+        let ok=|x:f64| blacks(&render(&deepen(x*k)))<=black_cap;
+        let safe=if ok(1.0) {1.0} else {largest_passing_scale(ok)};
+        a=deepen(k*safe);
+    }
+    // White point: a dull one on a photograph with real highlights.
+    let current_white=luma_percentile(&render(&a),0.99);
+    if current_white<TARGET_WHITE_LEVEL-5.0 && current_white>=150.0 {
+        let base=a;
+        let brighten=move |k:f64| AutoTone {
+            whites:(base.whites+25.0*k).min(25.0).round()+0.0,
+            curve_highlights:(base.curve_highlights+20.0*k).min(20.0).round()+0.0,
+            ..base
+        };
+        let k=smallest_reaching_scale(|k| luma_percentile(&render(&brighten(k)),0.99)>=TARGET_WHITE_LEVEL-2.0);
+        let ok=|x:f64| whites(&render(&brighten(x*k)))<=white_cap;
+        let safe=if ok(1.0) {1.0} else {largest_passing_scale(ok)};
+        a=brighten(k*safe);
+    }
+    let end=render(&a);
+    (a,whites(&end),blacks(&end))
 }
 
 /// Where the tones of a normally exposed photograph sit, in EV from middle
@@ -3715,6 +3832,21 @@ mod lumaworks_v0632_production_auto {
         }
         // Firelight is protected by the candidate's emitter detection.
         assert_eq!(exposure_correction(&ev(&exposed_scene(0.2, 0.003)), true), 0.0);
+    }
+
+    #[test]
+    fn lifted_black_point_is_deepened_without_new_clipping() {
+        // Smooth tones from a lifted black (~0.015 linear) to near white.
+        let img = Rgb32f::from_fn(256, 192, |x, y| {
+            let u = ((x + y * 3) % 256) as f32 / 255.0;
+            let v = 0.015 + 0.9 * u.powf(2.4);
+            [v * 1.02, v, v * 0.97]
+        });
+        let r = smart_auto_tone_report_balanced(&img, &SourceInfo::default(), &DevelopSettings::default());
+        assert!(r.final_tone.curve_shadows < r.proposed.curve_shadows || r.final_tone.blacks < r.proposed.blacks,
+            "black point not deepened: {r:?}");
+        assert!(r.new_black_clip_fraction <= NEW_SHADOW_CLIP_LIMIT + 0.003, "{r:?}");
+        assert!(r.new_white_clip_fraction <= NEW_HIGHLIGHT_CLIP_LIMIT + 0.003, "{r:?}");
     }
 
     #[test]

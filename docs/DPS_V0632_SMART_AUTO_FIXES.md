@@ -1,7 +1,7 @@
 # LumaWorks v0.6.32 — Smart Auto fixes (handoff / resume notes)
 
 Branch: `experiment/lumaworks-v0.6.32-smart-auto-fixes` (from v0.6.30 `419271c`).
-App: "LumaWorks Auto Fix", `com.dennis.lumaworks.autofix.v0632`, 0.6.32-beta.2 (63202).
+App: "LumaWorks Auto Fix", `com.dennis.lumaworks.autofix.v0632`, 0.6.32-beta.3 (63203).
 It installs alongside the other test builds.
 
 ## Status (27 Oct 2026)
@@ -22,6 +22,13 @@ It installs alongside the other test builds.
   - job 2: ARM64 APK, artifact `LumaWorks-v0.6.32-Smart-Auto-Fixes-ARM64`.
 - Other branches from 26 Oct also work on Auto: `experiment/lumaworks-v0.6.31-smart-auto-reliability`
   and `experiment/lumaworks-v0.6.32-classic-auto-repairs`. This branch is independent of them.
+
+- beta.3: tuned against Lightroom Auto on 10 of Dennis's photos (LR vs beta.2: brightness
+  within ±10 on 7/10, but our black point 3–7 levels higher, saturation 0.02–0.06 lower,
+  daisies white point 229 vs 248). Adds, for ordinary scenes only (not night/fire/white
+  subject on dark/intentional dark): vibrance ≥ +5 when the photo has colour, and a rendered
+  black/white point match (target luma p1 10, p99 238) via curve Shadows/Highlights +
+  Blacks/Whites, within the guard's clipping limits.
 
 ## Next steps (if resuming)
 1. Check the run: `gh api repos/dennisp5-alt/Dennis-Photo-Studio/actions/runs?branch=experiment/lumaworks-v0.6.32-smart-auto-fixes`.
