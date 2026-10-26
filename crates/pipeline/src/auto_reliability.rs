@@ -134,7 +134,12 @@ pub fn plan(src:&Rgb32f,info:&SourceInfo,current:&DevelopSettings)->SmartAutoPla
     // Use its pre-guard photographic candidate, then find the strongest
     // *render-verified* safe result without disabling other controls.
     let goal=audit.proposed;
-    let base_tone=tone_of(current);
+    // Canonical reference removes only Auto-owned tone controls. Comparing
+    // all strengths with this stable reference prevents an Auto-tap from
+    // gradually ratcheting beyond a previously approved safe correction.
+    let mut neutral=current.clone();
+    apply_tone(&mut neutral,AutoTone::default());
+    let base_tone=tone_of(&neutral);
     let manual=wb_is_user_choice(current.wb.mode);
     let wb=if manual {None}
         else {Some(crate::auto::auto_wb_report_balanced(src,info))};
@@ -144,6 +149,7 @@ pub fn plan(src:&Rgb32f,info:&SourceInfo,current:&DevelopSettings)->SmartAutoPla
         src,192,192,lightcraft_raster::resample::Filter::Box);
     let req=RenderRequest::fit(192,192);
     let baseline=crate::render(&proxy,info,current,&req).image;
+    let neutral_render=crate::render(&proxy,info,&neutral,&req).image;
     let mut chosen=current.clone();
     let mut accepted=safety_report(0.0,RenderMetrics{white:0.0,black:0.0,dark:0.0,gradient:1.0},false,0,"unchanged");
     let mut evaluated=0usize;
@@ -153,7 +159,7 @@ pub fn plan(src:&Rgb32f,info:&SourceInfo,current:&DevelopSettings)->SmartAutoPla
     'search: for use_wb in [true,false] {
         if use_wb && wb_to_try.is_none(){continue;}
         for strength in strengths {
-            let mut candidate=current.clone();
+            let mut candidate=neutral.clone();
             apply_tone(&mut candidate,scaled(base_tone,goal,strength));
             if use_wb {
                 if let Some(r)=wb_to_try {
@@ -162,11 +168,18 @@ pub fn plan(src:&Rgb32f,info:&SourceInfo,current:&DevelopSettings)->SmartAutoPla
                     candidate.wb.tint=r.tint;
                 }
             }
-            if candidate==*current {continue;}
+            if candidate==*current {
+                chosen=candidate;
+                accepted=safety_report(strength,
+                    RenderMetrics{white:0.0,black:0.0,dark:0.0,gradient:1.0},
+                    use_wb,evaluated,"already_approved_no_change");
+                break 'search;
+            }
             evaluated+=1;
             let rendered=crate::render(&proxy,info,&candidate,&req).image;
             let m=compare(&baseline.data,&rendered.data);
-            if safe(m) {
+            let canonical=compare(&neutral_render.data,&rendered.data);
+            if safe(m) && safe(canonical) {
                 chosen=candidate;
                 accepted=safety_report(strength,m,use_wb,evaluated,
                     if strength>=0.99 {"full_render_verified"}
@@ -186,7 +199,7 @@ pub fn plan(src:&Rgb32f,info:&SourceInfo,current:&DevelopSettings)->SmartAutoPla
         evaluated+=1;
         let rendered=crate::render(&proxy,info,&candidate,&req).image;
         let m=compare(&baseline.data,&rendered.data);
-        if safe(m){
+        if safe(m) && safe(compare(&neutral_render.data,&rendered.data)){
             chosen=candidate;
             accepted=safety_report(0.0,m,true,evaluated,"wb_only_render_verified");
         }
@@ -199,7 +212,7 @@ pub fn plan(src:&Rgb32f,info:&SourceInfo,current:&DevelopSettings)->SmartAutoPla
         let rendered=crate::render(&proxy,info,&with_haze,&req).image;
         evaluated+=1;
         let m=compare(&baseline.data,&rendered.data);
-        if safe(m) {
+        if safe(m) && safe(compare(&neutral_render.data,&rendered.data)) {
             chosen=with_haze;
             accepted=safety_report(accepted.accepted_strength,m,
                 accepted.checked_combined_wb,evaluated,"scene_haze_render_verified");
