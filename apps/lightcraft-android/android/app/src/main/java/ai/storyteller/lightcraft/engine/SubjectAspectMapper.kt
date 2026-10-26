@@ -1,7 +1,7 @@
 package ai.storyteller.lightcraft.engine
 
-import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 /**
@@ -41,11 +41,19 @@ internal object SubjectAspectMapper {
 
         init {
             require(side > 1 && inputSide > 1)
+            // Never interpolate padded grey logits back onto the photo,
+            // including where a person/hair touches the image frame.
+            val minX = ceil(fit.left.toDouble() * side / inputSide).toInt().coerceIn(0, side - 1)
+            val maxX = ((fit.left + fit.width).toDouble() * side / inputSide).toInt()
+                .minus(1).coerceIn(minX, side - 1)
+            val minY = ceil(fit.top.toDouble() * side / inputSide).toInt().coerceIn(0, side - 1)
+            val maxY = ((fit.top + fit.height).toDouble() * side / inputSide).toInt()
+                .minus(1).coerceIn(minY, side - 1)
             for (i in 0 until side) {
                 val fx = ((fit.left + (i + 0.5f) * fit.width / side) * side / inputSide - 0.5f)
-                    .coerceIn(0f, side - 1f)
+                    .coerceIn(minX.toFloat(), maxX.toFloat())
                 val fy = ((fit.top + (i + 0.5f) * fit.height / side) * side / inputSide - 0.5f)
-                    .coerceIn(0f, side - 1f)
+                    .coerceIn(minY.toFloat(), maxY.toFloat())
                 x0[i] = fx.toInt()
                 x1[i] = min(side - 1, x0[i] + 1)
                 tx[i] = fx - x0[i]
