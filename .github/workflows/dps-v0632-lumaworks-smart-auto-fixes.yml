@@ -41,7 +41,7 @@ jobs:
           assert 'private var smartAutoBusy = false' in vm
           assert 'fun smartAutoWbStatus(' in vm and 'fun smartAutoSummary(' in vm
           g=Path('apps/lightcraft-android/android/gradle.properties').read_text()
-          assert 'lightcraft.version=0.6.32-beta' in g and 'lightcraft.versionCode=63203' in g
+          assert 'lightcraft.version=0.6.32-beta' in g and 'lightcraft.versionCode=63204' in g
           assert 'com.dennis.lumaworks.autofix.v0632' in Path(
               'apps/lightcraft-android/android/app/build.gradle.kts').read_text()
           print('Smart Auto v0.6.32 wiring: PASS')

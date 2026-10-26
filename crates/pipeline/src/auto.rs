@@ -810,9 +810,10 @@ fn colourful_fraction(img:&Rgb32f,info:&SourceInfo,s:&DevelopSettings)->f64 {
 }
 
 /// Rendered 8-bit black and white points Lightroom's Auto gives ordinary
-/// photographs (darkest / brightest 1% of luma, Dennis's reference photos).
+/// photographs (darkest / brightest 1% of luma, Dennis's reference photos:
+/// whites 213–248, median about 228). Only clearly dull whites are raised.
 const TARGET_BLACK_LEVEL:f64=10.0;
-const TARGET_WHITE_LEVEL:f64=238.0;
+const TARGET_WHITE_LEVEL:f64=228.0;
 
 fn luma_percentile(img:&[[u8;4]],q:f64)->f64 {
     let mut v:Vec<f64>=img.iter().map(luma8).collect();
@@ -875,7 +876,7 @@ fn match_end_points(
     }
     // White point: a dull one on a photograph with real highlights.
     let current_white=luma_percentile(&render(&a),0.99);
-    if current_white<TARGET_WHITE_LEVEL-5.0 && current_white>=150.0 {
+    if current_white<TARGET_WHITE_LEVEL-10.0 && current_white>=150.0 {
         let base=a;
         let brighten=move |k:f64| AutoTone {
             whites:(base.whites+25.0*k).min(25.0).round()+0.0,

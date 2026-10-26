@@ -1,7 +1,7 @@
 # LumaWorks v0.6.32 — Smart Auto fixes (handoff / resume notes)
 
 Branch: `experiment/lumaworks-v0.6.32-smart-auto-fixes` (from v0.6.30 `419271c`).
-App: "LumaWorks Auto Fix", `com.dennis.lumaworks.autofix.v0632`, 0.6.32-beta.3 (63203).
+App: "LumaWorks Auto Fix", `com.dennis.lumaworks.autofix.v0632`, 0.6.32-beta.4 (63204).
 It installs alongside the other test builds.
 
 ## Status (27 Oct 2026)
@@ -29,6 +29,10 @@ It installs alongside the other test builds.
   subject on dark/intentional dark): vibrance ≥ +5 when the photo has colour, and a rendered
   black/white point match (target luma p1 10, p99 238) via curve Shadows/Highlights +
   Blacks/Whites, within the guard's clipping limits.
+
+- beta.4: beta.3 matched Lightroom's black points (8–15 vs LR 7–17) but its white target
+  (238) over-brightened photos LR leaves at 213–233. White target now 228, applied only when
+  the rendered p99 is below 218.
 
 ## Next steps (if resuming)
 1. Check the run: `gh api repos/dennisp5-alt/Dennis-Photo-Studio/actions/runs?branch=experiment/lumaworks-v0.6.32-smart-auto-fixes`.
