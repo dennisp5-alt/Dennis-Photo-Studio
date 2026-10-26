@@ -329,12 +329,13 @@ pub fn specs() -> Vec<CommandSpec> {
             let wb=plan.white_balance;
             let scene=plan.scene;
             let guard=plan.guard;
+            let finish=plan.finish;
             let manual_wb=plan.preset_preserved;
             let wb_changed=proposed.wb!=current.wb;
             let no_change=proposed==*current;
             Ok(json!({
                 "sourceSettings":current,"previewSettings":proposed,
-                "tone":tone,"toneAudit":tone_audit,"scene":scene,"combinedGuard":guard,
+                "tone":tone,"toneAudit":tone_audit,"scene":scene,"combinedGuard":guard,"photoFinish":finish,
                 "whiteBalance":wb,"manualWbPreserved":manual_wb,
                 "whiteBalanceChanged":wb_changed,"noChangeRecommended":no_change,
                 "model":{"status":"disabled","reason":"Classical photographic analysis; no learned tone model"}
@@ -388,6 +389,7 @@ pub fn specs() -> Vec<CommandSpec> {
             let wb=plan.white_balance;
             let scene=plan.scene;
             let guard=plan.guard;
+            let finish=plan.finish;
             let manual_wb=plan.preset_preserved;
             let wb_changed=proposed.wb!=current.wb;
             let no_change=proposed==*current;
@@ -402,7 +404,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 "tone":tone,"toneAudit":tone_audit,
                 "whiteBalance":wb,"whiteBalanceChanged":wb_changed,
                 "manualWbPreserved":manual_wb,"noChangeApplied":no_change,
-                "combinedGuard":guard,"scene":scene
+                "combinedGuard":guard,"scene":scene,"photoFinish":finish
             }))
         }),
         cmd!("develop.autoDetail", "Auto Detail & Noise", ["Photo"], None, "{}", has_active, |s, _p| {
