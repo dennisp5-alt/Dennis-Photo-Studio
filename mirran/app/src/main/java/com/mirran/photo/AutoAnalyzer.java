@@ -137,6 +137,12 @@ public final class AutoAnalyzer {
             r.clarity=range<.44f?.085f:.055f;
         }
         if(litSubject)r.clarity=Math.min(r.clarity,.025f);
+        // Conservative local detail recommendations, not semantic scene inference.
+        r.denoise=m.noiseIndex>.009f?
+            EditRecipe.clamp((m.noiseIndex-.009f)*12f,.06f,.32f):0f;
+        if(m.p90-m.p10<.36f&&m.avgLuma>.34f&&m.avgLuma<.70f
+            &&m.shadowShare<.14f&&m.blueShare<.28f&&m.channelClipShare<.045f)
+            r.dehaze=.10f;
         r.summary=String.format(Locale.US,
             "Local tonal analysis • %s; %s; %s. Balanced exposure, protected bright colours and preserved natural shadows.",
             litSubject?"lit subject in dark surroundings":"whole-frame tone",

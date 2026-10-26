@@ -1,6 +1,17 @@
-# MIRRAN — Intelligent Photo Studio (v0.1.5 experimental)
+# MIRRAN — Intelligent Photo Studio (v0.1.6 experimental)
 
 Native Java Android project, fully separate from approved Dennis Craft Mobile, LumaWorks, and other production editors. Main branch and all approved branches are left unchanged.
+
+## v0.1.6 — offline photographic engine (experimental)
+
+- First working **real semantic foreground masking** using Google's ML Kit Subject Segmentation API (beta). Model is free but must download once via Google Play services before mask inference works offline. No fake subjects or masks when unavailable.
+- Presence adds edge-aware local Denoise and cautious physically-inspired Dehaze. Both run on preview and full-sized exports.
+- Masks tab adds independent Subject and Background exposure, only enabled when an actual on-device segmentation mask is ready; masks are cached for up to four photos.
+- Explicit sRGB decoding for ICC-tagged JPEG/HEIC/PNG. This is a *colour-consistent sRGB entry point*, **not yet a 16-bit linear-light pipeline** or full ICC-preserving export system.
+- Automatic local noise assessment may apply modest Denoise; cautious Dehaze applies only on low-contrast candidate scenes.
+- Processing order is consistent for preview and export: edge-aware denoise, established tone, conservative dehaze, masked exposure; original photo untouched.
+- No OpenAI API key, account or paid provider is needed. Old Android picker, album swipe, saved in-session adjustments and JPEG quality 100 are preserved.
+- Performance and edge cases need real-device tests, particularly 50 MP exports and segmentation model downloads.
 
 ## v0.1.5 scene-quality audit
 

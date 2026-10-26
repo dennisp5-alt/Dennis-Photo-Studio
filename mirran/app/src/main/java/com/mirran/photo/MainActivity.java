@@ -21,7 +21,8 @@ public class MainActivity extends Activity {
     private static final int PALE=Color.rgb(246,249,253), MUTED=Color.rgb(93,111,134);
     private static final String[] LIGHT={"Exposure","Highlights","Shadows","Contrast"};
     private static final String[] COLOUR={"Vibrance","Warmth"};
-    private static final String[] PRESENCE={"Clarity"};
+    private static final String[] PRESENCE={"Clarity","Denoise","Dehaze"};
+    private static final String[] MASKING={"Subject","Background"};
     private final ExecutorService work=Executors.newSingleThreadExecutor();
     private final Handler ui=new Handler(Looper.getMainLooper());
     private Uri chosen;
@@ -34,6 +35,15 @@ public class MainActivity extends Activity {
     private View emptyState;
     private Button mainButton,saveButton;
     private TextView albumStatus,albumButton;
+    private TextView maskStatus;
+    private SubjectVision subjectVision;
+    private volatile SubjectMask currentMask;
+    private final LinkedHashMap<String,SubjectMask> recentMasks =
+        new LinkedHashMap<String,SubjectMask>(8,.75f,true){
+            @Override protected boolean removeEldestEntry(Map.Entry<String,SubjectMask> e){
+                return size()>4;
+            }
+        };
     // Album access is scoped to in-session permissions; no automatic exports.
     private final ArrayList<Uri> albumPhotos=new ArrayList<>();
     private final LinkedHashMap<String,EditRecipe> sessionEdits=new LinkedHashMap<>();
@@ -60,6 +70,10 @@ public class MainActivity extends Activity {
             return insets;
         });
         makeUI();
+        // The model is optional. Its first use may require a Google Play
+        // services download; manual editing always remains usable.
+        try{subjectVision=new SubjectVision();}
+        catch(Throwable problem){subjectVision=null;}
     }
     private int dp(float n){return (int)(getResources().getDisplayMetrics().density*n+.5f);}
     private GradientDrawable bg(int color,int radius) {
@@ -209,7 +223,7 @@ public class MainActivity extends Activity {
     }
     private void drawTabs() {
         tabRow.removeAllViews();
-        for(String label:new String[]{"Light","Colour","Presence"}) {
+        for(String label:new String[]{"Light","Colour","Presence","Masks"}) {
             TextView tab=text(label.toUpperCase(Locale.US),11,activeTab.equals(label)?Color.WHITE:BLUE,true);
             tab.setGravity(Gravity.CENTER);tab.setBackground(bg(activeTab.equals(label)?NAVY:Color.WHITE,12));
             LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(34),1);p.rightMargin=dp(5);
@@ -219,7 +233,8 @@ public class MainActivity extends Activity {
     }
     private void drawControls() {
         controls.removeAllViews();
-        String[] list=activeTab.equals("Light")?LIGHT:activeTab.equals("Colour")?COLOUR:PRESENCE;
+        String[] list=activeTab.equals("Light")?LIGHT:
+            activeTab.equals("Colour")?COLOUR:activeTab.equals("Masks")?MASKING:PRESENCE;
         // Two rows in Light, one row for the other panels.
         for(String key:list) {
             LinearLayout row=horizontal();
@@ -231,7 +246,8 @@ public class MainActivity extends Activity {
             TextView amount=text(recipe.amount(key),11,BLUE,true);amount.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
             add(row,amount,37,29);
             controls.addView(row,new LinearLayout.LayoutParams(-1,dp(31)));
-            bar.setEnabled(chosen!=null&&!busy);
+            boolean semantic=key.equals("Subject")||key.equals("Background");
+            bar.setEnabled(chosen!=null&&!busy&&(!semantic||currentMask!=null));
             bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 public void onStartTrackingTouch(SeekBar b){}
                 public void onStopTrackingTouch(SeekBar b){}
@@ -244,6 +260,14 @@ public class MainActivity extends Activity {
                     ui.removeCallbacks(delayedRender);ui.postDelayed(delayedRender,110);
                 }
             });
+        }
+        if(activeTab.equals("Masks")){
+            maskStatus=text(currentMask!=null?
+                "LOCAL ML MASK READY · subject and background":
+                "Mask pending/unavailable · one-time model download may be needed",
+                10,MUTED,false);
+            maskStatus.setPadding(0,dp(3),0,dp(3));
+            controls.addView(maskStatus);
         }
     }
     private void refreshAction(){
@@ -386,6 +410,7 @@ public class MainActivity extends Activity {
         renderGeneration++;
         final int serial=++loadSerial;
         chosen=uri;
+        currentMask=recentMasks.get(uri.toString());
         setBusy(true,"Opening photograph…");
         work.execute(()->{
             try{
@@ -406,6 +431,7 @@ public class MainActivity extends Activity {
                     stageTag.setText(saved==null?"ORIGINAL · HOLD TO COMPARE":"EDITED · HOLD TO COMPARE");
                     setBusy(false,null);
                     if(saved!=null)renderPreview();
+                    if(currentMask==null)requestSubjectMask(bitmap,uri,serial);
                 });
             }catch(Throwable ex){
                 ui.post(()->{
@@ -418,11 +444,38 @@ public class MainActivity extends Activity {
             }
         });
     }
+    private void requestSubjectMask(Bitmap preview,Uri uri,int serial){
+        if(subjectVision==null)return;
+        subjectVision.analyze(preview,new SubjectVision.Callback(){
+            @Override public void success(SubjectMask mask){
+                if(serial!=loadSerial||!uri.equals(chosen))return;
+                currentMask=mask;
+                recentMasks.put(uri.toString(),mask);
+                if(activeTab.equals("Masks"))drawControls();
+                if(Math.abs(recipe.subject)>.001f||Math.abs(recipe.background)>.001f)
+                    renderPreview();
+            }
+            @Override public void unavailable(String reason){
+                if(serial!=loadSerial||!uri.equals(chosen))return;
+                if(activeTab.equals("Masks"))drawControls();
+                // Failure is nonfatal; masks stay disabled, never fabricated.
+            }
+        });
+    }
+    private void processEdits(Bitmap bitmap,EditRecipe plan,SubjectMask mask){
+        DetailEngine.denoiseInPlace(bitmap,Math.max(0f,plan.denoise));
+        ToneEngine.applyInPlace(bitmap,plan);
+        DetailEngine.dehazeInPlace(bitmap,Math.max(0f,plan.dehaze));
+        DetailEngine.maskedExposureInPlace(bitmap,plan,mask);
+    }
     private Bitmap decode(Uri uri,int maxDim)throws IOException {
         ImageDecoder.Source src=ImageDecoder.createSource(getContentResolver(),uri);
         return ImageDecoder.decodeBitmap(src,(decoder,info,source)->{
             decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
             decoder.setMutableRequired(true);
+            // Explicitly colour-convert tagged JPEG/HEIC/PNG into an sRGB
+            // working image before 8-bit processing and JPEG output.
+            decoder.setTargetColorSpace(ColorSpace.get(ColorSpace.Named.SRGB));
             if(maxDim>0){
                 int w=info.getSize().getWidth(),h=info.getSize().getHeight();
                 int max=Math.max(w,h);
@@ -435,10 +488,11 @@ public class MainActivity extends Activity {
         final int token=++renderGeneration;
         final EditRecipe plan=recipe.copy();
         final Bitmap src=originalPreview;
+        final SubjectMask mask=currentMask;
         work.execute(()->{
             try{
                 Bitmap out=src.copy(Bitmap.Config.ARGB_8888,true);
-                ToneEngine.applyInPlace(out,plan);
+                processEdits(out,plan,mask);
                 ui.post(()->{
                     if(token==renderGeneration && chosen!=null){
                         editedPreview=out;photograph.setImageBitmap(out);
@@ -491,7 +545,15 @@ public class MainActivity extends Activity {
     }
     private void exportPhoto() {
         if(chosen==null||busy)return;
+        if(currentMask==null && (Math.abs(recipe.subject)>.001f
+            ||Math.abs(recipe.background)>.001f)){
+            new AlertDialog.Builder(this).setTitle("Subject mask unavailable")
+                .setMessage("This edit uses a semantic mask that has not loaded. Return to Masks when the on-device model is available, then export. No unmasked substitute will be applied.")
+                .setPositiveButton("OK",null).show();
+            return;
+        }
         final Uri input=chosen;final EditRecipe plan=recipe.copy();
+        final SubjectMask mask=currentMask;
         setBusy(true,"Rendering original-resolution JPEG…");
         work.execute(()->{
             Uri target=null;
@@ -500,7 +562,7 @@ public class MainActivity extends Activity {
                 if((long)full.getWidth()*full.getHeight()>60000000L) {
                     full.recycle();throw new IOException("Image exceeds the current 60 MP export safety limit");
                 }
-                ToneEngine.applyInPlace(full,plan);
+                processEdits(full,plan,mask);
                 ContentValues values=new ContentValues();
                 values.put(MediaStore.Images.Media.DISPLAY_NAME,"MIRRAN_"+new SimpleDateFormat("yyyyMMdd_HHmmss",Locale.US).format(new Date())+".jpg");
                 values.put(MediaStore.Images.Media.MIME_TYPE,"image/jpeg");
@@ -547,7 +609,9 @@ public class MainActivity extends Activity {
     @Override protected void onDestroy() {
         ui.removeCallbacks(delayedRender);
         ui.removeCallbacks(showCompare);
-        work.shutdownNow();super.onDestroy();
+        work.shutdownNow();
+        if(subjectVision!=null)subjectVision.close();
+        super.onDestroy();
     }
 
     private static final class MarkView extends View {

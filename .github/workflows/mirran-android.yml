@@ -3,7 +3,7 @@ name: MIRRAN Android Debug APK
 on:
   push:
     branches:
-      - experiment/mirran-v0.1.5-scene-quality-audit
+      - experiment/mirran-v0.1.6-offline-engine
     paths:
       - 'mirran/**'
       - '.github/workflows/mirran-android.yml'
@@ -36,14 +36,18 @@ jobs:
             app/src/main/java/com/mirran/photo/EditRecipe.java \
             app/src/main/java/com/mirran/photo/AutoAnalyzer.java \
             app/src/main/java/com/mirran/photo/ToneEngine.java \
-            tests/AutoPolicyTest.java
+            app/src/main/java/com/mirran/photo/SubjectMask.java \
+            app/src/main/java/com/mirran/photo/DetailEngine.java \
+            tests/AutoPolicyTest.java \
+            tests/OfflineDetailTest.java
           java -cp build/local-tests com.mirran.photo.AutoPolicyTest
+          java -cp build/local-tests com.mirran.photo.OfflineDetailTest
       - name: Build MIRRAN
         working-directory: mirran
         run: gradle --no-daemon --stacktrace :app:assembleDebug
       - name: Upload MIRRAN debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: MIRRAN-v0.1.5-debug-apk
+          name: MIRRAN-v0.1.6-debug-apk
           path: mirran/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14

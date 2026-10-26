@@ -6,6 +6,7 @@ import java.util.Locale;
 public final class EditRecipe {
     // UI scale -100..+100; exposure internally maps to +/-1 EV.
     public float exposure, highlights, shadows, contrast, vibrance, warmth, clarity;
+    public float denoise,dehaze,subject,background;
     public String summary = "Choose a photograph to begin.";
     public boolean cloud = false;
 
@@ -13,6 +14,7 @@ public final class EditRecipe {
         EditRecipe b = new EditRecipe();
         b.exposure=exposure; b.highlights=highlights; b.shadows=shadows;
         b.contrast=contrast; b.vibrance=vibrance; b.warmth=warmth; b.clarity=clarity;
+        b.denoise=denoise;b.dehaze=dehaze;b.subject=subject;b.background=background;
         b.summary=summary; b.cloud=cloud; return b;
     }
     public float get(String k) {
@@ -20,7 +22,9 @@ public final class EditRecipe {
             case "Exposure":return exposure; case "Highlights":return highlights;
             case "Shadows":return shadows; case "Contrast":return contrast;
             case "Vibrance":return vibrance; case "Warmth":return warmth;
-            case "Clarity":return clarity; default:return 0;
+            case "Clarity":return clarity;case "Denoise":return denoise;
+            case "Dehaze":return dehaze;case "Subject":return subject;
+            case "Background":return background;default:return 0;
         }
     }
     public void set(String k,float v) {
@@ -29,7 +33,9 @@ public final class EditRecipe {
             case "Exposure": exposure=v;break; case "Highlights":highlights=v;break;
             case "Shadows":shadows=v;break;case "Contrast":contrast=v;break;
             case "Vibrance":vibrance=v;break;case "Warmth":warmth=v;break;
-            case "Clarity":clarity=v;break;
+            case "Clarity":clarity=v;break;case "Denoise":denoise=v;break;
+            case "Dehaze":dehaze=v;break;case "Subject":subject=v;break;
+            case "Background":background=v;break;
         }
     }
     public static float clamp(float n,float a,float b) {return Math.max(a,Math.min(b,n));}
