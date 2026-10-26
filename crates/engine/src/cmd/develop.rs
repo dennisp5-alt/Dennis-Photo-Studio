@@ -323,7 +323,7 @@ pub fn specs() -> Vec<CommandSpec> {
             let current=s.develop_of(id).unwrap_or_default();
             // Use the production render-quality guard, NOT the old test-only
             // all-guards-off experiment. These settings are actually applied.
-            let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report_balanced(&src,&info,&current);
+            let tone_audit=lightcraft_pipeline::auto::classic_auto_tone_report(&src,&info,&current);
             let tone=tone_audit.final_tone;
             // Respect a consciously chosen neutral reference or manual WB.
             // Dedicated WB Auto remains available to replace it explicitly.
@@ -442,7 +442,7 @@ pub fn specs() -> Vec<CommandSpec> {
             // Normal one-tap Auto must apply the same protected decision as
             // the read-only preview. Do not route experimental unrestricted
             // tone or WB candidates to production commands.
-            let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report_balanced(&src,&info,&d);
+            let tone_audit=lightcraft_pipeline::auto::classic_auto_tone_report(&src,&info,&d);
             let a=tone_audit.final_tone;
             let manual_wb=d.wb.mode==WbMode::Custom;
             let wb=(!manual_wb).then(||lightcraft_pipeline::auto::auto_wb_report_balanced(&src,&info));

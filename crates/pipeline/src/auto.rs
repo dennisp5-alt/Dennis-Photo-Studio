@@ -3110,3 +3110,188 @@ mod studio_v0612_assertive_test {
         assert_eq!(report.tone.whites,-10.0);
     }
 }
+
+
+/// Independent Lightroom-era style histogram/3x3 Auto experiment.
+/// Deliberately leaves smart_auto_tone_report_balanced unchanged.
+/// WB and atmospheric edits still use the existing protected engine.
+pub fn classic_auto_tone_report(src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings)
+    ->AutoToneAuditReport {
+    let mut audit=smart_auto_tone_report(src,info,s);
+    let mut img=lightcraft_raster::resample::fit(
+        src,384,384,lightcraft_raster::resample::Filter::Box);
+    if img.data.is_empty() || img.width==0 || img.height==0 {return audit;}
+    let base=DevelopSettings{wb:s.wb,..DevelopSettings::default()};
+    crate::local::scene_linear_pre(&mut img,info,&base);
+    let (w,h)=(img.width,img.height);
+    let lum:Vec<f64>=img.data.iter().map(|c|luminance_2020(*c).max(0.0) as f64).collect();
+    let mut ev:Vec<f64>=lum.iter().map(|&v|(v.max(1e-6)/0.18).log2()).collect();
+    ev.sort_by(|a,b|a.total_cmp(b));
+    let at=|q:f64|->f64 { ev[((ev.len()-1) as f64*q).round() as usize] };
+    let (p02,p10,median,p90,p99)=(at(0.02),at(0.10),at(0.50),at(0.90),at(0.99));
+    let mut dark=0usize;
+    let mut bright=0usize;
+    let mut recover=0usize;
+    let mut detail=0usize;
+    let mut colour=0usize;
+    let mut neutral=0usize;
+    let mut subdued=0usize;
+    let mut vivid=0usize;
+    let mut warm_emitter=0usize;
+    let mut sums=[0.0f64;9];
+    let mut counts=[0usize;9];
+    let mut edges=[0usize;9];
+    for y in 0..h {
+        for x in 0..w {
+            let i=y*w+x;
+            let v=lum[i];
+            let c=img.data[i];
+            let tile=(y*3/h).min(2)*3+(x*3/w).min(2);
+            sums[tile]+=v;
+            counts[tile]+=1;
+            if v<0.027{dark+=1;}
+            if v>0.70{bright+=1;}
+            if (0.035..0.28).contains(&v){recover+=1;}
+            if v>0.35 && c[0]>c[1]*1.45 && c[1]>c[2]*1.45 {warm_emitter+=1;}
+            if x>0 && y>0 && (0.03..0.78).contains(&v) {
+                let edge=((v-lum[i-1]).abs()+(v-lum[i-w]).abs())/(0.035+v*2.0);
+                if edge>0.045{detail+=1;edges[tile]+=1;}
+            }
+            if (0.032..0.83).contains(&v) {
+                let r=c[0].clamp(0.0,1.0).powf(1.0/2.2) as f64;
+                let g=c[1].clamp(0.0,1.0).powf(1.0/2.2) as f64;
+                let b=c[2].clamp(0.0,1.0).powf(1.0/2.2) as f64;
+                let mx=r.max(g).max(b);
+                let sat=(mx-r.min(g).min(b))/mx.max(1e-6);
+                colour+=1;
+                if sat<0.065{neutral+=1;}
+                if (0.09..0.47).contains(&sat){subdued+=1;}
+                if sat>0.65{vivid+=1;}
+            }
+        }
+    }
+    let n=lum.len() as f64;
+    let df=dark as f64/n;
+    let bf=bright as f64/n;
+    let rf=recover as f64/n;
+    let cf=colour.max(1) as f64;
+    let soft=subdued as f64/cf;
+    let rich=vivid as f64/cf;
+    let coloured=1.0-neutral as f64/cf;
+    let texture=detail as f64/n>0.009;
+    let avg=|i:usize|sums[i]/counts[i].max(1) as f64;
+    let bright_sky=(0..3).filter(|&i|avg(i)>0.28).count()>=2;
+    let dark_ground=(6..9).any(|i|
+        (0.035..0.19).contains(&avg(i))
+        && edges[i] as f64/counts[i].max(1) as f64>0.025);
+    let backlit=bright_sky && dark_ground && rf>0.12;
+    let emitter=df>0.48 && p99>1.0
+        && (bf>0.0005 || warm_emitter as f64/n>0.0002);
+    let night=median< -2.2 && df>0.62 && (rf<0.23 || emitter);
+    let high_key=median>0.55 && df<0.06;
+
+    // Automatic exposure via robust percentile targets, not a uniform lift.
+    let mut exposure=if median< -0.55{(-0.55-median)*0.33}
+        else if median>0.58{(0.58-median)*0.34}else{0.0};
+    exposure=exposure.clamp(-0.72,0.80);
+    if night{exposure=exposure.min(0.05);}
+    if emitter{exposure=exposure.min(0.04);}
+    if high_key{exposure=exposure.max(-0.16);}
+    if bf>0.05 || p99>2.4{exposure=exposure.min(0.15);}
+    if backlit{exposure=exposure.min(0.12);}
+
+    // Percentile black/white-point expansion with hard highlight protection.
+    let mut contrast=if texture{((4.8-(p90-p10))*3.8).clamp(-10.0,18.0)}
+        else{0.0};
+    if night{contrast=contrast.min(3.0);}
+    let mut highlights=-((p99+exposure-1.55).max(0.0)*12.0).clamp(0.0,30.0);
+    if bf>0.10{highlights=highlights.min(-8.0);}
+    let mut shadows=if texture && rf>0.14{
+        ((-2.95-p10-exposure).max(0.0)*9.0).clamp(0.0,28.0)
+    }else{0.0};
+    if backlit{shadows=shadows.max(13.0);}
+    if night{shadows=shadows.min(3.0);}
+    let mut whites=((1.85-p99-exposure)*7.0).clamp(-16.0,12.0);
+    if bf>0.02{whites=whites.min(0.0);}
+    let mut blacks=(-(p02+exposure+4.1)*5.0).clamp(-15.0,9.0);
+    if night{blacks=blacks.min(0.0);}
+    if !texture && !backlit{whites=whites.min(2.0);blacks=blacks.max(-4.0);}
+    // Saturation is conditional on genuinely subdued existing colour.
+    let mut vib=0.0f64;
+    let mut sat=0.0f64;
+    if coloured>0.17 && soft>0.13 && rich<0.24 && !night{
+        vib=((soft-0.13)*22.0+(coloured-0.17)*5.0).clamp(0.0,13.0);
+        sat=((soft-0.13)*3.0).clamp(0.0,3.0);
+    }
+    if rich>0.12{sat=0.0;vib=vib.min(4.0);}
+    if neutral as f64/cf>0.90{sat=0.0;vib=0.0;}
+    let proposed=AutoTone{
+        exposure:(exposure*100.0).round()/100.0,
+        contrast:contrast.round(),highlights:highlights.round(),
+        shadows:shadows.round(),whites:whites.round(),blacks:blacks.round(),
+        vibrance:vib.round(),saturation:sat.round(),
+        curve_shadows:if backlit && !night{4.0}else{0.0},
+        curve_darks:if backlit && !night{8.0}else{0.0},
+        curve_lights:0.0,curve_highlights:0.0
+    };
+    let result=preview_quality_guard_report(src,info,s,proposed);
+    audit.proposed=proposed;
+    audit.final_tone=result.tone;
+    audit.guard_reasons=result.reasons;
+    audit.guard_reasons.insert(0,"classic_percentile_region_auto");
+    audit.new_white_clip_fraction=result.white_clip_change;
+    audit.new_black_clip_fraction=result.black_clip_change;
+    audit.quality_guard_skipped_for_emission=false;
+    audit
+}
+
+#[cfg(test)]
+mod classic_auto_ab_tests{
+    use super::*;
+    fn run(im:Rgb32f)->AutoToneAuditReport{
+        classic_auto_tone_report(&im,&SourceInfo::default(),&DevelopSettings::default())
+    }
+    #[test]
+    fn night_keeps_its_darkness(){
+        let r=run(Rgb32f::filled(96,96,[0.002;3]));
+        assert!(r.proposed.exposure<=0.05,"{:?}",r.proposed);
+        assert!(r.proposed.shadows<=3.0);
+    }
+    #[test]
+    fn neutral_stays_neutral(){
+        let r=run(Rgb32f::from_fn(96,96,|x,_|[0.06+x as f32*0.002;3]));
+        assert_eq!(r.proposed.vibrance,0.0);
+        assert_eq!(r.proposed.saturation,0.0);
+    }
+    #[test]
+    fn compressed_textured_range_receives_contrast(){
+        let r=run(Rgb32f::from_fn(96,96,|x,y|{
+            [if (x/8+y/8)%2==0{0.11}else{0.18};3]
+        }));
+        assert!(r.proposed.contrast>4.0,"{:?}",r.proposed);
+    }
+    #[test]
+    fn bright_sky_limits_foreground_global_exposure(){
+        let r=run(Rgb32f::from_fn(96,96,|x,y|{
+            if y<32{[0.43;3]}else{[if (x/7+y/7)%2==0{0.06}else{0.14};3]}
+        }));
+        assert!(r.proposed.exposure<=0.15,"{:?}",r.proposed);
+    }
+    #[test]
+    fn vivid_scene_avoids_forced_colour(){
+        let r=run(Rgb32f::from_fn(96,96,|x,_|{
+            if x%2==0{[0.65,0.02,0.02]}else{[0.02,0.54,0.02]}
+        }));
+        assert_eq!(r.proposed.saturation,0.0);
+    }
+    #[test]
+    fn deterministic_auto(){
+        let im=Rgb32f::from_fn(96,96,|x,y|{
+            let v=0.04+((x*13+y*7)%80) as f32*0.003;
+            [v,v*0.96,v*0.88]
+        });
+        let a=run(im.clone());let b=run(im);
+        assert_eq!(a.proposed,b.proposed);
+        assert_eq!(a.final_tone,b.final_tone);
+    }
+}
