@@ -32,6 +32,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let base=DevelopSettings::default();
     let audit=lightcraft_pipeline::auto::smart_auto_tone_report_balanced(&src,&info,&base);
     let t=audit.final_tone;
+    let scene=lightcraft_pipeline::scene_auto::evaluate(&src,&info,&base);
     let mut adjusted=base.clone();
     adjusted.light.exposure=t.exposure;
     adjusted.light.contrast=t.contrast;
