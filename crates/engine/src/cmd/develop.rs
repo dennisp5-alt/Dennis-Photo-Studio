@@ -325,7 +325,6 @@ pub fn specs() -> Vec<CommandSpec> {
             // all-guards-off experiment. These settings are actually applied.
             let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report_balanced(&src,&info,&current);
             let tone=tone_audit.final_tone;
-            let scene=lightcraft_pipeline::scene_auto::evaluate(&src,&info,&current);
             // Respect a consciously chosen neutral reference or manual WB.
             // Dedicated WB Auto remains available to replace it explicitly.
             let manual_wb=current.wb.mode==WbMode::Custom;
@@ -343,13 +342,16 @@ pub fn specs() -> Vec<CommandSpec> {
             proposal.curve.darks=tone.curve_darks;
             proposal.curve.lights=tone.curve_lights;
             proposal.curve.highlights=tone.curve_highlights;
-            if current.effects.dehaze.abs()<0.001 && scene.dehaze>0.0 {
-                proposal.effects.dehaze=scene.dehaze;
-            }
             if let Some(report)=wb.as_ref() {
                 proposal.wb.mode=WbMode::Auto;
                 proposal.wb.temp=report.temp;
                 proposal.wb.tint=report.tint;
+            }
+            // Judge any Dehaze on the proposed full tone/WB rendering,
+            // not the original pixels before the other Auto adjustments.
+            let scene=lightcraft_pipeline::scene_auto::evaluate(&src,&info,&proposal);
+            if current.effects.dehaze.abs()<0.001 && scene.dehaze>0.0 {
+                proposal.effects.dehaze=scene.dehaze;
             }
             // Compare complete current/proposed settings; zero recommendations
             // can still reset nonzero manual Light/Colour controls.
@@ -400,6 +402,8 @@ pub fn specs() -> Vec<CommandSpec> {
             allowed.curve.darks=proposed.curve.darks;
             allowed.curve.lights=proposed.curve.lights;
             allowed.curve.highlights=proposed.curve.highlights;
+            // White balance is part of the verified finished rendering.
+            allowed.wb=proposed.wb.clone();
             // Auto may add only a scene-verified Dehaze. Validate the
             // proposal against the current image, not just its slider bound.
             // Nonzero manual effects are never overwritten by Smart Auto.
@@ -409,7 +413,7 @@ pub fn specs() -> Vec<CommandSpec> {
                         .map_err(|e|bad("develop.autoApplyPreview",e))?;
                     let info=s.source_info(id);
                     let verified=lightcraft_pipeline::scene_auto::evaluate(
-                        &proxy,&info,&source);
+                        &proxy,&info,&allowed);
                     if proposed.effects.dehaze>12.0 ||
                         (verified.dehaze-proposed.effects.dehaze).abs()>0.01 {
                         return Err(bad("develop.autoApplyPreview",
@@ -418,9 +422,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 }
                 allowed.effects.dehaze=proposed.effects.dehaze;
             }
-            // Smart Auto respects manual Custom WB; other modes use the same
-            // bounded spatial-neutral report as the one-tap Auto command.
-            allowed.wb=proposed.wb.clone();
+            // Smart Auto respects manual Custom WB via its preview.
             if allowed!=proposed {
                 return Err(bad("develop.autoApplyPreview",
                     "Only Auto tone/curve/colour/WB and scene-approved Dehaze can be applied from preview"));
@@ -442,9 +444,27 @@ pub fn specs() -> Vec<CommandSpec> {
             // tone or WB candidates to production commands.
             let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report_balanced(&src,&info,&d);
             let a=tone_audit.final_tone;
-            let scene=lightcraft_pipeline::scene_auto::evaluate(&src,&info,&d);
             let manual_wb=d.wb.mode==WbMode::Custom;
             let wb=(!manual_wb).then(||lightcraft_pipeline::auto::auto_wb_report_balanced(&src,&info));
+            let mut planned=(*d).clone();
+            planned.light.exposure=a.exposure;
+            planned.light.contrast=a.contrast;
+            planned.light.highlights=a.highlights;
+            planned.light.shadows=a.shadows;
+            planned.light.whites=a.whites;
+            planned.light.blacks=a.blacks;
+            planned.color.vibrance=a.vibrance;
+            planned.color.saturation=a.saturation;
+            planned.curve.shadows=a.curve_shadows;
+            planned.curve.darks=a.curve_darks;
+            planned.curve.lights=a.curve_lights;
+            planned.curve.highlights=a.curve_highlights;
+            if let Some(report)=wb.as_ref() {
+                planned.wb.mode=WbMode::Auto;
+                planned.wb.temp=report.temp;
+                planned.wb.tint=report.tint;
+            }
+            let scene=lightcraft_pipeline::scene_auto::evaluate(&src,&info,&planned);
             edit(s,"develop.auto","Smart Auto",|d|{
                 d.light.exposure=a.exposure;
                 d.light.contrast=a.contrast;
