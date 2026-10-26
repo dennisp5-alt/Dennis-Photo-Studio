@@ -25,6 +25,7 @@
 
 pub mod auto;
 pub mod photo_studio_auto;
+pub mod rendered_auto_judge;
 pub mod scene;
 pub mod optionc;
 pub mod colorops;
