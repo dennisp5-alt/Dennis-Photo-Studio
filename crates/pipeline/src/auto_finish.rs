@@ -81,6 +81,19 @@ pub(super) fn refine(
             && ev.bright_fraction < 0.055);
     let isolated_lights = ev.median_ev < -1.7 && ev.dark_fraction > 0.56
         && ev.p995_ev > 1.2 && ev.bright_fraction < 0.055;
+    // Bright neutral subjects surrounded by darkness (white flowers, a lit
+    // object against a shaded pool) should retain luminous whites. This does
+    // not re-expose the dark background, nor is it a generic night booster.
+    // Require the existing multiscale neutral-white evidence rather than
+    // using overall darkness alone (firelight is deliberately excluded).
+    if ev.zonal.micro.neutral_white_subject && ev.dark_fraction > 0.72
+        && ev.recoverable_fraction < 0.12 && ev.bright_fraction > 0.025
+        && ev.bright_fraction < 0.16 && ev.p95_ev > 1.5 {
+        a.highlights = a.highlights.max(-8.0);
+        a.whites = a.whites.max(-2.0);
+        a.shadows = a.shadows.min(12.0);
+        return a;
+    }
     if intentional_dark || isolated_lights { return a; }
 
     let c = colour_evidence(src, info, s);
@@ -128,7 +141,50 @@ pub(super) fn refine(
         && ev.median_ev > -1.4 && ev.median_ev < 0.6 {
         a.whites = a.whites.max(4.0);
     }
+    refine_reference_tone(ev, &mut a);
     a
+}
+
+// Small reference-guided adjustments, using measured scene evidence. The
+// existing render safety check still runs after this function. In particular,
+// already-clipped highlights cannot be reconstructed from camera JPEGs.
+fn refine_reference_tone(ev: &AutoToneEvidence, a: &mut AutoTone) {
+    // An isolated bright subject plus deep surroundings is not a globally
+    // underexposed image: preserve the low-key atmosphere instead of using
+    // a +0.3 EV lift or blanket Shadows correction.
+    if ev.median_ev < -1.50 && ev.p95_ev > 1.30
+        && ev.p95_ev - ev.median_ev > 2.90
+        && ev.bright_fraction < 0.025 && ev.dark_fraction > 0.19
+        && ev.recoverable_fraction > 0.15 {
+        a.exposure = a.exposure.min(0.07);
+        a.shadows = a.shadows.min(8.0);
+        a.curve_shadows = a.curve_shadows.min(5.0);
+        a.curve_darks = a.curve_darks.min(4.0);
+        a.curve_lights = a.curve_lights.min(1.0);
+        return;
+    }
+
+    // On photos with small bright regions that are below severe-clipping
+    // evidence, a large negative Highlights adjustment removes the subject's
+    // sparkle. Keep substantial recovery for genuinely extreme highlights.
+    if ev.p995_ev > 1.75 && ev.p995_ev < 2.36
+        && ev.bright_fraction > 0.006 && ev.bright_fraction < 0.13
+        && ev.dark_fraction < 0.60 {
+        a.highlights = a.highlights.max(-10.0);
+        a.whites = a.whites.max(-4.0);
+    }
+
+    // A naturally well-exposed daylit image may need a subtle positive
+    // upper-midtone finish, not blanket Shadows/HDR. This is not a face
+    // detector and cannot change intentional colour grading.
+    if ev.median_ev > 0.15 && ev.median_ev < 0.64
+        && ev.p95_ev > 1.45 && ev.p995_ev < 2.27
+        && ev.dark_fraction < 0.22 && ev.bright_fraction < 0.045
+        && ev.recoverable_fraction > 0.28 {
+        a.curve_lights = a.curve_lights.max(4.0);
+        a.exposure = a.exposure.max(0.04);
+        a.highlights = a.highlights.max(-8.0);
+    }
 }
 
 #[cfg(test)]
@@ -137,6 +193,67 @@ mod tests {
     fn tone(i: &Rgb32f) -> AutoTone {
         crate::auto::smart_auto_tone_report_balanced(
             i, &SourceInfo::default(), &DevelopSettings::default()).final_tone
+    }
+    fn sample_evidence() -> AutoToneEvidence {
+        let scene = Rgb32f::from_fn(80, 64, |x, y| {
+            let t = 0.10 + ((x * 7 + y * 11) % 17) as f32 * 0.005;
+            [t, t, t]
+        });
+        crate::auto::smart_auto_tone_report(
+            &scene, &SourceInfo::default(), &DevelopSettings::default()).evidence
+    }
+    #[test]
+    fn white_rose_background_retains_depth() {
+        let mut e=sample_evidence();
+        e.median_ev=-1.78; e.p95_ev=1.59; e.p995_ev=1.91;
+        e.bright_fraction=0.0016; e.dark_fraction=0.275;
+        e.recoverable_fraction=0.52;
+        let mut a=AutoTone { exposure:0.36, shadows:20.0,
+            curve_darks:7.0, curve_lights:3.0, ..AutoTone::default() };
+        refine_reference_tone(&e,&mut a);
+        assert!(a.exposure<=0.07 && a.shadows<=8.0);
+        assert!(a.curve_darks<=4.0 && a.curve_lights<=1.0);
+    }
+    #[test]
+    fn saturated_petals_retain_bright_midtones() {
+        let mut e=sample_evidence();
+        e.median_ev=-1.19; e.p95_ev=2.03; e.p995_ev=2.20;
+        e.bright_fraction=0.079; e.dark_fraction=0.273;
+        e.recoverable_fraction=0.398;
+        let mut a=AutoTone {highlights:-18.0, ..AutoTone::default()};
+        refine_reference_tone(&e,&mut a);
+        assert_eq!(a.highlights,-10.0);
+    }
+    #[test]
+    fn full_daylight_keeps_moderate_positive_finish() {
+        let mut e=sample_evidence();
+        e.median_ev=0.49; e.p95_ev=1.79; e.p995_ev=2.12;
+        e.bright_fraction=0.013; e.dark_fraction=0.125;
+        e.recoverable_fraction=0.382;
+        let mut a=AutoTone {exposure:-0.01, highlights:-13.0, ..AutoTone::default()};
+        refine_reference_tone(&e,&mut a);
+        assert!(a.exposure>=0.04 && a.curve_lights>=4.0 && a.highlights>=-8.0);
+    }
+    #[test]
+    fn severe_highlights_and_night_remain_protected() {
+        let mut e=sample_evidence();
+        e.median_ev=-3.1; e.p95_ev=2.0; e.p995_ev=2.8;
+        e.bright_fraction=0.08; e.dark_fraction=0.75;
+        e.recoverable_fraction=0.03;
+        let mut a=AutoTone {exposure:0.0, highlights:-25.0, ..AutoTone::default()};
+        refine_reference_tone(&e,&mut a);
+        assert_eq!(a.highlights,-25.0);
+        assert_eq!(a.exposure,0.0);
+    }
+    #[test]
+    fn strong_backlight_retains_highlight_protection() {
+        let mut e=sample_evidence();
+        e.median_ev=-0.8; e.p95_ev=2.2; e.p995_ev=2.65;
+        e.bright_fraction=0.25; e.dark_fraction=0.20;
+        e.recoverable_fraction=0.38;
+        let mut a=AutoTone { highlights:-28.0, ..AutoTone::default() };
+        refine_reference_tone(&e,&mut a);
+        assert_eq!(a.highlights,-28.0);
     }
     #[test]
     fn muted_colour_receives_perceptual_vibrance() {
