@@ -167,7 +167,7 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".debug"
+            applicationIdSuffix = ".autoreliability0631"
         }
         release {
             isMinifyEnabled = true
