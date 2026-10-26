@@ -159,9 +159,14 @@ pub fn plan(src:&Rgb32f,info:&SourceInfo,current:&DevelopSettings)->ClassicPlan 
     let (mut applied,mut guard)=validate(src,info,current,&wanted);
     // After progressive tone reduction a haze proposal might no longer be
     // supported. Remove it and validate *again* rather than blindly applying.
-    scene=crate::scene_auto::evaluate(src,info,&applied);
+    // The scene evaluator intentionally treats any nonzero Dehaze as a
+    // user's manual setting. Clear the AUTOMATIC proposed value for this
+    // verification pass only, or it would always veto its own proposal.
+    let mut check_scene_settings=applied.clone();
+    if current.effects.dehaze.abs()<0.001 {check_scene_settings.effects.dehaze=0.0;}
+    scene=crate::scene_auto::evaluate(src,info,&check_scene_settings);
     if current.effects.dehaze.abs()<0.001 && applied.effects.dehaze>0.0 &&
-        (scene.dehaze-applied.effects.dehaze).abs()>0.01 {
+        scene.dehaze+0.01<applied.effects.dehaze {
         let mut no_haze=applied.clone();no_haze.effects.dehaze=0.0;
         let (checked,second)=validate(src,info,current,&no_haze);
         applied=checked;guard=second;
