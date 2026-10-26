@@ -400,9 +400,22 @@ pub fn specs() -> Vec<CommandSpec> {
             allowed.curve.darks=proposed.curve.darks;
             allowed.curve.lights=proposed.curve.lights;
             allowed.curve.highlights=proposed.curve.highlights;
-            // Auto may add only a conservative scene-verified Dehaze. A
-            // non-zero setting is an intentional manual adjustment.
+            // Auto may add only a scene-verified Dehaze. Validate the
+            // proposal against the current image, not just its slider bound.
+            // Nonzero manual effects are never overwritten by Smart Auto.
             if source.effects.dehaze.abs()<0.001 {
+                if proposed.effects.dehaze>0.0 {
+                    let proxy=s.source_now(id,SourceLevel::Preview)
+                        .map_err(|e|bad("develop.autoApplyPreview",e))?;
+                    let info=s.source_info(id);
+                    let verified=lightcraft_pipeline::scene_auto::evaluate(
+                        &proxy,&info,&source);
+                    if proposed.effects.dehaze>12.0 ||
+                        (verified.dehaze-proposed.effects.dehaze).abs()>0.01 {
+                        return Err(bad("develop.autoApplyPreview",
+                            "Scene Dehaze differs from the verified preview"));
+                    }
+                }
                 allowed.effects.dehaze=proposed.effects.dehaze;
             }
             // Smart Auto respects manual Custom WB; other modes use the same
