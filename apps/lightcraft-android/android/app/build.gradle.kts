@@ -146,7 +146,7 @@ android {
     ndkVersion = "29.0.14206865"
 
     defaultConfig {
-        applicationId = "com.dennis.lumaworks.classic.fixed.v0632"
+        applicationId = "com.dennis.lumaworks.classic.refined.v0633"
         minSdk = minApi
         targetSdk = 36
         versionCode = appVersionCode
