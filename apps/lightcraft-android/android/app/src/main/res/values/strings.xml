@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">LumaWorks Auto Trial 3</string>
-    <string name="import_into_lightcraft">Import into LumaWorks Auto Trial 3</string>
-    <string name="edit_in_lightcraft">Edit in LumaWorks Auto Trial 3</string>
+    <string name="app_name">LumaWorks Histogram Trial</string>
+    <string name="import_into_lightcraft">Import into LumaWorks Histogram Trial</string>
+    <string name="edit_in_lightcraft">Edit in LumaWorks Histogram Trial</string>
 </resources>
