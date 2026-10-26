@@ -28,10 +28,15 @@ public final class DetailEngine {
                 float l=lum(p),sumR=(p>>16)&255,sumG=(p>>8)&255,sumB=p&255;
                 float total=1f;
                 // 4-neighbour edge-aware filter; restrict cross-edge bleeding.
-                int[] samples={previous[x],next[x],current[x-1],current[x+1]};
-                for(int q:samples){
+                // Avoid allocating one Java array per pixel at full resolution.
+                for(int neighbour=0;neighbour<4;neighbour++){
+                    int q=neighbour==0?previous[x]:neighbour==1?next[x]:
+                        neighbour==2?current[x-1]:current[x+1];
                     float diff=Math.abs(l-lum(q));
-                    float weight=(float)Math.exp(-(diff*diff)/(.044f*.044f));
+                    if(diff>.13f)continue;
+                    float ratio=diff/.046f;
+                    float square=ratio*ratio;
+                    float weight=1f/(1f+square*square);
                     if(weight<.025f)continue;
                     total+=weight;
                     sumR+=((q>>16)&255)*weight;

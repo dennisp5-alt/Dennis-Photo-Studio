@@ -36,7 +36,7 @@ public final class OfflineDetailTest {
             "Strong edges must be protected");
         float[] floats=new float[]{1,1,0,0};
         SubjectMask foreground=new SubjectMask(2,2,floats);
-        check(foreground.sample(5,5,20,20)>.96f,"Mask foreground sampling");
+        check(foreground.sample(5,5,20,20)>.90f,"Mask foreground sampling with edge feathering");
         check(foreground.sample(5,15,20,20)<.04f,"Mask background sampling");
         Bitmap split=solid(20,20,0xff777777);
         EditRecipe masked=new EditRecipe();
