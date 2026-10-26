@@ -32,10 +32,12 @@ public final class ToneEngine {
                 target+=shadows*shadowWeight*(1-target);
                 target+=highs*highWeight*target;
                 target=sigmoid(clip(target),contrast);
-                float delta=target-lum;
-                r=clip(r*gain + delta*.68f);
-                g=clip(g*gain + delta*.68f);
-                bl=clip(bl*gain + delta*.68f);
+                // Apply exposure once, then adjust the new luminance by the tone curve.
+                // Avoid double-boosting exposure and clipping bright colours.
+                float delta=target-clip(lum*gain);
+                r=clip(r*gain + delta);
+                g=clip(g*gain + delta);
+                bl=clip(bl*gain + delta);
                 // Small selective warming, guarded from tint extremes.
                 r=clip(r+warmth*.55f);
                 bl=clip(bl-warmth*.62f);
