@@ -139,7 +139,7 @@ pub fn plan(src:&Rgb32f,info:&SourceInfo,current:&DevelopSettings)->SmartAutoPla
     let wb=if manual {None}
         else {Some(crate::auto::auto_wb_report_balanced(src,info))};
     let wb_to_try=wb.filter(|r|r.decision=="corrected" &&
-        (r.temp-current.wb.temp).abs()>2.0 || (r.tint-current.wb.tint).abs()>1.0);
+        ((r.temp-current.wb.temp).abs()>2.0 || (r.tint-current.wb.tint).abs()>1.0));
     let proxy=lightcraft_raster::resample::fit(
         src,192,192,lightcraft_raster::resample::Filter::Box);
     let req=RenderRequest::fit(192,192);
@@ -192,7 +192,7 @@ pub fn plan(src:&Rgb32f,info:&SourceInfo,current:&DevelopSettings)->SmartAutoPla
         }
     }
     // Scene-aware Dehaze must also be judged *after* proposed tone and WB.
-    let scene=crate::scene_auto::evaluate(src,info,&chosen);
+    let mut scene=crate::scene_auto::evaluate(src,info,&chosen);
     if current.effects.dehaze.abs()<0.001 && scene.dehaze>0.0 {
         let mut with_haze=chosen.clone();
         with_haze.effects.dehaze=scene.dehaze;
@@ -203,6 +203,10 @@ pub fn plan(src:&Rgb32f,info:&SourceInfo,current:&DevelopSettings)->SmartAutoPla
             chosen=with_haze;
             accepted=safety_report(accepted.accepted_strength,m,
                 accepted.checked_combined_wb,evaluated,"scene_haze_render_verified");
+        } else {
+            scene.dehaze=0.0;
+            scene.scene="rejected_by_combined_render_guard";
+            scene.evidence="combined_tone_wb_haze_clipping_or_shadow_risk";
         }
     }
     accepted.evaluated_candidates=evaluated;
