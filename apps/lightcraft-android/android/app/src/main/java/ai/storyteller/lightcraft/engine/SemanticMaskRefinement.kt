@@ -102,6 +102,7 @@ internal object SemanticMaskRefinement {
         pixels: IntArray,
         pixelSide: Int = 512,
         outputSide: Int = REFINED_SIDE,
+        subjectBoundary: Boolean = false,
     ): ByteArray {
         require(modelSide > 1 && modelSide <= 1024 && margins.size == modelSide * modelSide)
         require(pixelSide > 0 && pixels.size == pixelSide * pixelSide)
@@ -113,7 +114,13 @@ internal object SemanticMaskRefinement {
             lowGuides[y * modelSide + x] = pixels[sy * pixelSide + sx]
         }
         val output = ByteArray(outputSide * outputSide)
-        val colourSigma = 2f * 0.15f * 0.15f
+        // Tighten ONLY subject boundaries, keeping the original sky path byte-for-byte.
+        // Across hair/sky and shoulder/grass, the old 10% weight floor mixed
+        // dissimilar colours even when the photograph provided a strong edge.
+        // A nonzero floor still protects soft hair against noisy colour gaps.
+        val colourSigma = if (subjectBoundary) 2f * 0.12f * 0.12f
+            else 2f * 0.15f * 0.15f
+        val weightFloor = if (subjectBoundary) 0.035f else 0.10f
         for (y in 0 until outputSide) for (x in 0 until outputSide) {
             val fx = (x + 0.5f) * modelSide / outputSide - 0.5f
             val fy = (y + 0.5f) * modelSide / outputSide - 0.5f
@@ -135,7 +142,7 @@ internal object SemanticMaskRefinement {
                     val dColour = dr * dr + dg * dg + db * db
                     val spatial = exp((-(dx * dx + dy * dy) / 2.8f).toDouble()).toFloat()
                     val similar = exp((-dColour / colourSigma).toDouble()).toFloat()
-                    val weight = spatial * (0.10f + 0.90f * similar)
+                    val weight = spatial * (weightFloor + (1f - weightFloor) * similar)
                     sum += weight * margins[iy * modelSide + ix]
                     weights += weight
                 }
