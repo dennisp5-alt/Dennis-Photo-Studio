@@ -10,11 +10,15 @@ public final class ToneEngine {
         float s=x*x*(3f-2f*x);
         return clip(x+(s-x)*amount);
     }
+    private static float smoothstep(float a,float b,float value) {
+        float t=clip((value-a)/(b-a));
+        return t*t*(3f-2f*t);
+    }
     public static void applyInPlace(Bitmap b, EditRecipe e) {
         int w=b.getWidth(),h=b.getHeight();
         final float gain=(float)Math.pow(2,e.exposure*.9f);
         final float contrast=e.contrast*.9f;
-        final float shadows=e.shadows*.46f, highs=e.highlights*.48f;
+        final float shadows=e.shadows*.40f, highs=e.highlights*.48f;
         final float vibrance=e.vibrance*.68f, warmth=e.warmth*.085f;
         final float clarity=e.clarity*.28f;
         int[] prev=new int[w],cur=new int[w],next=new int[w];
@@ -27,7 +31,9 @@ public final class ToneEngine {
                 float r=((c>>>16)&255)/255f,g=((c>>>8)&255)/255f,bl=(c&255)/255f;
                 float lum=.2126f*r+.7152f*g+.0722f*bl;
                 float target=clip(lum*gain);
-                float shadowWeight=(1-target)*(1-target);
+                // Protect true blacks and dark foliage: never force black into grey.
+                // Lift shadows only above the toe, fading smoothly into midtones.
+                float shadowWeight=(1-target)*(1-target)*smoothstep(.055f,.22f,target);
                 float highWeight=target*target;
                 target+=shadows*shadowWeight*(1-target);
                 target+=highs*highWeight*target;

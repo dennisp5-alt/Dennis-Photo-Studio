@@ -47,13 +47,15 @@ public final class AutoAnalyzer {
         if(m.avgLuma<.32f)r.exposure=EditRecipe.clamp((.4f-m.avgLuma)*1.5f,0,.34f);
         else if(m.avgLuma>.68f)r.exposure=EditRecipe.clamp((.55f-m.avgLuma)*1.1f,-.22f,0);
         r.highlights=-EditRecipe.clamp(m.highlightShare*1.7f+.08f,0,.42f);
-        r.shadows=EditRecipe.clamp(m.shadowShare*1.0f+.09f,0,.40f);
+        // Preserve the photograph's natural shadow depth. Sparse dark pixels should not
+        // trigger a blanket lift; even heavily shadowed scenes have a restrained cap.
+        r.shadows=EditRecipe.clamp(.025f+Math.max(0f,m.shadowShare-.09f)*.38f,0,.16f);
         r.contrast=EditRecipe.clamp((.60f-range)*.22f,-.08f,.16f);
         r.vibrance=m.avgSat<.30f?.15f:.055f;
         r.warmth=EditRecipe.clamp(-m.redBias*.14f,-.09f,.09f);
         r.clarity=range<.43f?.13f:.075f;
         r.summary=String.format(java.util.Locale.US,
-            "Local tonal assessment • %s light, %s tonal range. Highlights and shadows balanced while keeping colour natural.",
+            "Local tonal assessment • %s light, %s tonal range. Gentle shadow lift protects dark depth and natural colour.",
             m.avgLuma<.37?"low":m.avgLuma>.64?"bright":"balanced",
             range<.43?"compressed":"good");
         return r;

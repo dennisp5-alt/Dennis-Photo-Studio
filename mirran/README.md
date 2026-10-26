@@ -1,6 +1,13 @@
-# MIRRAN — Intelligent Photo Studio (v0.1.0 experimental)
+# MIRRAN — Intelligent Photo Studio (v0.1.1 experimental)
 
 Native Java Android project, fully separate from approved Dennis Craft Mobile, LumaWorks, and other production editors. Main branch and all approved branches are left unchanged.
+
+## v0.1.1 changes
+
+- Added a permanently visible **+ NEW PHOTO** button to the assessment bar: select a different image without exporting the previous photo. Canceling the Android picker keeps the current image and adjustments.
+- Local Auto now suggests less aggressive shadows (approximately +3 to +16 maximum), rather than up to +40.
+- Shadow rendering now protects deep blacks using a smooth tonal gate, reducing flat/grey shadow appearance.
+- Resets queued previews when a new photo is selected, preventing a stale render from displaying on the next photograph.
 
 ## Current working scope
 

@@ -117,7 +117,19 @@ public class MainActivity extends Activity {
         report.setBackground(stroke(Color.WHITE,Color.rgb(230,235,242),16));
         LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(-1,-2);
         rp.setMargins(dp(13),0,dp(13),dp(10));root.addView(report,rp);
-        chip=text("●  YOUR PHOTO, INDIVIDUALLY ASSESSED",10,BLUE,true);add(report,chip,-1,19);
+        LinearLayout reportHeading=horizontal();
+        chip=text("●  YOUR PHOTO, INDIVIDUALLY ASSESSED",10,BLUE,true);
+        chip.setSingleLine(true);
+        chip.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        reportHeading.addView(chip,new LinearLayout.LayoutParams(0,dp(36),1));
+        TextView newPhoto=text("＋  NEW PHOTO",10,BLUE,true);
+        newPhoto.setGravity(Gravity.CENTER);
+        newPhoto.setContentDescription("Open another photograph without exporting");
+        newPhoto.setBackground(stroke(Color.rgb(239,246,255),Color.rgb(200,220,242),10));
+        newPhoto.setPadding(dp(10),0,dp(10),0);
+        add(reportHeading,newPhoto,-2,36);
+        newPhoto.setOnClickListener(v->openPhoto());
+        add(report,reportHeading,-1,36);
         summary=text("Open a photo, then tap Refine. AI vision can be connected securely in Settings.",12,MUTED,false);
         summary.setMaxLines(3);report.addView(summary);
 
@@ -195,7 +207,12 @@ public class MainActivity extends Activity {
         chosen=data.getData();
         try {getContentResolver().takePersistableUriPermission(chosen,Intent.FLAG_GRANT_READ_URI_PERMISSION);}
         catch(Exception ignored){}
-        recipe=new EditRecipe();originalPreview=null;editedPreview=null;photograph.setImageDrawable(null);
+        // Switching photos never requires exporting. Canceling the picker retains the current edit.
+        // Invalidate any queued preview renders from the previous photograph.
+        ui.removeCallbacks(delayedRender);
+        renderGeneration++;
+        recipe=new EditRecipe();originalPreview=null;editedPreview=null;metrics=null;
+        photograph.setImageDrawable(null);
         stageTag.setVisibility(View.GONE);emptyState.setVisibility(View.GONE);
         setBusy(true,"Opening photograph…");
         Uri uri=chosen;
