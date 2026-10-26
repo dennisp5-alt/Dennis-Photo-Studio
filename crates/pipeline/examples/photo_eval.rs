@@ -53,5 +53,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     save_ppm(&format!("{}_before.ppm",a[2]),&before)?;
     save_ppm(&format!("{}_after.ppm",a[2]),&after)?;
     fs::write(format!("{}_report.json",a[2]),serde_json::to_vec_pretty(&audit)?)?;
+    fs::write(format!("{}_scene.json",a[2]),serde_json::to_vec_pretty(&scene)?)?;
     Ok(())
 }
