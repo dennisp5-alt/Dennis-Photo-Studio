@@ -325,6 +325,7 @@ pub fn specs() -> Vec<CommandSpec> {
             // all-guards-off experiment. These settings are actually applied.
             let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report_balanced(&src,&info,&current);
             let tone=tone_audit.final_tone;
+            let scene=lightcraft_pipeline::scene_auto::evaluate(&src,&info,&current);
             // Respect a consciously chosen neutral reference or manual WB.
             // Dedicated WB Auto remains available to replace it explicitly.
             let manual_wb=current.wb.mode==WbMode::Custom;
@@ -342,6 +343,9 @@ pub fn specs() -> Vec<CommandSpec> {
             proposal.curve.darks=tone.curve_darks;
             proposal.curve.lights=tone.curve_lights;
             proposal.curve.highlights=tone.curve_highlights;
+            if current.effects.dehaze.abs()<0.001 && scene.dehaze>0.0 {
+                proposal.effects.dehaze=scene.dehaze;
+            }
             if let Some(report)=wb.as_ref() {
                 proposal.wb.mode=WbMode::Auto;
                 proposal.wb.temp=report.temp;
@@ -356,6 +360,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 "previewSettings":proposal,
                 "tone":tone,
                 "toneAudit":tone_audit,
+                "scene":scene,
                 "whiteBalance":wb,
                 "manualWbPreserved":manual_wb,
                 "noChangeRecommended":no_change,
@@ -395,12 +400,17 @@ pub fn specs() -> Vec<CommandSpec> {
             allowed.curve.darks=proposed.curve.darks;
             allowed.curve.lights=proposed.curve.lights;
             allowed.curve.highlights=proposed.curve.highlights;
+            // Auto may add only a conservative scene-verified Dehaze. A
+            // non-zero setting is an intentional manual adjustment.
+            if source.effects.dehaze.abs()<0.001 {
+                allowed.effects.dehaze=proposed.effects.dehaze;
+            }
             // Smart Auto respects manual Custom WB; other modes use the same
             // bounded spatial-neutral report as the one-tap Auto command.
             allowed.wb=proposed.wb.clone();
             if allowed!=proposed {
                 return Err(bad("develop.autoApplyPreview",
-                    "Only Auto tone/curve/colour/WB values can be applied from preview"));
+                    "Only Auto tone/curve/colour/WB and scene-approved Dehaze can be applied from preview"));
             }
             edit(s,"develop.autoApplyPreview","Smart Auto",|d|{
                 *d=proposed.clone();
@@ -419,6 +429,7 @@ pub fn specs() -> Vec<CommandSpec> {
             // tone or WB candidates to production commands.
             let tone_audit=lightcraft_pipeline::auto::smart_auto_tone_report_balanced(&src,&info,&d);
             let a=tone_audit.final_tone;
+            let scene=lightcraft_pipeline::scene_auto::evaluate(&src,&info,&d);
             let manual_wb=d.wb.mode==WbMode::Custom;
             let wb=(!manual_wb).then(||lightcraft_pipeline::auto::auto_wb_report_balanced(&src,&info));
             edit(s,"develop.auto","Smart Auto",|d|{
@@ -436,6 +447,9 @@ pub fn specs() -> Vec<CommandSpec> {
                 d.curve.darks=a.curve_darks;
                 d.curve.lights=a.curve_lights;
                 d.curve.highlights=a.curve_highlights;
+                if d.effects.dehaze.abs()<0.001 && scene.dehaze>0.0 {
+                    d.effects.dehaze=scene.dehaze;
+                }
                 // Existing user RGB point-curve edits are deliberately
                 // retained; Auto only replaces its four parametric regions.
                 if let Some(report)=wb {
@@ -445,7 +459,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 }
                 Ok(())
             })?;
-            Ok(json!({"tone":a,"toneAudit":tone_audit,"whiteBalance":wb,"manualWbPreserved":manual_wb}))
+            Ok(json!({"tone":a,"toneAudit":tone_audit,"scene":scene,"whiteBalance":wb,"manualWbPreserved":manual_wb}))
         }),
         cmd!("develop.autoDetail", "Auto Detail & Noise", ["Photo"], None, "{}", has_active, |s, _p| {
             let id=active(s,"develop.autoDetail")?;
@@ -482,13 +496,18 @@ pub fn specs() -> Vec<CommandSpec> {
                 .map_err(|e|bad("develop.autoEffects",e))?;
             let info=s.source_info(id);
             let a=lightcraft_pipeline::auto::auto_effects(&src,&info);
+            let current=s.develop_of(id).unwrap_or_default();
+            let scene=lightcraft_pipeline::scene_auto::evaluate(&src,&info,&current);
             edit(s,"develop.autoEffects","Auto Effects",|d|{
                 d.effects.texture=a.texture;
                 d.effects.clarity=a.clarity;
-                d.effects.dehaze=a.dehaze;
+                // Never reset or overwrite intentional manual Dehaze.
+                if d.effects.dehaze.abs()<0.001 && scene.dehaze>0.0 {
+                    d.effects.dehaze=scene.dehaze;
+                }
                 Ok(())
             })?;
-            Ok(json!({"mode":"adaptive-auto-effects","sourcePixels":src.width*src.height,"result":a}))
+            Ok(json!({"mode":"adaptive-auto-effects","sourcePixels":src.width*src.height,"result":a,"scene":scene}))
         }),
         cmd!(
             "develop.wb",
