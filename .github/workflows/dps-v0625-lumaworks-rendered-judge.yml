@@ -1,0 +1,147 @@
+name: LumaWorks v0.6.25 — Rendered Auto Judge + Neutral WB Trial
+
+on:
+  push:
+    branches: [experiment/lumaworks-v0.6.25-rendered-auto-judge]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumaworks-v0625-rendered-judge
+  cancel-in-progress: true
+
+jobs:
+  quality-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 115
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify separate app identity and new Auto wiring
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('apps/lightcraft-android/android')
+          gradle=(root/'app/build.gradle.kts').read_text()
+          props=(root/'gradle.properties').read_text()
+          strings=(root/'app/src/main/res/values/strings.xml').read_text()
+          auto=Path('crates/pipeline/src/auto.rs').read_text()
+          studio=Path('crates/pipeline/src/photo_studio_auto.rs').read_text()
+          engine=Path('crates/engine/src/cmd/develop.rs').read_text()
+          assert 'applicationId = "com.dennis.lumaworks.autotrial.v0625"' in gradle
+          assert 'lightcraft.version=0.6.25-beta' in props
+          assert 'lightcraft.versionCode=62501' in props
+          assert 'LumaWorks Auto Trial 3' in strings
+          for source in (studio,):
+              for item in ('const GRID: usize = 64','let sixteen=coarse','let eight=coarse','let four=coarse','region_shadow_weight'):
+                  assert item in source,item
+          for item in ('photo_studio_auto_tone_report','neutral_reference_wb_report','preview_quality_guard_report'):
+              assert item in auto,item
+          for item in ('photo_studio_auto_tone_report(&src,&info,&d)',
+                       'neutral_reference_wb_report(&src,&info)',
+                       'd.detail.nr_color=detail.nr_color',
+                       'd.effects.texture=effects.texture',
+                       'SourceLevel::Preview'):
+              assert item in engine,item
+          for item in ('isolated_vivid_subject','sunny_daylight','vivid_flower_on_dark_foliage_gets_coordinated_correction',
+                       'neutral_white_subject_never_uses_vivid_colour_exception'):
+              assert item in studio,item
+          assert 'added_highlight_clipping' in auto and 'for fraction in [0.80,0.60,0.40,0.20]' in auto
+          judge=Path('crates/pipeline/src/rendered_auto_judge.rs').read_text()
+          assert 'pub mod rendered_auto_judge;' in Path('crates/pipeline/src/lib.rs').read_text()
+          assert 'rendered_auto_judge::choose(src,info,s,original)' in auto
+          for item in ('fn evaluate(', 'fn scene(', 'fn newly_clipped_fraction(',
+                       'recognises_central_skin_like_tones_without_claiming_a_face',
+                       'penalises_new_clipped_skin_channels',
+                       'strong_daylight_dimming_is_not_rewarded'):
+              assert item in judge,item
+          assert 'pub mod photo_studio_auto;' in Path('crates/pipeline/src/lib.rs').read_text()
+          # Guard the existing offline masking and prevent touching the old lightweight Photo Studio.
+          assert Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/engine/SemanticMaskRefinement.kt').is_file()
+          # The frozen Photo Studio source is on its own branch, not this one.
+          print('Isolated Photo Studio Auto, neutral reference and app identity audit: PASS')
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Android SDK manager
+        run: |
+          MANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -1)"
+          test -x "$MANAGER"
+          echo "$(dirname "$MANAGER")" >> "$GITHUB_PATH"
+      - name: Android SDK 37.0 and NDK 29
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --channel=3 "platforms;android-37.0" "ndk;29.0.14206865"
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
+          if [ ! -e "$ANDROID_HOME/platforms/android-37" ]; then
+            ln -s "$ANDROID_HOME/platforms/android-37.0" "$ANDROID_HOME/platforms/android-37"
+          fi
+      - name: Rust toolchain and target
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal --target aarch64-linux-android
+          rustup default 1.99.0
+          cargo +1.99.0 install cargo-ndk --version 4.1.2 --locked
+      - name: Cache native Rust build and dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          cache-on-failure: true
+      - name: Validate finished-photo, corrective-photo, colour and NR regressions
+        run: |
+          cargo +1.99.0 test -p lightcraft-pipeline --locked --lib
+          cargo +1.99.0 test -p lightcraft-develop --locked --lib
+          cargo +1.99.0 test -p lightcraft-codecs --features heif --locked --lib
+      - name: Type-check complete native engine and Android HEIC feature before packaging
+        run: |
+          cargo +1.99.0 check -p lightcraft-engine --features lightcraft-codecs/heif --locked
+          cargo +1.99.0 check -p lightcraft-android --features heic --locked
+      - name: Bundle checksum-verified offline ADE20K weights
+        run: |
+          set -euo pipefail
+          ASSETS=apps/lightcraft-android/android/app/src/main/assets
+          mkdir -p "$ASSETS"
+          curl --fail --location --retry 5 --retry-delay 4 --connect-timeout 30 \
+            "https://huggingface.co/Xenova/segformer-b0-finetuned-ade-512-512/resolve/main/onnx/model.onnx?download=true" \
+            --output "$ASSETS/segformer_b0_ade.onnx"
+          echo "3e5c18a4be395f16646438d54c42377ddc202edfa33d5eced0c9506de75c44c2  $ASSETS/segformer_b0_ade.onnx" | sha256sum --check
+          test "$(stat -c%s "$ASSETS/segformer_b0_ade.onnx")" -gt 10000000
+      - name: Smoke-test semantic model input/output on CPU
+        run: |
+          python3 -m pip install --quiet onnxruntime==1.22.0 numpy
+          python3 - <<'PY'
+          import numpy as np, onnxruntime as ort
+          model='apps/lightcraft-android/android/app/src/main/assets/segformer_b0_ade.onnx'
+          s=ort.InferenceSession(model,providers=['CPUExecutionProvider'])
+          a=np.zeros((1,3,512,512),dtype=np.float32)
+          x=s.run(None,{s.get_inputs()[0].name:a})[0]
+          assert x.ndim==4 and x.shape[0]==1 and x.shape[1]==150 and x.shape[2]==x.shape[3],x.shape
+          print('Offline ADE20K semantic model runs correctly: '+str(x.shape))
+          PY
+      - name: Run semantic edge-refinement Kotlin regression tests
+        working-directory: apps/lightcraft-android/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace testDebugUnitTest -Plightcraft.abis=arm64-v8a
+      - name: Assemble ARM64 APK
+        working-directory: apps/lightcraft-android/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace assembleDebug -Plightcraft.abis=arm64-v8a
+      - name: Verify APK and app identity
+        run: |
+          APK=apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          ls -lh "$APK"
+      - name: Upload test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaWorks-v0.6.25-Rendered-Judge-NeutralWB-ARM64
+          path: apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
