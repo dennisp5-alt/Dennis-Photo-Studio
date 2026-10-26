@@ -2300,9 +2300,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 // No crop, straightening or coloured overlay; mask coordinates
                 // refer to the uncropped, EXIF-oriented photograph.
+                // Preserve the photograph's native orientation/aspect when
+                // selecting a Subject. The old 512x512 request distorted
+                // portraits before the segmentation model ever saw them.
+                // Keep the approved Sky/Background behaviour unchanged.
+                val sourceWidth = ed.info.width.toDouble().coerceAtLeast(1.0)
+                val sourceHeight = ed.info.height.toDouble().coerceAtLeast(1.0)
+                val previewLong = 512.0
+                val subjectWidth = if (sourceWidth >= sourceHeight) 512u
+                    else (previewLong * sourceWidth / sourceHeight)
+                        .toInt().coerceIn(64, 512).toUInt()
+                val subjectHeight = if (sourceHeight >= sourceWidth) 512u
+                    else (previewLong * sourceHeight / sourceWidth)
+                        .toInt().coerceIn(64, 512).toUInt()
                 val original = withContext(e.looks) {
-                    e.session.renderCropView(photoId, 512u, 512u, false)
-                        .toImageBitmap().asAndroidBitmap()
+                    e.session.renderCropView(photoId,
+                        if (kind == "subject") subjectWidth else 512u,
+                        if (kind == "subject") subjectHeight else 512u,
+                        false).toImageBitmap().asAndroidBitmap()
                 }
                 val segmentation = withContext(Dispatchers.Default) {
                     SemanticMasker.segment(getApplication(), original, kind)
