@@ -1,6 +1,15 @@
-# MIRRAN — Intelligent Photo Studio (v0.1.3 experimental)
+# MIRRAN — Intelligent Photo Studio (v0.1.4 experimental)
 
 Native Java Android project, fully separate from approved Dennis Craft Mobile, LumaWorks, and other production editors. Main branch and all approved branches are left unchanged.
+
+## v0.1.4 changes
+
+- **Albums** button opens a built-in gallery, grouped by MediaStore album buckets. Tap an album, tap a photo, and swipe horizontally through neighbouring photos without reopening the picker or exporting.
+- Gallery access requires explicit Android media permission. Android 14+ limited-photo grants may expose only the selected images; full album navigation requires **Allow all photos**. The Android system Photo Picker remains for single images and does not grant access to adjacent album images.
+- Touch handling distinguishes horizontal swipes from a stationary press-and-hold original comparison.
+- Stores separate per-photo edit recipes in memory while the app session is alive; returning to another photo restores the edit. Navigation does **not** auto-export files.
+- Full-resolution JPEG export uses Android encoder **quality 100** (not mathematically lossless; metadata/ICC restoration and huge images remain limitations).
+- Keeps all v0.1.3 Auto and shadow protections intact.
 
 ## v0.1.3 changes
 

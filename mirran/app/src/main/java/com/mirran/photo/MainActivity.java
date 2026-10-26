@@ -5,6 +5,8 @@ import android.os.*;
 import android.content.*;
 import android.graphics.*;
 import android.graphics.drawable.*;
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.provider.MediaStore;
 import android.view.*;
@@ -31,6 +33,22 @@ public class MainActivity extends Activity {
     private LinearLayout controls,tabRow;
     private View emptyState;
     private Button mainButton,saveButton;
+    private TextView albumStatus,albumButton;
+    // Album access is scoped to in-session permissions; no automatic exports.
+    private final ArrayList<Uri> albumPhotos=new ArrayList<>();
+    private final LinkedHashMap<String,EditRecipe> sessionEdits=new LinkedHashMap<>();
+    private String albumName="";
+    private int albumIndex=-1,loadSerial=0;
+    private float touchX,touchY;
+    private boolean showingCompare=false;
+    private final Runnable showCompare=()->{
+        if(originalPreview!=null && !busy && !showingCompare){
+            showingCompare=true;
+            photograph.setImageBitmap(originalPreview);
+            stageTag.setText("ORIGINAL · RELEASE TO COMPARE");
+            stageTag.setVisibility(View.VISIBLE);
+        }
+    };
     private String activeTab="Light";
     private int renderGeneration=0;
     private boolean busy=false;
@@ -74,7 +92,12 @@ public class MainActivity extends Activity {
         TextView name=text("M I R R A N",18,NAVY,true);add(brand,name,-2,24);
         TextView sub=text("INTELLIGENT PHOTO STUDIO",9,MUTED,false);add(brand,sub,-2,16);
         header.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
-        TextView cfg=text("SETTINGS  ⋯",11,BLUE,true);cfg.setPadding(dp(10),dp(12),0,dp(12));
+        albumButton=text("ALBUMS",11,BLUE,true);
+        albumButton.setPadding(dp(6),dp(12),dp(6),dp(12));
+        albumButton.setContentDescription("Browse photo albums with swipe navigation");
+        albumButton.setOnClickListener(v->openAlbums());
+        header.addView(albumButton);
+        TextView cfg=text("SETTINGS ⋯",11,BLUE,true);cfg.setPadding(dp(10),dp(12),0,dp(12));
         cfg.setOnClickListener(v->showServerSettings());
         header.addView(cfg);root.addView(header);
 
@@ -100,18 +123,60 @@ public class MainActivity extends Activity {
         empty.addView(placeholder);empty.addView(guidance);
         LinearLayout.LayoutParams o=new LinearLayout.LayoutParams(-2,-2);o.topMargin=dp(14);empty.addView(open,o);
         stage.addView(empty,new FrameLayout.LayoutParams(-1,-1));emptyState=empty;
+        TextView openAlbum=text("▦  BROWSE ALBUMS",12,BLUE,true);
+        openAlbum.setGravity(Gravity.CENTER);
+        openAlbum.setPadding(dp(18),dp(12),dp(18),dp(12));
+        openAlbum.setBackground(stroke(Color.WHITE,Color.rgb(182,207,239),16));
+        openAlbum.setOnClickListener(v->openAlbums());
+        LinearLayout.LayoutParams oa=new LinearLayout.LayoutParams(-2,-2);oa.topMargin=dp(11);
+        empty.addView(openAlbum,oa);
+        // A long hold compares original; a horizontal drag changes the album photo.
+        // Do not interrupt a swipe by instantly switching the image to original.
         stage.setOnTouchListener((v,event)->{
-            if(originalPreview==null)return false;
-            if(event.getAction()==MotionEvent.ACTION_DOWN) {
-                photograph.setImageBitmap(originalPreview);stageTag.setText("ORIGINAL · HOLD TO COMPARE");
-                stageTag.setVisibility(View.VISIBLE);return true;
-            }
-            if(event.getAction()==MotionEvent.ACTION_UP||event.getAction()==MotionEvent.ACTION_CANCEL) {
-                photograph.setImageBitmap(editedPreview!=null?editedPreview:originalPreview);
-                stageTag.setText("EDITED · HOLD TO COMPARE");return true;
+            if(originalPreview==null||busy)return true;
+            switch(event.getActionMasked()){
+                case MotionEvent.ACTION_DOWN:
+                    touchX=event.getX();touchY=event.getY();
+                    showingCompare=false;
+                    ui.removeCallbacks(showCompare);
+                    ui.postDelayed(showCompare,290);
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    if(Math.abs(event.getX()-touchX)>dp(19)||
+                       Math.abs(event.getY()-touchY)>dp(19)){
+                        ui.removeCallbacks(showCompare);
+                        restoreEdited();
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    ui.removeCallbacks(showCompare);
+                    float dx=event.getX()-touchX,dy=event.getY()-touchY;
+                    restoreEdited();
+                    if(Math.abs(dx)>dp(65)&&Math.abs(dx)>Math.abs(dy)*1.3f){
+                        moveAlbum(dx<0?1:-1);
+                    }
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    ui.removeCallbacks(showCompare);restoreEdited();return true;
             }
             return true;
         });
+        LinearLayout albumBar=horizontal();
+        albumBar.setPadding(dp(20),dp(2),dp(20),dp(6));
+        TextView previous=text("‹",25,BLUE,true);
+        previous.setGravity(Gravity.CENTER);
+        previous.setContentDescription("Previous photo in album");
+        previous.setOnClickListener(v->moveAlbum(-1));
+        add(albumBar,previous,35,28);
+        albumStatus=text("OPEN AN ALBUM FOR SWIPE NAVIGATION",10,MUTED,true);
+        albumStatus.setGravity(Gravity.CENTER);
+        albumBar.addView(albumStatus,new LinearLayout.LayoutParams(0,dp(28),1));
+        TextView next=text("›",25,BLUE,true);
+        next.setGravity(Gravity.CENTER);
+        next.setContentDescription("Next photo in album");
+        next.setOnClickListener(v->moveAlbum(1));
+        add(albumBar,next,35,28);
+        root.addView(albumBar);
 
         LinearLayout report=vertical();report.setPadding(dp(15),dp(13),dp(15),dp(13));
         report.setBackground(stroke(Color.WHITE,Color.rgb(230,235,242),16));
@@ -181,6 +246,7 @@ public class MainActivity extends Activity {
                     if(!fromUser)return;
                     recipe.set(key,(progress-100)/100f);
                     amount.setText(recipe.amount(key));
+                    rememberCurrent();
                     chip.setText(recipe.cloud?"●  AI EDIT · MANUAL REFINEMENT":"●  PERSONAL EDIT");
                     ui.removeCallbacks(delayedRender);ui.postDelayed(delayedRender,110);
                 }
@@ -190,7 +256,87 @@ public class MainActivity extends Activity {
     private void refreshAction(){
         if(mainButton==null)return;
         mainButton.setEnabled(!busy);saveButton.setEnabled(!busy&&chosen!=null);
+        if(albumButton!=null)albumButton.setEnabled(!busy);
         mainButton.setText(busy?"WORKING…":chosen==null?"＋  OPEN PHOTO":"✦  REFINE PHOTO");
+        updateAlbumStatus();
+    }
+    private void updateAlbumStatus(){
+        if(albumStatus==null)return;
+        albumStatus.setText(albumIndex>=0 && !albumPhotos.isEmpty()
+            ? albumName.toUpperCase(Locale.US)+"  ·  "+(albumIndex+1)+" / "+albumPhotos.size()
+            : "OPEN AN ALBUM FOR SWIPE NAVIGATION");
+    }
+    private void restoreEdited(){
+        if(showingCompare){
+            showingCompare=false;
+            photograph.setImageBitmap(editedPreview!=null?editedPreview:originalPreview);
+            stageTag.setText("EDITED · HOLD TO COMPARE");
+        }
+    }
+    private void rememberCurrent(){
+        if(chosen!=null && originalPreview!=null){
+            sessionEdits.put(chosen.toString(),recipe.copy());
+        }
+    }
+    private void moveAlbum(int delta){
+        if(busy || albumIndex<0 || albumPhotos.size()<2)return;
+        int target=albumIndex+delta;
+        if(target<0 || target>=albumPhotos.size()){
+            toast(target<0?"First photo in album":"Last photo in album");
+            return;
+        }
+        albumIndex=target;
+        loadPhoto(albumPhotos.get(target));
+    }
+    private void chooseAlbum(ArrayList<Uri> list,int index,String title){
+        if(list==null||list.isEmpty()||index<0||index>=list.size())return;
+        rememberCurrent();
+        albumPhotos.clear();albumPhotos.addAll(list);
+        albumIndex=index;
+        albumName=title;
+        // New album starts a new session; edits remain separately keyed by URI.
+        loadPhoto(albumPhotos.get(index));
+    }
+    private void openAlbums(){
+        if(busy)return;
+        if(hasAlbumPermission()){
+            new AlbumBrowser(this,this::chooseAlbum).show();
+            return;
+        }
+        new AlertDialog.Builder(this).setTitle("Browse complete albums")
+            .setMessage("Swiping through an album requires access to its photos. Choose Allow all photos in the Android permission prompt for full-album navigation. Limited access may show only selected images. The normal photo picker remains available without this permission.")
+            .setPositiveButton("Continue",(d,w)->requestAlbumPermission())
+            .setNegativeButton("Use Photo Picker",(d,w)->openPhoto())
+            .show();
+    }
+    private boolean hasAlbumPermission(){
+        if(Build.VERSION.SDK_INT>=33)
+            return checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES)==PackageManager.PERMISSION_GRANTED
+                || (Build.VERSION.SDK_INT>=34 &&
+                    checkSelfPermission("android.permission.READ_MEDIA_VISUAL_USER_SELECTED")==PackageManager.PERMISSION_GRANTED);
+        return checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)==PackageManager.PERMISSION_GRANTED;
+    }
+    private void requestAlbumPermission(){
+        if(Build.VERSION.SDK_INT>=34){
+            requestPermissions(new String[]{Manifest.permission.READ_MEDIA_IMAGES,
+                "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"},221);
+        }else if(Build.VERSION.SDK_INT>=33){
+            requestPermissions(new String[]{Manifest.permission.READ_MEDIA_IMAGES},221);
+        }else{
+            requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},221);
+        }
+    }
+    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){
+        super.onRequestPermissionsResult(request,permissions,results);
+        if(request!=221)return;
+        if(hasAlbumPermission()){
+            new AlbumBrowser(this,this::chooseAlbum).show();
+        }else{
+            new AlertDialog.Builder(this).setTitle("Album access unavailable")
+                .setMessage("You can still open and edit individual photos with Android's private Photo Picker.")
+                .setPositiveButton("Open Photo Picker",(d,w)->openPhoto())
+                .setNegativeButton("Cancel",null).show();
+        }
     }
     private void setBusy(boolean b,String message) {
         busy=b;if(message!=null)summary.setText(message);refreshAction();drawControls();
@@ -221,32 +367,54 @@ public class MainActivity extends Activity {
     @Override protected void onActivityResult(int request,int result,Intent data) {
         super.onActivityResult(request,result,data);
         if(request!=10||result!=RESULT_OK||data==null||data.getData()==null)return;
-        chosen=data.getData();
-        try {getContentResolver().takePersistableUriPermission(chosen,Intent.FLAG_GRANT_READ_URI_PERMISSION);}
+        // A one-off system-picker image has no neighbouring-image permissions.
+        // Open Albums instead when continuous album swiping is desired.
+        rememberCurrent();
+        albumPhotos.clear();albumIndex=-1;albumName="";
+        Uri uri=data.getData();
+        try {getContentResolver().takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);}
         catch(Exception ignored){}
-        // Switching photos never requires exporting. Canceling the picker retains the current edit.
-        // Invalidate any queued preview renders from the previous photograph.
+        loadPhoto(uri);
+    }
+    private void loadPhoto(Uri uri){
+        if(uri==null)return;
+        rememberCurrent();
         ui.removeCallbacks(delayedRender);
+        ui.removeCallbacks(showCompare);
+        restoreEdited();
         renderGeneration++;
-        recipe=new EditRecipe();originalPreview=null;editedPreview=null;metrics=null;
-        photograph.setImageDrawable(null);
-        stageTag.setVisibility(View.GONE);emptyState.setVisibility(View.GONE);
+        final int serial=++loadSerial;
+        chosen=uri;
         setBusy(true,"Opening photograph…");
-        Uri uri=chosen;
         work.execute(()->{
-            try {
+            try{
                 Bitmap bitmap=decode(uri,1800);
-                AutoAnalyzer.Metrics sample=AutoAnalyzer.measure(bitmap);
+                AutoAnalyzer.Metrics measurement=AutoAnalyzer.measure(bitmap);
                 ui.post(()->{
-                    if(chosen!=uri)return;
-                    originalPreview=bitmap;editedPreview=bitmap;metrics=sample;
+                    if(serial!=loadSerial || !uri.equals(chosen))return;
+                    originalPreview=bitmap;editedPreview=bitmap;metrics=measurement;
+                    EditRecipe saved=sessionEdits.get(uri.toString());
+                    recipe=saved==null?new EditRecipe():saved.copy();
                     photograph.setImageBitmap(bitmap);
-                    chip.setText("●  PHOTO READY");
-                    summary.setText("Photograph loaded. Tap Refine for an individual tonal assessment. Hold the image for before/after.");
-                    stageTag.setText("ORIGINAL · HOLD TO COMPARE");stageTag.setVisibility(View.VISIBLE);
+                    emptyState.setVisibility(View.GONE);
+                    chip.setText(saved==null?"●  PHOTO READY":"●  SAVED SESSION ADJUSTMENTS");
+                    summary.setText(saved==null
+                        ?"Photo loaded. Swipe to the next album image, or tap Refine. Hold for before/after."
+                        :"Restored this photo's adjustments. Swipe for next/previous, or export at JPEG quality 100.");
+                    stageTag.setVisibility(View.VISIBLE);
+                    stageTag.setText(saved==null?"ORIGINAL · HOLD TO COMPARE":"EDITED · HOLD TO COMPARE");
                     setBusy(false,null);
+                    if(saved!=null)renderPreview();
                 });
-            }catch(Throwable ex){ui.post(()->{setBusy(false,"Could not open this image: "+error(ex));emptyState.setVisibility(View.VISIBLE);chosen=null;});}
+            }catch(Throwable ex){
+                ui.post(()->{
+                    if(serial!=loadSerial)return;
+                    chosen=null;originalPreview=null;editedPreview=null;metrics=null;
+                    photograph.setImageDrawable(null);
+                    emptyState.setVisibility(View.VISIBLE);
+                    setBusy(false,"Could not open this image: "+error(ex));
+                });
+            }
         });
     }
     private Bitmap decode(Uri uri,int maxDim)throws IOException {
@@ -315,6 +483,7 @@ public class MainActivity extends Activity {
     }
     private void applyPlan(EditRecipe plan){
         recipe=plan;
+        rememberCurrent();
         chip.setText(plan.cloud?"●  AI VISUAL ASSESSMENT":"●  LOCAL TONAL ASSESSMENT");
         summary.setText(plan.summary);
         drawControls();renderPreview();
@@ -339,12 +508,12 @@ public class MainActivity extends Activity {
                 target=getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values);
                 if(target==null)throw new IOException("Gallery refused new image");
                 try(OutputStream stream=getContentResolver().openOutputStream(target)){
-                    if(stream==null||!full.compress(Bitmap.CompressFormat.JPEG,95,stream))throw new IOException("Could not write JPEG");
+                    if(stream==null||!full.compress(Bitmap.CompressFormat.JPEG,100,stream))throw new IOException("Could not write JPEG");
                 }
                 full.recycle();
                 values.clear();values.put(MediaStore.Images.Media.IS_PENDING,0);
                 getContentResolver().update(target,values,null,null);
-                ui.post(()->{setBusy(false,"Saved to Pictures/MIRRAN as a full-resolution JPEG. The original was not changed.");toast("Export saved");});
+                ui.post(()->{setBusy(false,"Saved to Pictures/MIRRAN at JPEG quality 100, full original dimensions. The original was not changed.");toast("Export saved");});
             }catch(Throwable ex){
                 if(target!=null)try{getContentResolver().delete(target,null,null);}catch(Exception ignored){}
                 ui.post(()->{setBusy(false,"Export failed: "+error(ex));toast("Could not export image");});
@@ -375,7 +544,9 @@ public class MainActivity extends Activity {
             }).setNegativeButton("Cancel",null).show();
     }
     @Override protected void onDestroy() {
-        ui.removeCallbacks(delayedRender);work.shutdownNow();super.onDestroy();
+        ui.removeCallbacks(delayedRender);
+        ui.removeCallbacks(showCompare);
+        work.shutdownNow();super.onDestroy();
     }
 
     private static final class MarkView extends View {
