@@ -689,6 +689,9 @@ pub fn smart_auto_tone_report_balanced(
         proposed.vibrance=proposed.vibrance.min(4.0);
         proposed.saturation=proposed.saturation.min(2.0);
     }
+    // Finish using existing tonal and OkLCh colour controls before the
+    // unchanged rendered-image quality safeguard evaluates the proposal.
+    proposed=crate::auto_finish::refine(src,info,s,ev,proposed);
     // Keep editable controls at sensible slider precision.
     proposed.exposure=(proposed.exposure*100.0).round()/100.0;
     proposed.contrast=proposed.contrast.round();
