@@ -1,0 +1,141 @@
+name: LumaWorks v0.6.33 — Classic Photo Refinement
+
+on:
+  push:
+    branches: [experiment/lumaworks-v0.6.33-classic-photo-refinement]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lumaworks-v0633-classic-refinement
+  cancel-in-progress: true
+
+jobs:
+  quality-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 115
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify photo-quality protections, original masks and independent APK identity
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          f=Path('crates/pipeline/src/classic_finish.rs').read_text()
+          g=Path('crates/pipeline/src/classic_guard.rs').read_text()
+          a=Path('crates/pipeline/src/auto.rs').read_text()
+          e=Path('crates/engine/src/cmd/develop.rs').read_text()
+          vm=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/AppViewModel.kt').read_text()
+          assert 'pub mod classic_finish;' in Path('crates/pipeline/src/lib.rs').read_text()
+          assert 'pub fn refine(' in f and 'LocalAdjustments{exposure:strength' in f
+          assert 'existing manual red mixer is preserved' not in f
+          assert 'fn existing_manual_red_mixer_is_preserved' in f
+          assert 'fn isolated_fire_or_black_night_does_not_lift_subject' in f
+          assert 'fn neutral_bright_studio_has_no_colour_fabrication' in f
+          assert 'fn keeps_daylight_and_tungsten_presets' in g
+          assert 'saturated_red_highlight_guard' in g
+          assert 'near_white_texture_guard' in g
+          assert 'pub fn classic_auto_tone_report(' in a and 'pub fn smart_auto_tone_report_balanced(' in a
+          assert e.count('lightcraft_pipeline::classic_guard::plan(')==3
+          assert 'photoFinish' in e and 'photoFinish' in vm
+          assert 'LumaWorks Classic Refined' in Path('apps/lightcraft-android/android/app/src/main/res/values/strings.xml').read_text()
+          assert 'com.dennis.lumaworks.classic.refined.v0633' in Path('apps/lightcraft-android/android/app/build.gradle.kts').read_text()
+          assert 'lightcraft.versionCode=63301' in Path('apps/lightcraft-android/android/gradle.properties').read_text()
+          for fname in ('SubjectAspectMapper.kt','SemanticMaskRefinement.kt','SemanticMasker.kt'):
+              assert Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/engine',fname).is_file()
+          print('Classic Photo Refinement source integrity and safeguards: PASS')
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Android SDK manager
+        run: |
+          MANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -1)"
+          test -x "$MANAGER"
+          echo "$(dirname "$MANAGER")" >> "$GITHUB_PATH"
+      - name: Android SDK 37.0 and NDK 29
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --channel=3 "platforms;android-37.0" "ndk;29.0.14206865"
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
+          if [ ! -e "$ANDROID_HOME/platforms/android-37" ]; then
+            ln -s "$ANDROID_HOME/platforms/android-37.0" "$ANDROID_HOME/platforms/android-37"
+          fi
+      - name: Rust toolchain and target
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal --target aarch64-linux-android
+          rustup default 1.99.0
+          cargo +1.99.0 install cargo-ndk --version 4.1.2 --locked
+      - name: Cache native Rust build and dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          cache-on-failure: true
+      - name: Validate finished-photo, corrective-photo, colour and NR regressions
+        run: |
+          cargo +1.99.0 test -p lightcraft-pipeline --locked --lib
+          cargo +1.99.0 test -p lightcraft-develop --locked --lib
+          cargo +1.99.0 test -p lightcraft-codecs --features heif --locked --lib
+      - name: Build offline evaluator for real local photographs
+        run: |
+          cargo +1.99.0 build -p lightcraft-pipeline --example photo_eval --locked
+      - name: Upload local photographic QA evaluator
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaWorks-v0.6.33-Classic-Refinement-Evaluator
+          path: target/debug/examples/photo_eval
+          if-no-files-found: error
+          retention-days: 7
+      - name: Type-check complete native engine and Android HEIC feature before packaging
+        run: |
+          cargo +1.99.0 check -p lightcraft-engine --features lightcraft-codecs/heif --locked
+          cargo +1.99.0 check -p lightcraft-android --features heic --locked
+      - name: Bundle checksum-verified offline ADE20K weights
+        run: |
+          set -euo pipefail
+          ASSETS=apps/lightcraft-android/android/app/src/main/assets
+          mkdir -p "$ASSETS"
+          curl --fail --location --retry 5 --retry-delay 4 --connect-timeout 30 \
+            "https://huggingface.co/Xenova/segformer-b0-finetuned-ade-512-512/resolve/main/onnx/model.onnx?download=true" \
+            --output "$ASSETS/segformer_b0_ade.onnx"
+          echo "3e5c18a4be395f16646438d54c42377ddc202edfa33d5eced0c9506de75c44c2  $ASSETS/segformer_b0_ade.onnx" | sha256sum --check
+          test "$(stat -c%s "$ASSETS/segformer_b0_ade.onnx")" -gt 10000000
+      - name: Smoke-test semantic model input/output on CPU
+        run: |
+          python3 -m pip install --quiet onnxruntime==1.22.0 numpy
+          python3 - <<'PY'
+          import numpy as np, onnxruntime as ort
+          model='apps/lightcraft-android/android/app/src/main/assets/segformer_b0_ade.onnx'
+          s=ort.InferenceSession(model,providers=['CPUExecutionProvider'])
+          a=np.zeros((1,3,512,512),dtype=np.float32)
+          x=s.run(None,{s.get_inputs()[0].name:a})[0]
+          assert x.ndim==4 and x.shape[0]==1 and x.shape[1]==150 and x.shape[2]==x.shape[3],x.shape
+          print('Offline ADE20K semantic model runs correctly: '+str(x.shape))
+          PY
+      - name: Run semantic edge-refinement Kotlin regression tests
+        working-directory: apps/lightcraft-android/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace testDebugUnitTest -Plightcraft.abis=arm64-v8a
+      - name: Assemble ARM64 APK
+        working-directory: apps/lightcraft-android/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace assembleDebug -Plightcraft.abis=arm64-v8a
+      - name: Verify APK and app identity
+        run: |
+          APK=apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          ls -lh "$APK"
+      - name: Upload test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaWorks-v0.6.33-Classic-Photo-Refinement-ARM64
+          path: apps/lightcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
