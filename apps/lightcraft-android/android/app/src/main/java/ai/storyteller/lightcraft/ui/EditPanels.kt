@@ -188,7 +188,7 @@ fun SectionSheet(vm: AppViewModel, ed: EditorState, section: EditSection, modifi
             EditSection.EFFECTS -> {
                 Row(Modifier.fillMaxWidth().padding(start=14.dp,top=5.dp,bottom=4.dp),
                     horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    LcButton("Auto Effects", null, description="Analyse texture and clarity") {
+                    LcButton("Auto Effects", null, description="Analyse texture, clarity and atmospheric haze") {
                         vm.runAutoEffects()
                     }
                     LcButton(if(manualEffects) "Hide sliders" else "Advanced", null) {
@@ -199,7 +199,7 @@ fun SectionSheet(vm: AppViewModel, ed: EditorState, section: EditSection, modifi
                     Tabs(listOf("effects" to "Effects", "vignette" to "Vignette", "grain" to "Grain"), ed.effectsTab) { ed.effectsTab = it }
                     EffectsPanel(vm, ed)
                 } else {
-                    Text("Analyses texture and clarity. Dehaze stays off unless you choose it in Advanced.",
+                    Text("Analyses texture, clarity and scene-confirmed haze. Manual Dehaze is preserved.",
                         color=Lc.panelTextSoft,fontFamily=Inter,fontSize=12.sp,
                         modifier=Modifier.padding(horizontal=17.dp,vertical=12.dp))
                 }
