@@ -25,6 +25,7 @@
 
 pub mod auto;
 pub mod classic_guard;
+pub mod classic_finish;
 mod auto_finish;
 pub mod scene;
 pub mod scene_auto;
