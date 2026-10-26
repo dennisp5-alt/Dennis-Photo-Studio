@@ -230,6 +230,9 @@ pub fn choose(src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings,seed:AutoTone)->Au
     if original.is_empty(){return seed;}
     let evidence=measurements(&original);
     let category=scene(evidence);
+    // Compute both frame and 3x3 regional histograms once on the original
+    // rendered sRGB preview. White balance is intentionally not changed.
+    let histogram=crate::histogram_auto::analyse(&original);
     let current=tone_of(s);
     let mut gentle=scaled(current,seed,0.65);
     // This maintains original camera colour and WB when the scene needs no
@@ -262,12 +265,27 @@ pub fn choose(src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings,seed:AutoTone)->Au
             subject.shadows=(seed.shadows+5.0).clamp(-5.0,38.0);
         },
     }
-    let options=[seed,gentle,subject,scaled(gentle,subject,0.5)];
+    let portrait=category==Scene::PortraitLike;
+    let low_key=category==Scene::VividLowKey;
+    let sunny=category==Scene::SunnyMixed;
+    let histogram_tone=histogram.as_ref().map(|ev|
+        crate::histogram_auto::propose(ev,seed,portrait,low_key,sunny)
+    ).unwrap_or(seed);
+    // Preserve all four v0.6.25 proposals. Add a histogram-led suggestion
+    // and a softer blend; actual rendered output still decides the winner.
+    let options=[seed,gentle,subject,scaled(gentle,subject,0.5),
+                 histogram_tone,scaled(gentle,histogram_tone,0.7)];
     let mut best=seed;
     let mut best_score=f64::NEG_INFINITY;
     for candidate in options {
         let rendered=crate::render(&proxy,info,&settings_for(s,candidate),&req).image;
-        let score=evaluate(&original,&rendered,evidence,category);
+        let mut score=evaluate(&original,&rendered,evidence,category);
+        if let (Some(original_hist),Some(candidate_hist))=
+            (histogram.as_ref(),crate::histogram_auto::analyse(&rendered).as_ref()) {
+            score+=crate::histogram_auto::score(
+                original_hist,candidate_hist,portrait,low_key,sunny
+            )*1.4;
+        }
         if score>best_score {
             best_score=score;
             best=candidate;
