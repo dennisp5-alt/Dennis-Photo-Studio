@@ -356,6 +356,16 @@ jobs:
           cargo +1.99.0 test -p lightcraft-pipeline --locked --lib
           cargo +1.99.0 test -p lightcraft-develop --locked --lib
           cargo +1.99.0 test -p lightcraft-codecs --features heif --locked --lib
+      - name: Build offline evaluator for real local photographs
+        run: |
+          cargo +1.99.0 build -p lightcraft-pipeline --example photo_eval --locked
+      - name: Upload local photographic QA evaluator
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaWorks-v0.6.27-Local-Photo-Evaluator
+          path: target/debug/examples/photo_eval
+          if-no-files-found: error
+          retention-days: 7
       - name: Type-check complete native engine and Android HEIC feature before packaging
         run: |
           cargo +1.99.0 check -p lightcraft-engine --features lightcraft-codecs/heif --locked
