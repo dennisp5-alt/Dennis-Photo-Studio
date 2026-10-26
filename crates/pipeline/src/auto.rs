@@ -3191,23 +3191,23 @@ pub fn classic_auto_tone_report(src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings)
     let high_key=median>0.55 && df<0.06;
 
     // Automatic exposure via robust percentile targets, not a uniform lift.
-    let mut exposure=if median< -0.55{(-0.55-median)*0.33}
-        else if median>0.58{(0.58-median)*0.34}else{0.0};
-    exposure=exposure.clamp(-0.72,0.80);
+    let mut exposure=if median< -0.55{(-0.55-median)*0.46}
+        else if median>0.58{(0.58-median)*0.40}else{0.0};
+    exposure=exposure.clamp(-1.15,1.35);
     if night{exposure=exposure.min(0.05);}
     if emitter{exposure=exposure.min(0.04);}
     if high_key{exposure=exposure.max(-0.16);}
-    if bf>0.05 || p99>2.4{exposure=exposure.min(0.15);}
+    if bf>0.05 || p99>2.4{exposure=exposure.min(0.32);}
     if backlit{exposure=exposure.min(0.12);}
 
     // Percentile black/white-point expansion with hard highlight protection.
-    let mut contrast=if texture{((4.8-(p90-p10))*3.8).clamp(-10.0,18.0)}
+    let mut contrast=if texture{((5.1-(p90-p10))*5.4).clamp(-14.0,32.0)}
         else{0.0};
     if night{contrast=contrast.min(3.0);}
-    let mut highlights=-((p99+exposure-1.55).max(0.0)*12.0).clamp(0.0,30.0);
+    let mut highlights=-((p99+exposure-1.55).max(0.0)*18.0).clamp(0.0,48.0);
     if bf>0.10{highlights=highlights.min(-8.0);}
     let mut shadows=if texture && rf>0.14{
-        ((-2.95-p10-exposure).max(0.0)*9.0).clamp(0.0,28.0)
+        ((-2.95-p10-exposure).max(0.0)*13.0).clamp(0.0,46.0)
     }else{0.0};
     if backlit{shadows=shadows.max(13.0);}
     if night{shadows=shadows.min(3.0);}
@@ -3220,8 +3220,8 @@ pub fn classic_auto_tone_report(src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings)
     let mut vib=0.0f64;
     let mut sat=0.0f64;
     if coloured>0.17 && soft>0.13 && rich<0.24 && !night{
-        vib=((soft-0.13)*22.0+(coloured-0.17)*5.0).clamp(0.0,13.0);
-        sat=((soft-0.13)*3.0).clamp(0.0,3.0);
+        vib=((soft-0.13)*37.0+(coloured-0.17)*8.0).clamp(0.0,24.0);
+        sat=((soft-0.13)*6.0).clamp(0.0,6.0);
     }
     if rich>0.12{sat=0.0;vib=vib.min(4.0);}
     if neutral as f64/cf>0.90{sat=0.0;vib=0.0;}
@@ -3234,13 +3234,13 @@ pub fn classic_auto_tone_report(src:&Rgb32f,info:&SourceInfo,s:&DevelopSettings)
         curve_darks:if backlit && !night{8.0}else{0.0},
         curve_lights:0.0,curve_highlights:0.0
     };
-    let result=preview_quality_guard_report(src,info,s,proposed);
+    // The final combined candidate is validated in classic_guard::plan,
+    // including its white balance, dehaze and rendered tone.
     audit.proposed=proposed;
-    audit.final_tone=result.tone;
-    audit.guard_reasons=result.reasons;
-    audit.guard_reasons.insert(0,"classic_percentile_region_auto");
-    audit.new_white_clip_fraction=result.white_clip_change;
-    audit.new_black_clip_fraction=result.black_clip_change;
+    audit.final_tone=proposed;
+    audit.guard_reasons=vec!["classic_percentile_region_auto"];
+    audit.new_white_clip_fraction=0.0;
+    audit.new_black_clip_fraction=0.0;
     audit.quality_guard_skipped_for_emission=false;
     audit
 }
