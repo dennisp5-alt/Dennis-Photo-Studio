@@ -154,16 +154,16 @@ jobs:
           assert 'smart_auto_tone_report_all_guards_off(&src,&info,&' not in e
           assert 'auto_wb_report_all_guards_off(&src,&info)' not in e
           assert 'auto_wb_report_all_guards_off(&src, &info)' not in e
-          assert 'let manual_wb=current.wb.mode==WbMode::Custom' in e
-          assert 'let manual_wb=d.wb.mode==WbMode::Custom' in e
-          assert 'smart_auto_tone_report_balanced(&src,&info,&' in e
-          assert 'auto_wb_report_balanced(&src, &info)' in e
+          assert 'lightcraft_pipeline::auto_reliability::plan(&src,&info,&current)' in e
+          reliability=Path('crates/pipeline/src/auto_reliability.rs').read_text()
+          assert 'wb_is_user_choice(current.wb.mode)' in reliability
+          assert 'auto_wb_report_balanced(src,info)' in reliability
           assert 'photographic_wb_preservation_gates_bypassed_test_only' in a
           assert 'all_photographic_auto_guards_disabled_test_only' in a
           assert 'cmd!("develop.autoPreview"' in e
           assert '"sourceSettings":current' in e
-          assert '"previewSettings":proposal' in e
-          assert 'Restored Auto uses original editable engine controls' in e
+          assert '"previewSettings":plan.settings' in e
+          assert 'Offline deterministic photographic controls' in e
           assert '"model":model' in e
           assert 'optionc_pilot_v1.json' in Path('crates/pipeline/src/optionc.rs').read_text()
           assert 'pub mod optionc;' in Path('crates/pipeline/src/lib.rs').read_text()
@@ -231,7 +231,7 @@ jobs:
           assert 'val sceneSignal=when' in vm
           assert 'let baseline=s.clone();' in a
           assert 'cmd!("develop.autoApplyPreview"' in e
-          assert '"toneAudit":tone_audit' in e
+          assert '"toneAudit":plan.tone_audit' in e
           assert 'val approved=ed.autoPreview ?: return' in vm
           assert 'execute("develop.autoApplyPreview",params)' in vm
           assert 'Show Auto diagnostics' in p
