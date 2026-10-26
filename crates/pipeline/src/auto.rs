@@ -721,7 +721,17 @@ pub fn photo_studio_auto_tone_report(
     // Reuse the existing evidence so the preview diagnostics and safety
     // checks remain compatible with the LumaWorks UI.
     let mut audit=smart_auto_tone_report_mode(src,info,s,false);
-    let (proposal,_) = crate::photo_studio_auto::analyse(src,info,s);
+    let (original,studio_evidence)=crate::photo_studio_auto::analyse(src,info,s);
+    // First test actual rendered appearances instead of blindly taking the
+    // largest allowed Auto slider change. This scorer is explicitly heuristic
+    // and can later be evaluated against a labelled dataset; not trained AI.
+    let mut proposal=crate::rendered_auto_judge::choose(src,info,s,original);
+    // Don't weaken verified v0.6.24 white-subject and night protections.
+    if audit.evidence.zonal.micro.neutral_white_subject ||
+       audit.evidence.zonal.nano.neutral_white_subject ||
+       studio_evidence.protected_warm_atmosphere {
+        proposal.exposure=proposal.exposure.min(original.exposure);
+    }
     let mut guarded=preview_quality_guard_report(src,info,s,proposal);
     // Treat bright-subject exposure and highlight recovery as one proposal.
     // If extra clipping vetoed the first EV, try progressively smaller
