@@ -45,7 +45,16 @@ It installs alongside the other test builds.
   as 512×512 logits. Animals/objects keep the refined SegFormer path. CI posts MODNet overlays
   of Kodak portraits to eval branch masks/.
 
+- beta.5 masking is committed but NOT yet built or tested: GitHub Actions free minutes ran out
+  on 27 Oct (runs refused before starting). Since `e81eccf`, a push runs only the tests,
+  A/B renders and the MODNet mask check; the APK and engine tests run only via Run workflow
+  (`gh api -X POST repos/dennisp5-alt/Dennis-Photo-Studio/actions/workflows/dps-v0632-lumaworks-smart-auto-fixes.yml/dispatches -f ref=experiment/lumaworks-v0.6.32-smart-auto-fixes`).
+
 ## Next steps (if resuming)
+0. When minutes are back: dispatch the workflow; check eval branch masks/ (MODNet overlays,
+   modnet_io.txt input/output names), Kotlin tests, then send Dennis the beta.5 APK link and
+   ask him to retest Subject/Background on the same photo. Optionally pin the MODNet sha256
+   printed in CI.
 1. Check the run: `gh api repos/dennisp5-alt/Dennis-Photo-Studio/actions/runs?branch=experiment/lumaworks-v0.6.32-smart-auto-fixes`.
 2. Fix any test failures, then `git fetch origin eval/lumaworks-v0632-auto-compare` and look
    at `b_under13_*`, `c_under20_*`, `e_over08_*` and the 17 `a_orig_*` (should be unchanged
