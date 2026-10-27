@@ -8,7 +8,7 @@ import kotlin.math.roundToInt
 
 /**
  * Pure, testable mask-selection and image-guided upsampling routines.
- * Do not change the background selector here: its v0.6.18 result is the reference.
+ * Background is always the exact complement of the Subject selection.
  */
 internal object SemanticMaskRefinement {
     const val SKY = 2
@@ -82,6 +82,93 @@ internal object SemanticMaskRefinement {
             if (!plausible) for (k in 0 until tail) {
                 out[queue[k]] = -4f
             }
+        }
+        return out
+    }
+
+    /** Stored person-matte mask resolution (SegMask allows up to 1024). */
+    const val MATTE_SIDE = 512
+
+    /** MODNet input: short side 512, both sides a multiple of 32. */
+    fun mattingInputSize(width: Int, height: Int): Pair<Int, Int> {
+        require(width > 0 && height > 0)
+        val scale = 512f / min(width, height)
+        val w = max(32, ((width * scale).roundToInt() / 32) * 32)
+        val h = max(32, ((height * scale).roundToInt() / 32) * 32)
+        return w to h
+    }
+
+    /**
+     * Where the scene model saw people, dilated by [radius] cells (a missed hair
+     * edge or shoulder is still allowed) and softened: 1 near people, 0 far away.
+     * Gates the person matte so a sign or poster far from anyone is never selected.
+     */
+    fun personSupport(margins: FloatArray, side: Int, radius: Int = 5): FloatArray {
+        require(side > 0 && margins.size == side * side)
+        val dilated = FloatArray(margins.size)
+        for (y in 0 until side) for (x in 0 until side) {
+            var hit = 0f
+            loop@ for (yy in max(0, y - radius)..min(side - 1, y + radius))
+                for (xx in max(0, x - radius)..min(side - 1, x + radius))
+                    if (margins[yy * side + xx] > -2f) { hit = 1f; break@loop }
+            dilated[y * side + x] = hit
+        }
+        var soft = dilated
+        repeat(2) {
+            val next = FloatArray(soft.size)
+            for (y in 0 until side) for (x in 0 until side) {
+                var sum = 0f
+                var n = 0
+                for (yy in max(0, y - 1)..min(side - 1, y + 1))
+                    for (xx in max(0, x - 1)..min(side - 1, x + 1)) { sum += soft[yy * side + xx]; n++ }
+                next[y * side + x] = sum / n
+            }
+            soft = next
+        }
+        return soft
+    }
+
+    private fun bilinear(v: FloatArray, w: Int, h: Int, fx: Float, fy: Float): Float {
+        val x = fx.coerceIn(0f, (w - 1).toFloat())
+        val y = fy.coerceIn(0f, (h - 1).toFloat())
+        val x0 = x.toInt()
+        val y0 = y.toInt()
+        val x1 = min(x0 + 1, w - 1)
+        val y1 = min(y0 + 1, h - 1)
+        val tx = x - x0
+        val ty = y - y0
+        val top = v[y0 * w + x0] * (1 - tx) + v[y0 * w + x1] * tx
+        val bottom = v[y1 * w + x0] * (1 - tx) + v[y1 * w + x1] * tx
+        return top * (1 - ty) + bottom * ty
+    }
+
+    /**
+     * A 0..1 matte (on its own [mw]×[mh] grid over the photograph) as stored SegMask
+     * logits on a square [outputSide] grid over the same photograph, optionally gated
+     * by [support] (on a [supportSide] grid). [invert] gives the exact complement, so
+     * Subject and Background always meet at the same edge.
+     */
+    fun matteToLogits(
+        alpha: FloatArray, mw: Int, mh: Int,
+        support: FloatArray?, supportSide: Int,
+        outputSide: Int = MATTE_SIDE, invert: Boolean = false,
+    ): ByteArray {
+        require(mw > 1 && mh > 1 && alpha.size == mw * mh)
+        require(support == null || (supportSide > 1 && support.size == supportSide * supportSide))
+        require(outputSide in 16..1024)
+        val out = ByteArray(outputSide * outputSide)
+        for (y in 0 until outputSide) for (x in 0 until outputSide) {
+            val u = (x + 0.5f) / outputSide
+            val v = (y + 0.5f) / outputSide
+            var a = bilinear(alpha, mw, mh, u * mw - 0.5f, v * mh - 0.5f)
+            if (support != null) {
+                a *= bilinear(support, supportSide, supportSide, u * supportSide - 0.5f, v * supportSide - 0.5f)
+            }
+            val p = a.coerceIn(1e-6f, 1f - 1e-6f)
+            val logit = kotlin.math.ln(p / (1f - p))
+            val stored = (logit.coerceIn(-15.875f, 15.875f) * 8f).roundToInt().coerceIn(-127, 127)
+            // Negate the stored value (not the logit) so the complement is exact.
+            out[y * outputSide + x] = (if (invert) -stored else stored).toByte()
         }
         return out
     }

@@ -1,7 +1,7 @@
 # LumaWorks v0.6.32 — Smart Auto fixes (handoff / resume notes)
 
 Branch: `experiment/lumaworks-v0.6.32-smart-auto-fixes` (from v0.6.30 `419271c`).
-App: "LumaWorks Auto Fix", `com.dennis.lumaworks.autofix.v0632`, 0.6.32-beta.4 (63204).
+App: "LumaWorks Auto Fix", `com.dennis.lumaworks.autofix.v0632`, 0.6.32-beta.5 (63205).
 It installs alongside the other test builds.
 
 ## Status (27 Oct 2026)
@@ -33,6 +33,17 @@ It installs alongside the other test builds.
 - beta.4: beta.3 matched Lightroom's black points (8–15 vs LR 7–17) but its white target
   (238) over-brightened photos LR leaves at 213–233. White target now 228, applied only when
   the rendered p99 is below 218.
+
+- beta.4 vs Lightroom on Dennis's 10 photos: average difference 6.8 (beta.2 7.0); blacks
+  within 0–4 levels, colour within 0.03. Remaining gaps by design: fire, daisies.
+- beta.5: Subject/Background masking. Problems: Background was a different, square-squashed,
+  unrefined 128px path (did not meet the Subject edge); SegFormer-B0 sees people at 128×128,
+  so hair/outline were blobs and leaked into similar-coloured walls. Now: Subject and
+  Background are one aspect-correct selection (Background = exact byte complement); when a
+  person is found, MODNet (Xenova/modnet, Apache-2.0, assets/modnet_portrait.onnx) gives a
+  hair-level matte at 1024px input, gated to where SegFormer saw people (dilated ~4%), stored
+  as 512×512 logits. Animals/objects keep the refined SegFormer path. CI posts MODNet overlays
+  of Kodak portraits to eval branch masks/.
 
 ## Next steps (if resuming)
 1. Check the run: `gh api repos/dennisp5-alt/Dennis-Photo-Studio/actions/runs?branch=experiment/lumaworks-v0.6.32-smart-auto-fixes`.

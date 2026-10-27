@@ -52,10 +52,10 @@ internal object SemanticMasker {
     fun segment(context: Context, original: Bitmap, kind: String): JSONObject {
         require(kind in setOf("subject", "background", "sky")) { "Unknown semantic selection" }
         require(original.width > 0 && original.height > 0) { "Empty photograph" }
-        // Preserve proportions only for Subject. Previously all portrait
-        // photographs were distorted into a square before classification.
-        // Sky and Background deliberately retain their approved legacy path.
-        val subjectFit = if (kind == "subject")
+        // Subject and Background are one selection (Background is its exact
+        // complement), analysed with the photograph's true proportions.
+        // Sky keeps its approved square path.
+        val subjectFit = if (kind != "sky")
             SubjectAspectMapper.fit(original.width, original.height, INPUT) else null
         val resized = if (subjectFit != null) {
             val square = Bitmap.createBitmap(INPUT, INPUT, Bitmap.Config.ARGB_8888)
@@ -137,9 +137,7 @@ internal object SemanticMasker {
                         .maxByOrNull { centreCounts[it] }?.takeIf { centreCounts[it] > side * side / 180 }
                         ?: error("No clearly selectable subject was found")
                 }
-                if (kind == "subject")
-                    SemanticMaskRefinement.selectSubject(counts, centreCounts, side, legacy)
-                else legacy
+                SemanticMaskRefinement.selectSubject(counts, centreCounts, side, legacy)
             }
         }
         require(counts[label] >= side * side / 500) {
@@ -160,18 +158,22 @@ internal object SemanticMasker {
         }
         val outSide: Int
         val mask: ByteArray
-        if (kind == "background") {
-            outSide = side
-            mask = ByteArray(side * side) { i ->
-                // Exact legacy behaviour: invert selected subject's margin.
-                (-margins[i] * 8.0f).toInt().coerceIn(-127, 127).toByte()
-            }
+        // People: a dedicated person matte (hair-level edges), kept to where the
+        // scene model saw people. Background is the exact complement.
+        val matte = if (kind != "sky" && label == PERSON)
+            PortraitMatter.matte(context, original) else null
+        if (matte != null) {
+            outSide = SemanticMaskRefinement.MATTE_SIDE
+            mask = SemanticMaskRefinement.matteToLogits(
+                matte.alpha, matte.width, matte.height,
+                SemanticMaskRefinement.personSupport(margins, side), side,
+                outSide, invert = kind == "background")
         } else {
             outSide = SemanticMaskRefinement.REFINED_SIDE
             val evidence = if (kind == "sky")
                 SemanticMaskRefinement.retainSkyRegions(margins, side)
             else margins
-            val guidePixels = if (kind == "subject") {
+            val guidePixels = if (kind != "sky") {
                 // Upsampling guidance must use the original image coordinates,
                 // never the letterboxed model input or its grey padding.
                 val guide = Bitmap.createScaledBitmap(original, INPUT, INPUT, true)
@@ -180,9 +182,12 @@ internal object SemanticMasker {
                 if (guide !== original) guide.recycle()
                 p
             } else pixels
-            mask = SemanticMaskRefinement.refine(
+            val refined = SemanticMaskRefinement.refine(
                 evidence, side, guidePixels, INPUT, outSide,
-                subjectBoundary = kind == "subject")
+                subjectBoundary = kind != "sky")
+            // Background: the same refined edge, inverted (-128 cannot occur).
+            mask = if (kind == "background")
+                ByteArray(refined.size) { i -> (-refined[i]).toByte() } else refined
         }
         val deflater = Deflater(8, true) // raw DEFLATE, matching miniz_oxide::compress_to_vec
         val packed = try {

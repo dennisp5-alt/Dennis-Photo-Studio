@@ -2300,23 +2300,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 // No crop, straightening or coloured overlay; mask coordinates
                 // refer to the uncropped, EXIF-oriented photograph.
-                // Preserve the photograph's native orientation/aspect when
-                // selecting a Subject. The old 512x512 request distorted
-                // portraits before the segmentation model ever saw them.
-                // Keep the approved Sky/Background behaviour unchanged.
+                // Subject and Background (one selection, complements) keep the
+                // photograph's true proportions at 1024 px on the long side, so
+                // the person matte sees hair-level detail. Sky keeps 512x512.
                 val sourceWidth = ed.info.width.toDouble().coerceAtLeast(1.0)
                 val sourceHeight = ed.info.height.toDouble().coerceAtLeast(1.0)
-                val previewLong = 512.0
-                val subjectWidth = if (sourceWidth >= sourceHeight) 512u
+                val previewLong = 1024.0
+                val subjectWidth = if (sourceWidth >= sourceHeight) 1024u
                     else (previewLong * sourceWidth / sourceHeight)
-                        .toInt().coerceIn(64, 512).toUInt()
-                val subjectHeight = if (sourceHeight >= sourceWidth) 512u
+                        .toInt().coerceIn(64, 1024).toUInt()
+                val subjectHeight = if (sourceHeight >= sourceWidth) 1024u
                     else (previewLong * sourceHeight / sourceWidth)
-                        .toInt().coerceIn(64, 512).toUInt()
+                        .toInt().coerceIn(64, 1024).toUInt()
+                val aspectCorrect = kind != "sky"
                 val original = withContext(e.looks) {
                     e.session.renderCropView(photoId,
-                        if (kind == "subject") subjectWidth else 512u,
-                        if (kind == "subject") subjectHeight else 512u,
+                        if (aspectCorrect) subjectWidth else 512u,
+                        if (aspectCorrect) subjectHeight else 512u,
                         false).toImageBitmap().asAndroidBitmap()
                 }
                 val segmentation = withContext(Dispatchers.Default) {

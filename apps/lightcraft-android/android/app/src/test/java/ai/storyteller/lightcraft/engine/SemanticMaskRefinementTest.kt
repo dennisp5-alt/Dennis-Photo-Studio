@@ -99,4 +99,38 @@ class SemanticMaskRefinementTest {
         val result=SemanticMaskRefinement.refine(margin,model,px,32,32,subjectBoundary=true)
         assertTrue(result.all{it.toInt()>0})
     }
+
+    @Test fun mattingInputKeepsProportionsAndModelStride() {
+        val (w, h) = SemanticMaskRefinement.mattingInputSize(1536, 2048)
+        assertEquals(512, w)
+        assertEquals(672, h)
+        val (lw, lh) = SemanticMaskRefinement.mattingInputSize(4000, 3000)
+        assertEquals(672, lw)
+        assertEquals(512, lh)
+    }
+
+    @Test fun backgroundIsTheExactComplementOfSubject() {
+        val mw = 40
+        val mh = 30
+        val alpha = FloatArray(mw * mh) { i -> (i % mw) / (mw - 1f) }
+        val subject = SemanticMaskRefinement.matteToLogits(alpha, mw, mh, null, 0, 64, invert = false)
+        val background = SemanticMaskRefinement.matteToLogits(alpha, mw, mh, null, 0, 64, invert = true)
+        for (i in subject.indices) assertEquals(-subject[i].toInt(), background[i].toInt())
+        assertTrue("left edge not selected", subject[32 * 64 + 1] < 0)
+        assertTrue("right edge selected", subject[32 * 64 + 62] > 0)
+    }
+
+    @Test fun matteFarFromAnyDetectedPersonIsDropped() {
+        val side = 32
+        // Scene model: a person only in the left third.
+        val margins = FloatArray(side * side) { i -> if (i % side < side / 3) 6f else -8f }
+        val support = SemanticMaskRefinement.personSupport(margins, side)
+        assertTrue(support[16 * side + 4] > 0.99f)
+        assertTrue(support[16 * side + 30] < 0.01f)
+        // Matte says "person" everywhere (e.g. a poster on the right).
+        val alpha = FloatArray(64 * 64) { 1f }
+        val mask = SemanticMaskRefinement.matteToLogits(alpha, 64, 64, support, side, 64)
+        assertTrue("person kept", mask[32 * 64 + 8] > 100)
+        assertTrue("far poster dropped", mask[32 * 64 + 62] < -100)
+    }
 }

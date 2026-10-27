@@ -41,7 +41,7 @@ jobs:
           assert 'private var smartAutoBusy = false' in vm
           assert 'fun smartAutoWbStatus(' in vm and 'fun smartAutoSummary(' in vm
           g=Path('apps/lightcraft-android/android/gradle.properties').read_text()
-          assert 'lightcraft.version=0.6.32-beta' in g and 'lightcraft.versionCode=63204' in g
+          assert 'lightcraft.version=0.6.32-beta' in g and 'lightcraft.versionCode=63205' in g
           assert 'com.dennis.lumaworks.autofix.v0632' in Path(
               'apps/lightcraft-android/android/app/build.gradle.kts').read_text()
           print('Smart Auto v0.6.32 wiring: PASS')
@@ -110,6 +110,38 @@ jobs:
         run: |
           mkdir -p eval/in eval/out
           cargo +1.99.0 run -p lightcraft-pipeline --example auto_compare --locked -- eval/in eval/out | tee eval/out/summary.txt
+      - name: Person-matte check on test portraits (MODNet)
+        continue-on-error: true
+        run: |
+          set -eu
+          mkdir -p eval/models eval/out/masks
+          curl -fsSL --retry 5 --retry-delay 4 --connect-timeout 30 \
+            "https://huggingface.co/Xenova/modnet/resolve/main/onnx/model.onnx?download=true" -o eval/models/modnet.onnx
+          sha256sum eval/models/modnet.onnx | tee eval/out/masks/modnet_sha256.txt
+          python3 -m pip install --quiet onnxruntime==1.22.0 numpy pillow
+          python3 - <<'PY2'
+          from pathlib import Path
+          import numpy as np, onnxruntime as ort
+          from PIL import Image
+          s=ort.InferenceSession('eval/models/modnet.onnx',providers=['CPUExecutionProvider'])
+          i=s.get_inputs()[0]; o=s.get_outputs()[0]
+          info=f"input {i.name} {i.shape} / output {o.name} {o.shape}"
+          print(info); Path('eval/out/masks/modnet_io.txt').write_text(info+"\n")
+          for name in ['kodim04','kodim15','kodim05','kodim14','kodim24']:
+              p=Path(f'eval/kodak/{name}.png')
+              if not p.exists(): continue
+              im=Image.open(p).convert('RGB'); W,H=im.size
+              k=512/min(W,H); w=max(32,round(W*k)//32*32); h=max(32,round(H*k)//32*32)
+              a=np.asarray(im.resize((w,h),Image.BILINEAR),dtype=np.float32)/127.5-1
+              x=a.transpose(2,0,1)[None]
+              m=s.run(None,{i.name:x})[0][0,0]
+              m=np.asarray(Image.fromarray((np.clip(m,0,1)*255).astype(np.uint8)).resize((W,H),Image.BILINEAR),dtype=np.float32)/255
+              base=np.asarray(im,dtype=np.float32)
+              red=base*(1-0.55*m[...,None])+np.array([255,0,0],np.float32)*0.55*m[...,None]
+              row=np.concatenate([base,red,np.repeat(m[...,None]*255,3,-1)],1)
+              Image.fromarray(row.clip(0,255).astype(np.uint8)).save(f'eval/out/masks/{name}_matte.jpg',quality=88)
+              print(name,'matte mean',float(m.mean()))
+          PY2
       - name: Publish the comparison to the eval branch
         continue-on-error: true
         env:
@@ -180,6 +212,16 @@ jobs:
             --output "$ASSETS/segformer_b0_ade.onnx"
           echo "3e5c18a4be395f16646438d54c42377ddc202edfa33d5eced0c9506de75c44c2  $ASSETS/segformer_b0_ade.onnx" | sha256sum --check
           test "$(stat -c%s "$ASSETS/segformer_b0_ade.onnx")" -gt 10000000
+      - name: Bundle offline person-matting weights (MODNet, Apache-2.0)
+        run: |
+          set -euo pipefail
+          ASSETS=apps/lightcraft-android/android/app/src/main/assets
+          mkdir -p "$ASSETS"
+          curl --fail --location --retry 5 --retry-delay 4 --connect-timeout 30 \
+            "https://huggingface.co/Xenova/modnet/resolve/main/onnx/model.onnx?download=true" \
+            --output "$ASSETS/modnet_portrait.onnx"
+          sha256sum "$ASSETS/modnet_portrait.onnx"
+          test "$(stat -c%s "$ASSETS/modnet_portrait.onnx")" -gt 20000000
       - name: Kotlin unit tests
         working-directory: apps/lightcraft-android/android
         run: |
