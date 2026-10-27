@@ -160,10 +160,13 @@ jobs:
       - name: Smart Auto, colour and tone regression tests
         run: cargo +1.99.0 test -p lightcraft-pipeline --locked --lib
       - name: Engine Smart Auto command tests (preview equals one-tap, WB kept)
+        if: github.event_name == 'workflow_dispatch'
         run: cargo +1.99.0 test -p lightcraft-engine --locked --lib smart_auto
 
   apk:
     name: ARM64 test APK
+    # Saves Actions minutes: the APK is built only on request (Run workflow).
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 100
     env:
