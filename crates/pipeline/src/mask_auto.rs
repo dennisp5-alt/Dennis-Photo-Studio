@@ -123,6 +123,11 @@ pub fn plan(kind: RegionKind, r: &RegionStats, rest: Option<&RegionStats>) -> Pl
             // A subject a little brighter than its surroundings, within a normal range.
             let rest_median = rest.map_or(r.median, |x| x.median);
             let mut goal = (rest_median + 10.0).clamp(105.0, 135.0);
+            if r.median > goal {
+                // Already brighter than that: a bright subject is welcome, and only
+                // an overexposed one is brought down.
+                goal = if r.median > 175.0 || r.white_clip > 0.03 { 160.0f64.max(goal) } else { r.median };
+            }
             if kind == RegionKind::Other {
                 goal = r.median + 0.6 * (goal - r.median);
             }
@@ -140,8 +145,9 @@ pub fn plan(kind: RegionKind, r: &RegionStats, rest: Option<&RegionStats>) -> Pl
             }
         }
         RegionKind::Background => {
-            // Never brighter than the subject: darken to sit below it, never lift.
-            let goal = rest.map(|s| s.median - 12.0).filter(|g| r.median > *g + 3.0);
+            // Never brighter than the subject: darken to sit below it, never lift, and
+            // by a modest amount (a darkened background, not a grey one).
+            let goal = rest.map(|s| (s.median - 12.0).max(r.median - 35.0)).filter(|g| r.median > *g + 3.0);
             let mut saturation = 0.0;
             if let Some(s) = rest
                 && r.chroma > s.chroma + 0.04
@@ -150,7 +156,7 @@ pub fn plan(kind: RegionKind, r: &RegionStats, rest: Option<&RegionStats>) -> Pl
             }
             Plan {
                 median: goal.map(|g| g.max(40.0)),
-                exposure_range: (-0.8, 0.0),
+                exposure_range: (-0.6, 0.0),
                 recover_highlights: true,
                 lift_shadows: false,
                 deepen_blacks: true,
@@ -375,7 +381,9 @@ pub fn mask_auto(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings, id: u32) 
         let base_a = a;
         let lift = move |k: f64| LocalAdjustments { shadows: (40.0 * k).round() + 0.0, ..base_a };
         let k = smallest_reaching(|k| measure(&lift(k)).p10 >= 42.0);
-        a = lift(k);
+        if measure(&lift(k)).p10 - now.p10 >= 4.0 {
+            a = lift(k);
+        }
         if a.shadows != 0.0 {
             notes.push("opened shadows");
         }
@@ -387,7 +395,11 @@ pub fn mask_auto(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings, id: u32) 
         let deepen = move |k: f64| LocalAdjustments { blacks: (-40.0 * k).round() + 0.0, ..base_a };
         let k = smallest_reaching(|k| measure(&deepen(k)).p01 <= 14.0);
         let k = k * largest_passing(|x| new_blacks(&deepen(k * x)) <= NEW_BLACK_CLIP_LIMIT);
-        a = deepen(k);
+        // Kept only when it really deepens the black point (the local Blacks slider
+        // barely moves some photographs' end points; a maxed slider doing nothing is noise).
+        if now.p01 - measure(&deepen(k)).p01 >= 4.0 {
+            a = deepen(k);
+        }
         if a.blacks != 0.0 {
             notes.push("deepened blacks");
         }
@@ -399,7 +411,9 @@ pub fn mask_auto(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings, id: u32) 
         let brighten = move |k: f64| LocalAdjustments { whites: (40.0 * k).round() + 0.0, ..base_a };
         let k = smallest_reaching(|k| measure(&brighten(k)).p99 >= 228.0);
         let k = k * largest_passing(|x| new_whites(&brighten(k * x)) <= NEW_WHITE_CLIP_LIMIT);
-        a = brighten(k);
+        if measure(&brighten(k)).p99 - now.p99 >= 4.0 {
+            a = brighten(k);
+        }
         if a.whites != 0.0 {
             notes.push("brightened whites");
         }
@@ -501,7 +515,9 @@ mod tests {
         let subject = stats(110.0, 10.0, 240.0, 0.2, 0.0);
         let bright_bg = stats(150.0, 20.0, 250.0, 0.35, 0.0);
         let p = plan(RegionKind::Background, &bright_bg, Some(&subject));
-        assert_eq!(p.median, Some(98.0));
+        assert_eq!(p.median, Some(115.0), "at most 35 levels darker");
+        let a_little_brighter = stats(120.0, 20.0, 250.0, 0.2, 0.0);
+        assert_eq!(plan(RegionKind::Background, &a_little_brighter, Some(&subject)).median, Some(98.0));
         assert!(p.exposure_range.1 <= 0.0);
         assert!(p.saturation < 0.0, "a louder background is calmed");
         let dark_bg = stats(60.0, 5.0, 200.0, 0.1, 0.0);
@@ -513,6 +529,11 @@ mod tests {
         let dark_subject = stats(70.0, 8.0, 200.0, 0.2, 0.0);
         let p = plan(RegionKind::Subject, &dark_subject, Some(&stats(120.0, 5.0, 240.0, 0.2, 0.0)));
         assert_eq!(p.median, Some(130.0));
+        let bright = stats(150.0, 8.0, 245.0, 0.3, 0.0);
+        assert_eq!(plan(RegionKind::Subject, &bright, Some(&stats(70.0, 5.0, 240.0, 0.2, 0.0))).median, None,
+            "a subject brighter than its surroundings is welcome");
+        let blown = stats(200.0, 40.0, 255.0, 0.2, 0.0);
+        assert_eq!(plan(RegionKind::Subject, &blown, Some(&stats(70.0, 5.0, 240.0, 0.2, 0.0))).median, Some(160.0));
         let fine = stats(118.0, 8.0, 240.0, 0.3, 0.0);
         assert_eq!(plan(RegionKind::Subject, &fine, Some(&stats(110.0, 5.0, 240.0, 0.3, 0.0))).median, None);
     }
