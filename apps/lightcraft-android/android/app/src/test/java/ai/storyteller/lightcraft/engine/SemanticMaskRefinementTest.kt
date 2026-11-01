@@ -133,4 +133,14 @@ class SemanticMaskRefinementTest {
         assertTrue("person kept", mask[32 * 64 + 8] > 100)
         assertTrue("far poster dropped", mask[32 * 64 + 62] < -100)
     }
+
+    @Test fun scatteredMatteOnCrowdIsRejectedButPortraitMatteAccepted() {
+        val side = 32
+        // Scene model: a prominent person in the middle third.
+        val margins = FloatArray(side * side) { i -> if (i % side in 10..21) 5f else -6f }
+        val good = FloatArray(64 * 64) { i -> if (i % 64 in 20..43) 1f else 0f }
+        val scattered = FloatArray(64 * 64) { i -> if (i % 64 in 20..24) 1f else 0f }
+        assertTrue(SemanticMaskRefinement.matteAgrees(good, 64, 64, margins, side))
+        assertTrue(!SemanticMaskRefinement.matteAgrees(scattered, 64, 64, margins, side))
+    }
 }

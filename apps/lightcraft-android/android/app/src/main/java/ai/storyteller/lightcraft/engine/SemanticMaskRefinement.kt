@@ -89,6 +89,26 @@ internal object SemanticMaskRefinement {
     /** Stored person-matte mask resolution (SegMask allows up to 1024). */
     const val MATTE_SIDE = 512
 
+    /**
+     * Whether a person matte is trustworthy for this photograph. MODNet is a
+     * portrait matter: excellent on one or two prominent people, unreliable on
+     * small or crowded figures (it returns scattered fragments). Require a
+     * prominent person in the scene model AND that the matte covers most of the
+     * cells the scene model called "person". Otherwise keep the scene model.
+     */
+    fun matteAgrees(alpha: FloatArray, mw: Int, mh: Int, margins: FloatArray, side: Int): Boolean {
+        require(alpha.size == mw * mh && margins.size == side * side)
+        var person = 0
+        var covered = 0
+        for (y in 0 until side) for (x in 0 until side) {
+            if (margins[y * side + x] <= 0f) continue
+            person++
+            val a = bilinear(alpha, mw, mh, (x + 0.5f) / side * mw - 0.5f, (y + 0.5f) / side * mh - 0.5f)
+            if (a > 0.5f) covered++
+        }
+        return person >= side * side / 12 && covered >= person * 0.75f
+    }
+
     /** MODNet input: short side 512, both sides a multiple of 32. */
     fun mattingInputSize(width: Int, height: Int): Pair<Int, Int> {
         require(width > 0 && height > 0)
@@ -103,7 +123,7 @@ internal object SemanticMaskRefinement {
      * edge or shoulder is still allowed) and softened: 1 near people, 0 far away.
      * Gates the person matte so a sign or poster far from anyone is never selected.
      */
-    fun personSupport(margins: FloatArray, side: Int, radius: Int = 5): FloatArray {
+    fun personSupport(margins: FloatArray, side: Int, radius: Int = 3): FloatArray {
         require(side > 0 && margins.size == side * side)
         val dilated = FloatArray(margins.size)
         for (y in 0 until side) for (x in 0 until side) {

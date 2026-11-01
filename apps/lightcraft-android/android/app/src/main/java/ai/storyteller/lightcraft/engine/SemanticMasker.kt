@@ -160,8 +160,9 @@ internal object SemanticMasker {
         val mask: ByteArray
         // People: a dedicated person matte (hair-level edges), kept to where the
         // scene model saw people. Background is the exact complement.
-        val matte = if (kind != "sky" && label == PERSON)
-            PortraitMatter.matte(context, original) else null
+        val matte = (if (kind != "sky" && label == PERSON)
+            PortraitMatter.matte(context, original) else null)
+            ?.takeIf { SemanticMaskRefinement.matteAgrees(it.alpha, it.width, it.height, margins, side) }
         if (matte != null) {
             outSide = SemanticMaskRefinement.MATTE_SIDE
             mask = SemanticMaskRefinement.matteToLogits(
