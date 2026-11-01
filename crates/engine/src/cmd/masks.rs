@@ -592,6 +592,32 @@ pub fn specs() -> Vec<CommandSpec> {
                 })
             }
         ),
+        cmd!(
+            "mask.auto",
+            "Auto Mask Adjustments",
+            [],
+            None,
+            "{id?} — measures the selected part of the photo on small renders and sets the mask's Exposure, Highlights, Shadows, Whites, Blacks, Saturation and Dehaze (Subject a little brighter than its surroundings, Background never brighter than the subject, Sky never brightened); other local sliders are kept → {kind, coverage, adjust, before, after, rest_median, notes}",
+            has_active,
+            |s, p| {
+                let c = "mask.auto";
+                let id = s.active().ok_or_else(|| bad(c, "no active photo"))?;
+                let mid = mask_id(p, s.active_mask, c)?;
+                let src = s.source_now(id, crate::media::SourceLevel::Thumb).map_err(|e| bad(c, e))?;
+                let info = s.source_info(id);
+                let d = s.develop_of(id).unwrap_or_default();
+                let report = lightcraft_pipeline::mask_auto::mask_auto(&src, &info, &d, mid).map_err(|e| bad(c, e))?;
+                let adjust = clamp_local(report.adjust);
+                masks_edit(s, c, "Auto Mask", |masks, _| {
+                    let i = find(masks, mid, c)?;
+                    masks[i].adjust = adjust;
+                    Ok(())
+                })?;
+                let mut out = serde_json::to_value(&report).map_err(|e| bad(c, e.to_string()))?;
+                out["adjust"] = serde_json::to_value(adjust).unwrap_or_default();
+                Ok(out)
+            }
+        ),
         cmd!("mask.select", "Select Mask", [], None, "{id|null}", has_active, |s, p| {
             s.active_mask = p.get("id").and_then(Value::as_u64).map(|v| v as u32);
             ok()

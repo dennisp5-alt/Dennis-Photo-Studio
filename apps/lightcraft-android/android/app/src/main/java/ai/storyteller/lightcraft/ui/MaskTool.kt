@@ -138,6 +138,8 @@ private val localSpecs = listOf(
 
 /** The reference app's sections in Masking (its local adjustments), with their sliders. */
 enum class MaskSection(val label: String, val icon: Glyph, val keys: List<String>) {
+    // Auto applies at once (measured on the masked part), as Edit's Auto does for the photo.
+    AUTO("Auto", LcIcon.SectionAuto, emptyList()),
     LIGHT("Light", MdIcon.LightMode, listOf("exposure", "contrast", "highlights", "shadows", "whites", "blacks")),
     COLOR("Color", MdIcon.Thermostat, listOf("temp", "tint", "saturation", "hue")),
     EFFECTS("Effects", MdIcon.Vignette, listOf("texture", "clarity", "dehaze")),

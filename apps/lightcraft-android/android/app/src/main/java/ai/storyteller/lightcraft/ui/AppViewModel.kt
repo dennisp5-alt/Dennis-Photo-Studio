@@ -2221,7 +2221,60 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             ed.maskPicker = "new"
             return
         }
+        if (section == "auto") return applyMaskAuto()
         ed.maskSection = if (ed.maskSection == section) null else section
+    }
+
+    /** True while a mask's Auto is running: a second tap is ignored (one undo step). */
+    private var maskAutoBusy = false
+
+    /** Auto for the edited mask: the engine measures the selected part and sets its
+     * Light sliders, Saturation and Dehaze; the Light sliders are then shown. */
+    fun applyMaskAuto() {
+        val ed = editor ?: return
+        val e = engine ?: return
+        val mask = ed.selectedMask ?: return
+        if (maskAutoBusy) return
+        maskAutoBusy = true
+        val params = JSONObject().put("id", mask.toLong()).toString()
+        viewModelScope.launch {
+            try {
+                runCatching {
+                    e.command {
+                        val result = JSONObject(execute("mask.auto", params))
+                        snapshot(ed.photoId) to result
+                    }
+                }.onSuccess { (snapshot, result) ->
+                    if (editor !== ed) return@onSuccess
+                    ed.update(snapshot)
+                    ed.liveLocal = emptyMap()
+                    ed.maskSection = "light"
+                    refreshMasks()
+                    requestView()
+                    say(maskAutoSummary(result), brief = true)
+                }.onFailure { say(it.message) }
+            } finally {
+                maskAutoBusy = false
+            }
+        }
+    }
+
+    /** What a mask's Auto set, in the sliders' own words. */
+    private fun maskAutoSummary(result: JSONObject): String {
+        val a = result.optJSONObject("adjust")
+        fun v(key: String) = a?.optDouble(key, 0.0) ?: 0.0
+        fun signed(x: Int) = if (x > 0) "+$x" else "$x"
+        val kind = when (result.optString("kind")) {
+            "subject" -> "Subject"; "background" -> "Background"; "sky" -> "Sky"; else -> "Mask"
+        }
+        val parts = mutableListOf<String>()
+        if (v("exposure") != 0.0) parts += "Exposure " + String.format(java.util.Locale.US, "%+.2f", v("exposure"))
+        listOf("highlights" to "Highlights", "shadows" to "Shadows", "whites" to "Whites", "blacks" to "Blacks",
+            "saturation" to "Saturation", "dehaze" to "Dehaze").forEach { (key, label) ->
+            val x = Math.round(v(key)).toInt()
+            if (x != 0) parts += "$label ${signed(x)}"
+        }
+        return "$kind Auto • " + if (parts.isEmpty()) "already well balanced, nothing changed" else parts.joinToString(" • ")
     }
 
     /** Edit mask [id] itself (its picture in the column; its parts are picked under it). */

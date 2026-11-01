@@ -126,7 +126,9 @@ internal object SemanticMasker {
         }
         // Preserve the successful v0.6.18 background label decision verbatim.
         // Only the *subject* selector adds explicit animal/person prioritisation.
-        val label = when (kind) {
+        // v0.6.32-beta.6: a subject with no scene class of its own (a protea, a fire)
+        // is no longer an error here: the salient-object model may still find it.
+        val label: Int? = when (kind) {
             "sky" -> SKY
             else -> {
                 val legacy = if (counts[PERSON] >= side * side / 250) PERSON
@@ -135,54 +137,72 @@ internal object SemanticMasker {
                     val excluded = setOf(0, 1, 2, 3, 5, 6, 8, 9, 11, 13, 21, 26, 29, 46, 52, 54)
                     centreCounts.indices.filter { it !in excluded && counts[it] < side * side * 0.80 }
                         .maxByOrNull { centreCounts[it] }?.takeIf { centreCounts[it] > side * side / 180 }
-                        ?: error("No clearly selectable subject was found")
                 }
-                SemanticMaskRefinement.selectSubject(counts, centreCounts, side, legacy)
+                legacy?.let { SemanticMaskRefinement.selectSubject(counts, centreCounts, side, it) }
+                    ?.takeIf { counts[it] >= side * side / 500 }
             }
         }
-        require(counts[label] >= side * side / 500) {
-            if (kind == "sky") "No identifiable sky was found" else "No identifiable subject was found"
-        }
+        if (kind == "sky") require(counts[SKY] >= side * side / 500) { "No identifiable sky was found" }
 
         // Keep the model's soft per-class score margin, not hard pixel labels.
         // The previous background path intentionally retains its 128px results.
-        val margins = FloatArray(side * side)
-        for (y in 0 until side) for (x in 0 until side) {
-            val i = y * side + x
-            val chosen = subjectMap?.at(scores[label], x, y) ?: scores[label][y][x]
-            var other = Float.NEGATIVE_INFINITY
-            for (c in scores.indices) if (c != label) {
-                other = max(other, subjectMap?.at(scores[c], x, y) ?: scores[c][y][x])
+        fun marginsOf(chosenLabel: Int): FloatArray {
+            val out = FloatArray(side * side)
+            for (y in 0 until side) for (x in 0 until side) {
+                val i = y * side + x
+                val chosen = subjectMap?.at(scores[chosenLabel], x, y) ?: scores[chosenLabel][y][x]
+                var other = Float.NEGATIVE_INFINITY
+                for (c in scores.indices) if (c != chosenLabel) {
+                    other = max(other, subjectMap?.at(scores[c], x, y) ?: scores[c][y][x])
+                }
+                out[i] = (chosen - other).coerceIn(-12.0f, 12.0f)
             }
-            margins[i] = (chosen - other).coerceIn(-12.0f, 12.0f)
+            return out
         }
+        val margins: FloatArray? = label?.let { marginsOf(it) }
+        // Subjects that are not people: the salient-object map, unless it is only a
+        // small piece of an object the scene model outlined (daisy centres).
+        val salient: FloatArray? = if (kind != "sky" && label != PERSON)
+            SalientObject.saliency(context, original)?.takeIf {
+                SemanticMaskRefinement.saliencyUsable(it, SalientObject.SIDE, margins, side)
+            } else null
+        if (label == null && salient == null) error("No clearly selectable subject was found")
         val outSide: Int
         val mask: ByteArray
         // People: a dedicated person matte (hair-level edges), kept to where the
         // scene model saw people. Background is the exact complement.
-        val matte = (if (kind != "sky" && label == PERSON)
+        val matte = (if (kind != "sky" && label == PERSON && margins != null)
             PortraitMatter.matte(context, original) else null)
-            ?.takeIf { SemanticMaskRefinement.matteAgrees(it.alpha, it.width, it.height, margins, side) }
+            ?.takeIf { SemanticMaskRefinement.matteAgrees(it.alpha, it.width, it.height, margins!!, side) }
+        // Upsampling guidance must use the original image coordinates, never the
+        // letterboxed model input or its grey padding.
+        fun subjectGuide(): IntArray {
+            val guide = Bitmap.createScaledBitmap(original, INPUT, INPUT, true)
+            val p = IntArray(INPUT * INPUT)
+            guide.getPixels(p, 0, INPUT, 0, 0, INPUT, INPUT)
+            if (guide !== original) guide.recycle()
+            return p
+        }
         if (matte != null) {
             outSide = SemanticMaskRefinement.MATTE_SIDE
             mask = SemanticMaskRefinement.matteToLogits(
                 matte.alpha, matte.width, matte.height,
-                SemanticMaskRefinement.personSupport(margins, side), side,
+                SemanticMaskRefinement.personSupport(margins!!, side), side,
                 outSide, invert = kind == "background")
+        } else if (salient != null) {
+            // The salient object's own edge, snapped to the photograph's colours.
+            outSide = SemanticMaskRefinement.MATTE_SIDE
+            val refined = SemanticMaskRefinement.refine(
+                SemanticMaskRefinement.probabilityToMargins(salient), SalientObject.SIDE,
+                subjectGuide(), INPUT, outSide, subjectBoundary = true)
+            mask = if (kind == "background")
+                ByteArray(refined.size) { i -> (-refined[i]).toByte() } else refined
         } else {
             outSide = SemanticMaskRefinement.REFINED_SIDE
             val evidence = if (kind == "sky")
-                SemanticMaskRefinement.retainSkyRegions(margins, side)
-            else margins
-            val guidePixels = if (kind != "sky") {
-                // Upsampling guidance must use the original image coordinates,
-                // never the letterboxed model input or its grey padding.
-                val guide = Bitmap.createScaledBitmap(original, INPUT, INPUT, true)
-                val p = IntArray(INPUT * INPUT)
-                guide.getPixels(p, 0, INPUT, 0, 0, INPUT, INPUT)
-                if (guide !== original) guide.recycle()
-                p
-            } else pixels
+                SemanticMaskRefinement.retainSkyRegions(margins!!, side)
+            else margins!!
+            val guidePixels = if (kind != "sky") subjectGuide() else pixels
             val refined = SemanticMaskRefinement.refine(
                 evidence, side, guidePixels, INPUT, outSide,
                 subjectBoundary = kind != "sky")

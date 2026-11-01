@@ -41,9 +41,16 @@ jobs:
           assert 'private var smartAutoBusy = false' in vm
           assert 'fun smartAutoWbStatus(' in vm and 'fun smartAutoSummary(' in vm
           g=Path('apps/lightcraft-android/android/gradle.properties').read_text()
-          assert 'lightcraft.version=0.6.32-beta' in g and 'lightcraft.versionCode=63205' in g
+          assert 'lightcraft.version=0.6.32-beta.6' in g and 'lightcraft.versionCode=63206' in g
           assert 'com.dennis.lumaworks.autofix.v0632' in Path(
               'apps/lightcraft-android/android/app/build.gradle.kts').read_text()
+          m=Path('crates/engine/src/cmd/masks.rs').read_text()
+          assert '"mask.auto"' in m and 'mask_auto::mask_auto(' in m
+          assert 'AUTO("Auto", LcIcon.SectionAuto, emptyList())' in Path(
+              'apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/ui/MaskTool.kt').read_text()
+          assert 'fun applyMaskAuto()' in vm
+          sm=Path('apps/lightcraft-android/android/app/src/main/java/ai/storyteller/lightcraft/engine/SemanticMasker.kt').read_text()
+          assert 'SalientObject.saliency(' in sm and 'saliencyUsable(' in sm
           print('Smart Auto v0.6.32 wiring: PASS')
           PY
       - name: Rust toolchain
@@ -55,8 +62,8 @@ jobs:
         with:
           workspaces: ". -> target"
           cache-on-failure: true
-      - name: Build the old-vs-new comparison tool
-        run: cargo +1.99.0 build -p lightcraft-pipeline --example auto_compare --locked
+      - name: Build the comparison tools
+        run: cargo +1.99.0 build -p lightcraft-pipeline --example auto_compare --example mask_auto_compare --locked
       - name: Fetch public test photographs and make exposure/colour variants
         continue-on-error: true
         run: |
@@ -142,6 +149,39 @@ jobs:
               Image.fromarray(row.clip(0,255).astype(np.uint8)).save(f'eval/out/masks/{name}_matte.jpg',quality=88)
               print(name,'matte mean',float(m.mean()))
           PY2
+      - name: Subject saliency (U2-Netp) and per-mask Auto on test photos
+        continue-on-error: true
+        run: |
+          set -eu
+          mkdir -p eval/models eval/masks_in eval/out/saliency eval/out/mask_auto
+          curl -fsSL --retry 5 --retry-delay 4 --connect-timeout 30 \
+            "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx" -o eval/models/u2netp.onnx
+          echo "309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8  eval/models/u2netp.onnx" | sha256sum --check
+          python3 -m pip install --quiet onnxruntime==1.22.0 numpy pillow
+          python3 - <<'PY3'
+          from pathlib import Path
+          import json, numpy as np, onnxruntime as ort
+          from PIL import Image
+          s=ort.InferenceSession('eval/models/u2netp.onnx',providers=['CPUExecutionProvider'])
+          names=['a_orig_kodim%s'%i for i in ['01','02','03','04','05','07','08','13','14','15','16','19','20','21','22','23','24']]+['b_under13_kodim05','b_under13_kodim16','e_over08_kodim07']
+          for n in names:
+              p=Path(f'eval/in/{n}.png')
+              if not p.exists(): continue
+              im=Image.open(p).convert('RGB'); W,H=im.size
+              x=np.asarray(im.resize((320,320),Image.BILINEAR),np.float32)/255.
+              x=(x-[0.485,0.456,0.406])/[0.229,0.224,0.225]
+              raw=s.run(None,{s.get_inputs()[0].name:x.transpose(2,0,1)[None].astype(np.float32)})[0][0,0]
+              if raw.max()<0.5: print(n,'nothing salient'); continue
+              m=(raw-raw.min())/(raw.max()-raw.min())
+              q=np.clip(m,1e-6,1-1e-6); logit=np.clip(np.log(q/(1-q)),-12,12)
+              im.save(f'eval/masks_in/{n}.png')
+              Path(f'eval/masks_in/{n}.seg.json').write_text(json.dumps({'side':320,'logits':[round(float(v),3) for v in logit.ravel()]}))
+              a=np.asarray(Image.fromarray((m*255).astype(np.uint8)).resize((W,H),Image.BILINEAR),np.float32)/255.
+              base=np.asarray(im,np.float32); g=base.mean(2,keepdims=True)*.25+np.array([0,0,60.])
+              Image.fromarray(np.clip(base*a[...,None]+g*(1-a[...,None]),0,255).astype(np.uint8)).save(f'eval/out/saliency/{n}.jpg',quality=85)
+              print(n,'salient area %.3f'%float((m>.5).mean()))
+          PY3
+          cargo +1.99.0 run -p lightcraft-pipeline --example mask_auto_compare --locked -- eval/masks_in eval/out/mask_auto | tee eval/out/mask_auto/summary.txt
       - name: Publish the comparison to the eval branch
         continue-on-error: true
         env:
@@ -159,6 +199,8 @@ jobs:
           git push -qf "https://x-access-token:${TOKEN}@github.com/${REPO}.git" eval:eval/lumaworks-v0632-auto-compare
       - name: Smart Auto, colour and tone regression tests
         run: cargo +1.99.0 test -p lightcraft-pipeline --locked --lib
+      - name: Engine type-check (mask.auto command)
+        run: cargo +1.99.0 check -p lightcraft-engine --locked
       - name: Engine Smart Auto command tests (preview equals one-tap, WB kept)
         if: github.event_name == 'workflow_dispatch'
         run: cargo +1.99.0 test -p lightcraft-engine --locked --lib smart_auto
@@ -225,6 +267,15 @@ jobs:
             --output "$ASSETS/modnet_portrait.onnx"
           sha256sum "$ASSETS/modnet_portrait.onnx"
           test "$(stat -c%s "$ASSETS/modnet_portrait.onnx")" -gt 20000000
+      - name: Bundle offline salient-object weights (U2-Netp, Apache-2.0)
+        run: |
+          set -euo pipefail
+          ASSETS=apps/lightcraft-android/android/app/src/main/assets
+          mkdir -p "$ASSETS"
+          curl --fail --location --retry 5 --retry-delay 4 --connect-timeout 30 \
+            "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx" \
+            --output "$ASSETS/u2netp_salient.onnx"
+          echo "309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8  $ASSETS/u2netp_salient.onnx" | sha256sum --check
       - name: Kotlin unit tests
         working-directory: apps/lightcraft-android/android
         run: |

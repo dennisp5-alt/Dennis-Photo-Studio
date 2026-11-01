@@ -143,4 +143,47 @@ class SemanticMaskRefinementTest {
         assertTrue(SemanticMaskRefinement.matteAgrees(good, 64, 64, margins, side))
         assertTrue(!SemanticMaskRefinement.matteAgrees(scattered, 64, 64, margins, side))
     }
+
+    @Test fun flatSaliencyIsNotStretchedIntoAFakeSelection() {
+        assertTrue(SemanticMaskRefinement.normaliseSaliency(FloatArray(100) { 0.2f + 0.001f * it }) == null)
+        val n = SemanticMaskRefinement.normaliseSaliency(FloatArray(100) { if (it < 50) 0.1f else 0.9f })!!
+        assertEquals(0f, n[0], 1e-6f)
+        assertEquals(1f, n[99], 1e-6f)
+    }
+
+    @Test fun salientFlowerWithNoSceneClassIsUsed() {
+        // A protea: no scene-model object, a compact salient blob in the middle.
+        val s = 64
+        val sal = FloatArray(s * s) { i -> val x = i % s; val y = i / s
+            if ((x - 32) * (x - 32) + (y - 34) * (y - 34) < 18 * 18) 0.95f else 0.02f }
+        assertTrue(SemanticMaskRefinement.saliencyUsable(sal, s, null, 32))
+    }
+
+    @Test fun daisyCentresInsideALargeFlowerObjectDeferToTheSceneModel() {
+        val s = 64
+        val side = 32
+        // Scene model: "flower" over most of the frame.
+        val flower = FloatArray(side * side) { i -> if (i / side in 4..29) 4f else -5f }
+        // Saliency: only three small yellow centres, all inside the flowers.
+        val centres = listOf(20 to 20, 44 to 30, 30 to 48)
+        val sal = FloatArray(s * s) { i -> val x = i % s; val y = i / s
+            if (centres.any { (cx, cy) -> (x - cx) * (x - cx) + (y - cy) * (y - cy) < 16 }) 1f else 0f }
+        assertTrue(!SemanticMaskRefinement.saliencyUsable(sal, s, flower, side))
+        // The same scene object, but the salient region is most of it: use saliency.
+        val whole = FloatArray(s * s) { i -> if (i / s in 12..54 && i % s in 6..58) 0.9f else 0.05f }
+        assertTrue(SemanticMaskRefinement.saliencyUsable(whole, s, flower, side))
+    }
+
+    @Test fun saliencyCoveringEverythingOrNothingIsRejected() {
+        val s = 64
+        assertTrue(!SemanticMaskRefinement.saliencyUsable(FloatArray(s * s) { 0.95f }, s, null, 32))
+        assertTrue(!SemanticMaskRefinement.saliencyUsable(FloatArray(s * s) { if (it == 5) 1f else 0f }, s, null, 32))
+    }
+
+    @Test fun probabilitiesBecomeBoundedMargins() {
+        val m = SemanticMaskRefinement.probabilityToMargins(floatArrayOf(0f, 0.5f, 1f))
+        assertEquals(-12f, m[0], 1e-6f)
+        assertEquals(0f, m[1], 1e-5f)
+        assertEquals(12f, m[2], 1e-6f)
+    }
 }

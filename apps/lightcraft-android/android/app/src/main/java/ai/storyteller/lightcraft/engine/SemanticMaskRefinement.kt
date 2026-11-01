@@ -148,6 +148,62 @@ internal object SemanticMaskRefinement {
         return soft
     }
 
+    /**
+     * Saliency model output (sigmoid 0..1) stretched to 0..1 as the model's authors
+     * do, or null when nothing in the photograph stands out (a raw peak below 0.5:
+     * stretching that would only amplify noise into a fake selection).
+     */
+    fun normaliseSaliency(raw: FloatArray): FloatArray? {
+        if (raw.isEmpty()) return null
+        var lo = Float.POSITIVE_INFINITY
+        var hi = Float.NEGATIVE_INFINITY
+        for (v in raw) { if (!v.isFinite()) return null; lo = min(lo, v); hi = max(hi, v) }
+        if (hi < 0.5f || hi - lo < 1e-4f) return null
+        return FloatArray(raw.size) { ((raw[it] - lo) / (hi - lo)).coerceIn(0f, 1f) }
+    }
+
+    /**
+     * Whether the salient-object map should define Select Subject.
+     *
+     * [sal] is [salSide]² over the photograph; [objectMargins] is the scene model's
+     * chosen non-person object (score margin, > 0 inside) on its [side]² grid, or null
+     * when the scene model found no selectable object.
+     *
+     * Not used when almost nothing stands out (under 0.4% of the frame), when nearly
+     * everything does (over 85%: no single subject), or when the salient part is a
+     * small piece of an object the scene model outlined (at least 60% of it lies inside
+     * that object, which is over four times larger) — white daisies, for example, where
+     * only the yellow centres stand out and the scene model's "flower" is the subject.
+     */
+    fun saliencyUsable(sal: FloatArray, salSide: Int, objectMargins: FloatArray?, side: Int): Boolean {
+        require(salSide > 1 && sal.size == salSide * salSide)
+        var salient = 0
+        for (v in sal) if (v > 0.5f) salient++
+        val area = salient.toFloat() / sal.size
+        if (area < 0.004f || area > 0.85f) return false
+        if (objectMargins == null) return true
+        require(side > 1 && objectMargins.size == side * side)
+        var objectCells = 0
+        for (v in objectMargins) if (v > 0f) objectCells++
+        val objectArea = objectCells.toFloat() / objectMargins.size
+        if (objectArea <= 0f) return true
+        var inside = 0
+        for (y in 0 until salSide) for (x in 0 until salSide) {
+            if (sal[y * salSide + x] <= 0.5f) continue
+            val m = bilinear(objectMargins, side, side,
+                (x + 0.5f) / salSide * side - 0.5f, (y + 0.5f) / salSide * side - 0.5f)
+            if (m > 0f) inside++
+        }
+        val partOfObject = inside >= salient * 0.6f && area * 4f < objectArea
+        return !partOfObject
+    }
+
+    /** A 0..1 map as clamped logits (±12), the evidence [refine] expects. */
+    fun probabilityToMargins(p: FloatArray): FloatArray = FloatArray(p.size) {
+        val q = p[it].coerceIn(1e-6f, 1f - 1e-6f)
+        kotlin.math.ln(q / (1f - q)).coerceIn(-12f, 12f)
+    }
+
     private fun bilinear(v: FloatArray, w: Int, h: Int, fx: Float, fy: Float): Float {
         val x = fx.coerceIn(0f, (w - 1).toFloat())
         val y = fy.coerceIn(0f, (h - 1).toFloat())

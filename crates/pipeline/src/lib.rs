@@ -36,6 +36,7 @@ pub mod geometry;
 pub mod local;
 pub mod lut;
 pub mod masks;
+pub mod mask_auto;
 pub mod optics;
 pub mod output;
 pub mod profiles;

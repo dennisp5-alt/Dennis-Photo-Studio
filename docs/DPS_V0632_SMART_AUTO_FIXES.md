@@ -1,7 +1,7 @@
 # LumaWorks v0.6.32 — Smart Auto fixes (handoff / resume notes)
 
 Branch: `experiment/lumaworks-v0.6.32-smart-auto-fixes` (from v0.6.30 `419271c`).
-App: "LumaWorks Auto Fix", `com.dennis.lumaworks.autofix.v0632`, 0.6.32-beta.5 (63205).
+App: "LumaWorks Auto Fix", `com.dennis.lumaworks.autofix.v0632`, 0.6.32-beta.6 (63206).
 It installs alongside the other test builds.
 
 ## Status (27 Oct 2026)
@@ -49,6 +49,27 @@ It installs alongside the other test builds.
   on 27 Oct (runs refused before starting). Since `e81eccf`, a push runs only the tests,
   A/B renders and the MODNet mask check; the APK and engine tests run only via Run workflow
   (`gh api -X POST repos/dennisp5-alt/Dennis-Photo-Studio/actions/workflows/dps-v0632-lumaworks-smart-auto-fixes.yml/dispatches -f ref=experiment/lumaworks-v0.6.32-smart-auto-fixes`).
+
+- beta.5 built (run 41353037055) and handed over 2 Nov.
+- beta.6 (2 Nov): Dennis: Select Subject is great on clear subjects but finds nothing on a yellow
+  protea, and spills onto leaves around pink daisies; asked for Auto inside each mask.
+  - Subject/Background for non-people now use a salient-object model, U²-Netp (Apache-2.0, 4.6 MB,
+    rembg release asset `u2netp.onnx`, sha256 309c8469…ddd8, packaged as `assets/u2netp_salient.onnx`),
+    320² over the stretched photo, min-max normalised (null if raw peak < 0.5), refined with the
+    joint bilateral upsampler to 512². Falls back to the scene model when saliency covers < 0.4% or
+    > 85% of the frame, or is a small part (≥ 60% inside, < ¼ the area) of the scene model's chosen
+    object (white daisies: only the centres are salient). People keep MODNet/SegFormer.
+    Tested offline on Dennis's 10 photos + the protea (session only): protea, orange protea, red
+    flower, fire, kids on tubes, portraits all selected well; white daisies → scene model.
+  - Per-mask Auto: `crates/pipeline/src/mask_auto.rs` + engine `mask.auto` + Masking's new first
+    section "Auto". Measures the mask's region on 192 px renders weighted by the mask's own alpha.
+    Subject: median toward (rest + 10) in 105..135 (±1.5 EV; low-key max +1); Background: only
+    darkened to 12 below the subject, louder colour calmed; Sky: never brightened, washed-out brought
+    to 188, pale blue gets saturation, flat gets Dehaze +12. Then highlights recovery, shadows,
+    blacks, whites (each only as far as needed, new-clipping guarded), saturation. Other local
+    sliders are kept. Android's semantic masks are Object segmentations named "Select Sky/…": the
+    name decides the kind.
+  - CI eval branch gains `saliency/` and `mask_auto/` (Kodak only).
 
 ## Next steps (if resuming)
 0. When minutes are back: dispatch the workflow; check eval branch masks/ (MODNet overlays,
