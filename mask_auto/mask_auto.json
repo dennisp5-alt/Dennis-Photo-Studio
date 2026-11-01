@@ -1,0 +1,1778 @@
+[
+  {
+    "Select Background": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 0.0,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -30.531874841582304,
+        "chroma": 0.12472094325658646,
+        "median": 118.33419999999998,
+        "p01": 39.6298,
+        "p10": 55.417199999999994,
+        "p99": 178.93380000000002,
+        "white_clip": 0.0
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -30.531874841582304,
+        "chroma": 0.12472094325658646,
+        "median": 118.33419999999998,
+        "p01": 39.6298,
+        "p10": 55.417199999999994,
+        "p99": 178.93380000000002,
+        "white_clip": 0.0
+      },
+      "coverage": 0.9915181078941684,
+      "kind": "background",
+      "notes": [
+        "already well balanced"
+      ],
+      "rest_median": null
+    },
+    "Select Subject": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 1.4,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -86.44662881039747,
+        "chroma": 0.3409773413065436,
+        "median": 126.18739999999998,
+        "p01": 49.553599999999996,
+        "p10": 99.70839999999998,
+        "p99": 227.84040000000002,
+        "white_clip": 0.011602878169779217
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -65.59394026362718,
+        "chroma": 0.2589392929021305,
+        "median": 91.74119999999999,
+        "p01": 47.8384,
+        "p10": 74.8082,
+        "p99": 186.8484,
+        "white_clip": 0.0
+      },
+      "coverage": 0.00848205167483622,
+      "kind": "subject",
+      "notes": [
+        "brightened"
+      ],
+      "rest_median": 118.33419999999998
+    },
+    "photo": "a_orig_kodim01"
+  },
+  {
+    "Select Background": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 0.0,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -112.03055384982926,
+        "chroma": 0.43933550529341275,
+        "median": 71.514,
+        "p01": 35.4366,
+        "p10": 59.095400000000005,
+        "p99": 107.4918,
+        "white_clip": 0.0
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -112.03055384982926,
+        "chroma": 0.43933550529341275,
+        "median": 71.514,
+        "p01": 35.4366,
+        "p10": 59.095400000000005,
+        "p99": 107.4918,
+        "white_clip": 0.0
+      },
+      "coverage": 0.9859102136948522,
+      "kind": "background",
+      "notes": [
+        "already well balanced"
+      ],
+      "rest_median": null
+    },
+    "Select Subject": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": -0.5,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 9.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 40.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -49.873680390978436,
+        "chroma": 0.19676212341630833,
+        "median": 159.9584,
+        "p01": 62.2096,
+        "p10": 115.3078,
+        "p99": 224.5396,
+        "white_clip": 0.0
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -51.684132941750086,
+        "chroma": 0.20394126785186653,
+        "median": 185.73260000000002,
+        "p01": 67.2096,
+        "p10": 134.24079999999998,
+        "p99": 247.32699999999997,
+        "white_clip": 0.0
+      },
+      "coverage": 0.014089786305147055,
+      "kind": "subject",
+      "notes": [
+        "darkened",
+        "brightened whites",
+        "added colour"
+      ],
+      "rest_median": 71.514
+    },
+    "photo": "a_orig_kodim02"
+  },
+  {
+    "Select Background": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 0.0,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -18.251882807912786,
+        "chroma": 0.12213036564343595,
+        "median": 98.11479999999999,
+        "p01": 35.1552,
+        "p10": 55.0928,
+        "p99": 201.9166,
+        "white_clip": 0.0002620715881615655
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -18.251882807912786,
+        "chroma": 0.12213036564343595,
+        "median": 98.11479999999999,
+        "p01": 35.1552,
+        "p10": 55.0928,
+        "p99": 201.9166,
+        "white_clip": 0.0002620715881615655
+      },
+      "coverage": 0.8276032092523745,
+      "kind": "background",
+      "notes": [
+        "already well balanced"
+      ],
+      "rest_median": 109.56859999999999
+    },
+    "Select Subject": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 0.0,
+        "highlights": -4.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -118.12147181448881,
+        "chroma": 0.4857578690198192,
+        "median": 109.13179999999998,
+        "p01": 28.788999999999994,
+        "p10": 60.0534,
+        "p99": 234.58399999999997,
+        "white_clip": 0.0001719366009342339
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -118.84605447324216,
+        "chroma": 0.4887543403741633,
+        "median": 109.56859999999999,
+        "p01": 28.788999999999994,
+        "p10": 60.0534,
+        "p99": 238.7508,
+        "white_clip": 0.032122403989675294
+      },
+      "coverage": 0.1723982268688579,
+      "kind": "subject",
+      "notes": [
+        "brightening held back to avoid clipping",
+        "recovered highlights"
+      ],
+      "rest_median": 98.11479999999999
+    },
+    "photo": "a_orig_kodim03"
+  },
+  {
+    "Select Background": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": -0.6,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -27.22563114598266,
+        "chroma": 0.13793559251128318,
+        "median": 107.3106,
+        "p01": 25.7178,
+        "p10": 58.7038,
+        "p99": 181.33440000000002,
+        "white_clip": 0.0
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -29.992103914371388,
+        "chroma": 0.15391812947010783,
+        "median": 121.6736,
+        "p01": 29.2112,
+        "p10": 64.3902,
+        "p99": 206.68219999999997,
+        "white_clip": 0.0008241857302544324
+      },
+      "coverage": 0.24832707822708766,
+      "kind": "background",
+      "notes": [
+        "darkened"
+      ],
+      "rest_median": 81.07740000000001
+    },
+    "Select Subject": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 0.6,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 40.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -71.4117405011248,
+        "chroma": 0.2882030818771942,
+        "median": 97.644,
+        "p01": 42.28339999999999,
+        "p10": 59.580000000000005,
+        "p99": 207.58479999999997,
+        "white_clip": 0.0147434634389133
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -60.72769233448549,
+        "chroma": 0.24596953240122388,
+        "median": 81.07740000000001,
+        "p01": 34.2204,
+        "p10": 48.882999999999996,
+        "p99": 172.8212,
+        "white_clip": 0.00043207632739798333
+      },
+      "coverage": 0.751681857638799,
+      "kind": "subject",
+      "notes": [
+        "brightening held back to avoid clipping",
+        "brightened",
+        "brightened whites"
+      ],
+      "rest_median": 121.6736
+    },
+    "photo": "a_orig_kodim04"
+  },
+  {
+    "Select Background": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": -0.6,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -20.1520604675626,
+        "chroma": 0.09956517193336191,
+        "median": 70.4838,
+        "p01": 11.2664,
+        "p10": 34.7328,
+        "p99": 189.7658,
+        "white_clip": 0.0
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -23.542443521768284,
+        "chroma": 0.11574808927294904,
+        "median": 85.2452,
+        "p01": 15.4068,
+        "p10": 41.6964,
+        "p99": 210.6988,
+        "white_clip": 0.0007824877244556483
+      },
+      "coverage": 0.44727376302082944,
+      "kind": "background",
+      "notes": [
+        "darkened"
+      ],
+      "rest_median": 72.97879999999999
+    },
+    "Select Subject": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 0.3,
+        "highlights": -11.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 15.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -28.8172381443088,
+        "chroma": 0.13744392870227906,
+        "median": 79.4022,
+        "p01": 18.9082,
+        "p10": 35.6154,
+        "p99": 240.64159999999998,
+        "white_clip": 0.009968181545991689
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -23.690436441345533,
+        "chroma": 0.11261695358885487,
+        "median": 72.97879999999999,
+        "p01": 16.700799999999997,
+        "p10": 33.343799999999995,
+        "p99": 232.38839999999996,
+        "white_clip": 0.0017999310923199347
+      },
+      "coverage": 0.5527311836192647,
+      "kind": "subject",
+      "notes": [
+        "brightening held back to avoid clipping",
+        "brightened",
+        "recovered highlights",
+        "added colour"
+      ],
+      "rest_median": 85.2452
+    },
+    "photo": "a_orig_kodim05"
+  },
+  {
+    "Select Background": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 0.0,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -30.171626786946323,
+        "chroma": 0.1285564852359994,
+        "median": 118.2528,
+        "p01": 37.9198,
+        "p10": 61.50379999999999,
+        "p99": 175.18699999999998,
+        "white_clip": 0.0
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -30.171626786946323,
+        "chroma": 0.1285564852359994,
+        "median": 118.2528,
+        "p01": 37.9198,
+        "p10": 61.50379999999999,
+        "p99": 175.18699999999998,
+        "white_clip": 0.0
+      },
+      "coverage": 0.9658953099468911,
+      "kind": "background",
+      "notes": [
+        "already well balanced"
+      ],
+      "rest_median": 140.4472
+    },
+    "Select Subject": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 0.0,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -73.11186901213779,
+        "chroma": 0.286858186077714,
+        "median": 140.4472,
+        "p01": 64.8244,
+        "p10": 96.31339999999999,
+        "p99": 222.84820000000002,
+        "white_clip": 0.003582140070138486
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -73.11186901213779,
+        "chroma": 0.286858186077714,
+        "median": 140.4472,
+        "p01": 64.8244,
+        "p10": 96.31339999999999,
+        "p99": 222.84820000000002,
+        "white_clip": 0.003582140070138486
+      },
+      "coverage": 0.03410484962214045,
+      "kind": "subject",
+      "notes": [
+        "already well balanced"
+      ],
+      "rest_median": 118.2528
+    },
+    "photo": "a_orig_kodim07"
+  },
+  {
+    "Select Background": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 0.0,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -13.157115340284477,
+        "chroma": 0.06428979661411156,
+        "median": 88.84079999999999,
+        "p01": 17.2808,
+        "p10": 33.705999999999996,
+        "p99": 183.4444,
+        "white_clip": 0.0
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -13.157115340284477,
+        "chroma": 0.06428979661411156,
+        "median": 88.84079999999999,
+        "p01": 17.2808,
+        "p10": 33.705999999999996,
+        "p99": 183.4444,
+        "white_clip": 0.0
+      },
+      "coverage": 0.7009819878472431,
+      "kind": "background",
+      "notes": [
+        "already well balanced"
+      ],
+      "rest_median": 108.316
+    },
+    "Select Subject": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 0.0,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 40.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -93.80420526154404,
+        "chroma": 0.3812599652006913,
+        "median": 108.316,
+        "p01": 26.9054,
+        "p10": 50.3542,
+        "p99": 224.29919999999998,
+        "white_clip": 0.004691741274824719
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -92.84897923648086,
+        "chroma": 0.3775233939307912,
+        "median": 108.316,
+        "p01": 26.9054,
+        "p10": 50.3542,
+        "p99": 212.1616,
+        "white_clip": 0.00013620150558746623
+      },
+      "coverage": 0.29901833129085,
+      "kind": "subject",
+      "notes": [
+        "brightened whites"
+      ],
+      "rest_median": 88.84079999999999
+    },
+    "photo": "a_orig_kodim14"
+  },
+  {
+    "Select Background": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": -0.6,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": -7.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -15.850209177409614,
+        "chroma": 0.14540916410678578,
+        "median": 172.6794,
+        "p01": 6.0618,
+        "p10": 32.4396,
+        "p99": 212.0,
+        "white_clip": 0.0
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -19.0648608543371,
+        "chroma": 0.18217408057706316,
+        "median": 206.83419999999998,
+        "p01": 8.3414,
+        "p10": 39.132600000000004,
+        "p99": 254.0,
+        "white_clip": 0.22943553334554534
+      },
+      "coverage": 0.4989434934129536,
+      "kind": "background",
+      "notes": [
+        "darkened",
+        "calmed colour"
+      ],
+      "rest_median": 53.025
+    },
+    "Select Subject": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 1.35,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 15.0,
+        "shadows": 40.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -43.40233422162821,
+        "chroma": 0.21109743655191207,
+        "median": 79.08,
+        "p01": 21.104,
+        "p10": 36.8902,
+        "p99": 251.9022,
+        "white_clip": 0.017296963446758313
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -27.586390484644017,
+        "chroma": 0.1332453020827924,
+        "median": 53.025,
+        "p01": 6.917400000000001,
+        "p10": 18.3282,
+        "p99": 194.3436,
+        "white_clip": 0.0006883729349608095
+      },
+      "coverage": 0.5010596979677856,
+      "kind": "subject",
+      "notes": [
+        "brightening held back to avoid clipping",
+        "brightened",
+        "opened shadows",
+        "added colour"
+      ],
+      "rest_median": 206.83419999999998
+    },
+    "photo": "a_orig_kodim15"
+  },
+  {
+    "Select Background": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": -0.6,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -5.754756201682688,
+        "chroma": 0.058391957990315796,
+        "median": 85.23899999999999,
+        "p01": 30.7072,
+        "p10": 43.355399999999996,
+        "p99": 192.8192,
+        "white_clip": 0.0
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -6.781095236954294,
+        "chroma": 0.0691789837001495,
+        "median": 103.9634,
+        "p01": 39.350199999999994,
+        "p10": 54.0694,
+        "p99": 231.74299999999997,
+        "white_clip": 0.002260051319741997
+      },
+      "coverage": 0.9722207861008787,
+      "kind": "background",
+      "notes": [
+        "darkened"
+      ],
+      "rest_median": 76.5204
+    },
+    "Select Subject": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 1.5,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 15.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 40.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -54.42020144783391,
+        "chroma": 0.21511357601763548,
+        "median": 108.2328,
+        "p01": 52.10719999999999,
+        "p10": 74.1754,
+        "p99": 222.91259999999997,
+        "white_clip": 0.0
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -36.35401970534497,
+        "chroma": 0.14383491445008761,
+        "median": 76.5204,
+        "p01": 39.900999999999996,
+        "p10": 54.7514,
+        "p99": 152.27639999999997,
+        "white_clip": 0.0
+      },
+      "coverage": 0.02777969260620906,
+      "kind": "subject",
+      "notes": [
+        "brightened",
+        "brightened whites",
+        "added colour"
+      ],
+      "rest_median": 103.9634
+    },
+    "photo": "a_orig_kodim16"
+  },
+  {
+    "Select Background": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 0.0,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -14.103598315737731,
+        "chroma": 0.09703577893273943,
+        "median": 101.596,
+        "p01": 47.4914,
+        "p10": 64.8918,
+        "p99": 161.3824,
+        "white_clip": 0.0
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -14.103598315737731,
+        "chroma": 0.09703577893273943,
+        "median": 101.596,
+        "p01": 47.4914,
+        "p10": 64.8918,
+        "p99": 161.3824,
+        "white_clip": 0.0
+      },
+      "coverage": 0.6951114430147679,
+      "kind": "background",
+      "notes": [
+        "already well balanced"
+      ],
+      "rest_median": 160.93359999999998
+    },
+    "Select Subject": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 0.0,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 11.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -52.2082478299106,
+        "chroma": 0.20514915682831797,
+        "median": 160.7446,
+        "p01": 23.9908,
+        "p10": 79.1324,
+        "p99": 226.4162,
+        "white_clip": 0.004134026057304178
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -46.87471768808709,
+        "chroma": 0.18421082502572522,
+        "median": 160.93359999999998,
+        "p01": 23.778200000000002,
+        "p10": 79.7606,
+        "p99": 226.64079999999998,
+        "white_clip": 0.0005327974274842667
+      },
+      "coverage": 0.3048896739685527,
+      "kind": "subject",
+      "notes": [
+        "added colour"
+      ],
+      "rest_median": 101.596
+    },
+    "photo": "a_orig_kodim19"
+  },
+  {
+    "Select Background": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": -0.5,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -21.284753054264733,
+        "chroma": 0.084135381107374,
+        "median": 215.0426,
+        "p01": 31.6298,
+        "p10": 60.0546,
+        "p99": 219.0,
+        "white_clip": 4.075716724490138e-6
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -24.448380659521053,
+        "chroma": 0.09664252883374548,
+        "median": 250.11079999999998,
+        "p01": 37.7674,
+        "p10": 71.1044,
+        "p99": 254.0,
+        "white_clip": 0.5815376242996603
+      },
+      "coverage": 0.8224848728554021,
+      "kind": "background",
+      "notes": [
+        "darkened"
+      ],
+      "rest_median": 78.6902
+    },
+    "Select Subject": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 0.2,
+        "highlights": -15.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 15.0,
+        "shadows": 40.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -38.4881737673306,
+        "chroma": 0.1569698649466704,
+        "median": 83.9118,
+        "p01": 19.4212,
+        "p10": 32.846399999999996,
+        "p99": 226.51639999999998,
+        "white_clip": 0.028670528563320048
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -32.582413355074806,
+        "chroma": 0.13290712564271198,
+        "median": 78.6902,
+        "p01": 12.2808,
+        "p10": 24.5616,
+        "p99": 228.95459999999997,
+        "white_clip": 0.02520022702907203
+      },
+      "coverage": 0.17751640369689745,
+      "kind": "subject",
+      "notes": [
+        "brightening held back to avoid clipping",
+        "brightened",
+        "recovered highlights",
+        "opened shadows",
+        "added colour"
+      ],
+      "rest_median": 250.11079999999998
+    },
+    "photo": "a_orig_kodim20"
+  },
+  {
+    "Select Background": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": -0.6,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": 4.863716047355203,
+        "chroma": 0.1047886423561301,
+        "median": 103.8992,
+        "p01": 26.195400000000003,
+        "p10": 50.4476,
+        "p99": 165.4626,
+        "white_clip": 0.0
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": 5.819749894834706,
+        "chroma": 0.12438257811505005,
+        "median": 126.07399999999998,
+        "p01": 33.8424,
+        "p10": 62.5496,
+        "p99": 197.85,
+        "white_clip": 0.001462965248964279
+      },
+      "coverage": 0.9385751761642002,
+      "kind": "background",
+      "notes": [
+        "darkened"
+      ],
+      "rest_median": 107.18619999999999
+    },
+    "Select Subject": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 0.0,
+        "highlights": -7.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 14.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -44.194037693822374,
+        "chroma": 0.18359484864735012,
+        "median": 106.1832,
+        "p01": 35.1614,
+        "p10": 59.633799999999994,
+        "p99": 244.112,
+        "white_clip": 0.00013856100475029032
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -39.53572128846072,
+        "chroma": 0.16454448928325824,
+        "median": 107.18619999999999,
+        "p01": 35.19539999999999,
+        "p10": 59.992,
+        "p99": 252.18419999999998,
+        "white_clip": 0.16497648384457234
+      },
+      "coverage": 0.06142498340481959,
+      "kind": "subject",
+      "notes": [
+        "brightening held back to avoid clipping",
+        "recovered highlights",
+        "added colour"
+      ],
+      "rest_median": 126.07399999999998
+    },
+    "photo": "a_orig_kodim21"
+  },
+  {
+    "Select Background": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": -0.35,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -26.21882313369071,
+        "chroma": 0.12490799516008205,
+        "median": 96.50379999999998,
+        "p01": 36.2756,
+        "p10": 60.279399999999995,
+        "p99": 164.04860000000002,
+        "white_clip": 0.000013376074945970017
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -28.915378847896523,
+        "chroma": 0.1378414937286741,
+        "median": 108.11840000000001,
+        "p01": 41.678399999999996,
+        "p10": 67.96279999999999,
+        "p99": 182.5592,
+        "white_clip": 0.0005862287779653795
+      },
+      "coverage": 0.894876078686654,
+      "kind": "background",
+      "notes": [
+        "darkened"
+      ],
+      "rest_median": 108.6218
+    },
+    "Select Subject": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 0.0,
+        "highlights": -4.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -65.8413157581728,
+        "chroma": 0.2583157384983835,
+        "median": 108.6218,
+        "p01": 40.011799999999994,
+        "p10": 66.2072,
+        "p99": 235.7206,
+        "white_clip": 0.0
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -66.3560418680826,
+        "chroma": 0.26033421844218535,
+        "median": 108.6218,
+        "p01": 40.011799999999994,
+        "p10": 66.2072,
+        "p99": 240.07759999999996,
+        "white_clip": 0.2381704672646365
+      },
+      "coverage": 0.10512455958946053,
+      "kind": "subject",
+      "notes": [
+        "brightening held back to avoid clipping",
+        "recovered highlights"
+      ],
+      "rest_median": 108.11840000000001
+    },
+    "photo": "a_orig_kodim22"
+  },
+  {
+    "Select Background": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": -0.6,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -19.410106209358364,
+        "chroma": 0.13783869477372376,
+        "median": 86.081,
+        "p01": 40.340999999999994,
+        "p10": 51.129599999999996,
+        "p99": 200.1512,
+        "white_clip": 3.4442268399589735e-6
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -23.088500468415027,
+        "chroma": 0.16278246712118177,
+        "median": 104.7004,
+        "p01": 50.268800000000006,
+        "p10": 63.4052,
+        "p99": 240.3278,
+        "white_clip": 0.010283401582012896
+      },
+      "coverage": 0.6032612719567497,
+      "kind": "background",
+      "notes": [
+        "darkened"
+      ],
+      "rest_median": 85.36779999999999
+    },
+    "Select Subject": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 0.0,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -80.01313337206905,
+        "chroma": 0.35316120010275404,
+        "median": 85.36779999999999,
+        "p01": 37.9238,
+        "p10": 54.5616,
+        "p99": 227.088,
+        "white_clip": 0.019230707329517437
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -80.01313337206905,
+        "chroma": 0.35316120010275404,
+        "median": 85.36779999999999,
+        "p01": 37.9238,
+        "p10": 54.5616,
+        "p99": 227.088,
+        "white_clip": 0.019230707329517437
+      },
+      "coverage": 0.3967411215788324,
+      "kind": "subject",
+      "notes": [
+        "brightening held back to avoid clipping"
+      ],
+      "rest_median": 104.7004
+    },
+    "photo": "a_orig_kodim23"
+  },
+  {
+    "Select Background": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": -0.6,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -14.790761632916153,
+        "chroma": 0.07995582537475081,
+        "median": 94.0826,
+        "p01": 35.9238,
+        "p10": 52.984,
+        "p99": 212.0,
+        "white_clip": 0.0
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -17.41458452981503,
+        "chroma": 0.09436972048983137,
+        "median": 114.0478,
+        "p01": 40.406800000000004,
+        "p10": 64.8292,
+        "p99": 254.0,
+        "white_clip": 0.08431873938773916
+      },
+      "coverage": 0.41008141212213056,
+      "kind": "background",
+      "notes": [
+        "darkened"
+      ],
+      "rest_median": 93.42639999999999
+    },
+    "Select Subject": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 0.2,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 15.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -23.674578431805276,
+        "chroma": 0.09573148957170612,
+        "median": 99.6636,
+        "p01": 34.5524,
+        "p10": 59.3346,
+        "p99": 238.75019999999998,
+        "white_clip": 0.015190751520213791
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -19.712105704650035,
+        "chroma": 0.0796982679519331,
+        "median": 93.42639999999999,
+        "p01": 32.6246,
+        "p10": 55.493399999999994,
+        "p99": 224.6768,
+        "white_clip": 0.0007857612054909791
+      },
+      "coverage": 0.589919704861086,
+      "kind": "subject",
+      "notes": [
+        "brightening held back to avoid clipping",
+        "brightened",
+        "added colour"
+      ],
+      "rest_median": 114.0478
+    },
+    "photo": "a_orig_kodim24"
+  },
+  {
+    "Select Background": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": -0.6,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -13.24202225448846,
+        "chroma": 0.06779089984801129,
+        "median": 44.467,
+        "p01": 4.9908,
+        "p10": 17.9828,
+        "p99": 129.3984,
+        "white_clip": 0.0
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -15.543021644559111,
+        "chroma": 0.07942485642996744,
+        "median": 54.761,
+        "p01": 7.203399999999999,
+        "p10": 23.151000000000003,
+        "p99": 151.065,
+        "white_clip": 0.0
+      },
+      "coverage": 0.5546721813726617,
+      "kind": "background",
+      "notes": [
+        "darkened"
+      ],
+      "rest_median": 42.9828
+    },
+    "Select Subject": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 1.5,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 15.0,
+        "shadows": 40.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -29.37972473712118,
+        "chroma": 0.13189367128925192,
+        "median": 71.0224,
+        "p01": 18.9976,
+        "p10": 37.5472,
+        "p99": 225.02900000000002,
+        "white_clip": 0.006786181741621737
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -17.00011101917493,
+        "chroma": 0.07662656527859403,
+        "median": 42.9828,
+        "p01": 7.3386,
+        "p10": 18.2034,
+        "p99": 150.4742,
+        "white_clip": 0.0
+      },
+      "coverage": 0.4453324461294963,
+      "kind": "subject",
+      "notes": [
+        "brightened",
+        "opened shadows",
+        "added colour"
+      ],
+      "rest_median": 54.761
+    },
+    "photo": "b_under13_kodim05"
+  },
+  {
+    "Select Background": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 0.0,
+        "highlights": 0.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -38.01298762417512,
+        "chroma": 0.16184583787981713,
+        "median": 153.325,
+        "p01": 51.6736,
+        "p10": 81.5304,
+        "p99": 230.74579999999997,
+        "white_clip": 0.008458871481298348
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -38.01298762417512,
+        "chroma": 0.16184583787981713,
+        "median": 153.325,
+        "p01": 51.6736,
+        "p10": 81.5304,
+        "p99": 230.74579999999997,
+        "white_clip": 0.008458871481298348
+      },
+      "coverage": 0.9697347005207982,
+      "kind": "background",
+      "notes": [
+        "already well balanced"
+      ],
+      "rest_median": 165.3352
+    },
+    "Select Subject": {
+      "adjust": {
+        "amount": 100.0,
+        "blacks": 0.0,
+        "clarity": 0.0,
+        "color_hue": 0.0,
+        "color_sat": 0.0,
+        "contrast": 0.0,
+        "defringe": 0.0,
+        "dehaze": 0.0,
+        "exposure": 0.0,
+        "highlights": -9.0,
+        "hue": 0.0,
+        "moire": 0.0,
+        "noise": 0.0,
+        "saturation": 0.0,
+        "shadows": 0.0,
+        "sharpness": 0.0,
+        "temp": 0.0,
+        "texture": 0.0,
+        "tint": 0.0,
+        "whites": 0.0
+      },
+      "after": {
+        "black_clip": 0.0,
+        "blueness": -79.62014522167587,
+        "chroma": 0.3130020167689253,
+        "median": 162.04819999999998,
+        "p01": 70.67080000000001,
+        "p10": 107.77560000000001,
+        "p99": 245.84079999999997,
+        "white_clip": 0.0032074856077908744
+      },
+      "before": {
+        "black_clip": 0.0,
+        "blueness": -81.10821945837736,
+        "chroma": 0.31882732244241213,
+        "median": 165.3352,
+        "p01": 70.67080000000001,
+        "p10": 108.90899999999999,
+        "p99": 251.6856,
+        "white_clip": 0.14275523013709243
+      },
+      "coverage": 0.030265299479166063,
+      "kind": "subject",
+      "notes": [
+        "recovered highlights"
+      ],
+      "rest_median": 153.325
+    },
+    "photo": "e_over08_kodim07"
+  }
+]

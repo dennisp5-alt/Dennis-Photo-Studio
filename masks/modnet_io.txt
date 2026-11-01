@@ -1,0 +1,1 @@
+input input ['batch_size', 3, 'height', 'width'] / output output ['batch_size', 1, 'height', 'width']
