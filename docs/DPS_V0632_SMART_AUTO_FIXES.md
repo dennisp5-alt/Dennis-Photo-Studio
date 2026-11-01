@@ -71,6 +71,8 @@ It installs alongside the other test builds.
     name decides the kind.
   - CI eval branch gains `saliency/` and `mask_auto/` (Kodak only).
 
+- beta.6 built 2 Nov (run 41363132026, APK artifact 13106333187); handed to Dennis to test the protea and per-mask Auto.
+
 ## Next steps (if resuming)
 0. When minutes are back: dispatch the workflow; check eval branch masks/ (MODNet overlays,
    modnet_io.txt input/output names), Kotlin tests, then send Dennis the beta.5 APK link and
