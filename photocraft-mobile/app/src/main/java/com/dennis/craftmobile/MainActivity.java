@@ -68,7 +68,7 @@ public final class MainActivity extends Activity {
         int rotation = 0;
         float straightenAngle = 0f;
         float perspectiveVertical, perspectiveHorizontal;
-        String look = "Original";
+        String look = "None";
         float[] autoZones;  // Immutable zone map measured on original preview.
         float autoStrength = 100f;
         boolean autoLowKey; // 16x16 scene judgement, no semantic portrait mask.
@@ -80,6 +80,21 @@ public final class MainActivity extends Activity {
         // Colour gains estimated only when spatial neutral evidence is convincing.
         float wbRed = 1f, wbGreen = 1f, wbBlue = 1f, wbConfidence;
         boolean wbPicked;
+        // v0.6.21: Auto keeps its own tone values. The Exposure…Tint sliders are
+        // the photographer's own adjustments on top of Auto, with the same scale
+        // whether Auto is on or not. A Look only changes these sliders.
+        float autoExposure, autoContrast, autoHighlights, autoShadows;
+        // Free crop, normalised to the rotated + straightened frame. ratio is
+        // the aspect lock used while dragging (0 = free).
+        float cropLeft = 0f, cropTop = 0f, cropRight = 1f, cropBottom = 1f;
+        boolean autoOn() {
+            return autoZones != null &&
+                    autoZones.length == SpatialAuto64.SIZE * SpatialAuto64.SIZE;
+        }
+        boolean cropped() {
+            return cropLeft > .0005f || cropTop > .0005f ||
+                    cropRight < .9995f || cropBottom < .9995f;
+        }
         Edit copy() {
             Edit d = new Edit();
             d.exposure = exposure; d.contrast = contrast; d.highlights = highlights;
@@ -100,11 +115,17 @@ public final class MainActivity extends Activity {
             d.wbRed = wbRed; d.wbGreen = wbGreen; d.wbBlue = wbBlue;
             d.wbConfidence = wbConfidence;
             d.wbPicked=wbPicked;
+            d.autoExposure = autoExposure; d.autoContrast = autoContrast;
+            d.autoHighlights = autoHighlights; d.autoShadows = autoShadows;
+            d.cropLeft = cropLeft; d.cropTop = cropTop;
+            d.cropRight = cropRight; d.cropBottom = cropBottom;
             return d;
         }
     }
 
     private Uri input;
+    private String inputKey;
+    private final ExecutorService storeWork = Executors.newSingleThreadExecutor();
     private Bitmap previewSource, fastPreviewSource, renderedPreview;
     private Edit edit = new Edit();
     private final ArrayDeque<Edit> undo = new ArrayDeque<>();
@@ -128,6 +149,11 @@ public final class MainActivity extends Activity {
     private int cropSection=1; // 0 Crop, 1 Straighten, 2 Transform
     private int guideStep;
     private float guideX,guideY,guideDownX,guideDownY;
+    // Free crop dragging: 0 none, 1 move, 2..5 corners (TL,TR,BL,BR), 6..9 edges (L,T,R,B).
+    private int cropHandle;
+    private float cropDownX,cropDownY;
+    private float[] cropAtDown;
+    private Edit cropUndo;
     private TextView openPlaceholder, status, photoCounter;
     // Only user-granted picker URIs. Edits are session-local, original files untouched.
     private final ArrayList<Uri> photoSelection = new ArrayList<>();
@@ -191,7 +217,48 @@ public final class MainActivity extends Activity {
         w.setNavigationBarColor(Color.BLACK);
         w.getDecorView().setSystemUiVisibility(0);
         buildLayout();
-        handleIncomingImage(getIntent());
+        java.util.ArrayList<Uri> restored = state == null ? null :
+                (Build.VERSION.SDK_INT >= 33 ? state.getParcelableArrayList("photos", Uri.class)
+                        : state.getParcelableArrayList("photos"));
+        if (restored != null && !restored.isEmpty()) {
+            // Android closed the app in the background: reopen the same photo
+            // with its saved edits instead of an empty editor.
+            photoSelection.addAll(restored);
+            photoIndex = Math.max(0, Math.min(restored.size() - 1, state.getInt("index", 0)));
+            activeAlbumName = state.getString("album", "");
+            editingFromAnotherApp = state.getBoolean("fromOtherApp", false);
+            jpegQuality = state.getInt("quality", 95);
+            loadChosenPhoto(photoSelection.get(photoIndex));
+        } else {
+            handleIncomingImage(getIntent());
+        }
+    }
+
+    @Override protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        if (photoIndex >= 0 && !photoSelection.isEmpty()) {
+            out.putParcelableArrayList("photos", new ArrayList<>(photoSelection));
+            out.putInt("index", photoIndex);
+            out.putString("album", activeAlbumName);
+            out.putBoolean("fromOtherApp", editingFromAnotherApp);
+            out.putInt("quality", jpegQuality);
+        }
+    }
+
+    @Override protected void onPause() {
+        storeCurrentEdit();
+        super.onPause();
+    }
+
+    /** Keep the current photo's edits on disk (background thread). */
+    private void storeCurrentEdit() {
+        if (input == null || inputKey == null) return;
+        String key = inputKey;
+        Edit snapshot = edit.copy();
+        editsByPhoto.put(input.toString(), snapshot);
+        try {
+            storeWork.execute(() -> EditStore.save(getApplicationContext(), key, snapshot));
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {}
     }
 
     @Override protected void onStart() {
@@ -357,6 +424,7 @@ public final class MainActivity extends Activity {
                         }
                     }
                 }
+                if(cropEditing())drawCropFrame(c);
                 if(!guideMode||guideStep==0)return;
                 android.graphics.Paint pen=new android.graphics.Paint(
                         android.graphics.Paint.ANTI_ALIAS_FLAG);
@@ -372,6 +440,7 @@ public final class MainActivity extends Activity {
             }
         };
         guideOverlay.setClickable(false);
+        guideOverlay.setOnTouchListener((v,event)->cropTouch(event));
         canvas.addView(guideOverlay,new FrameLayout.LayoutParams(-1,-1));
         photoCounter = label("",11,Color.WHITE);
         photoCounter.setPadding(dp(12),dp(6),dp(12),dp(6));
@@ -428,9 +497,11 @@ public final class MainActivity extends Activity {
             if(guideOverlay!=null)guideOverlay.invalidate();
         }
         if(newMode!=Mode.ADJUST)neutralPickMode=false;
+        boolean wasCropping=cropEditing();
         mode = newMode;
         drawTabs();
         drawControls();
+        if(wasCropping!=cropEditing()) {render();guideOverlay.invalidate();}
     }
 
     private void tab(String name, String glyph, boolean active, Runnable callback) {
@@ -461,19 +532,15 @@ public final class MainActivity extends Activity {
     }
 
     private Edit presetFor(String name) {
-        Edit v = new Edit();
-        v.look = name;
-        switch (name) {
-            case "Natural": v.contrast = 9; v.shadows = 10; v.saturation = 5; break;
-            case "Warm": v.contrast = 7; v.warmth = 24; v.saturation = 9; break;
-            case "Cool": v.contrast = 8; v.warmth = -25; v.saturation = 4; break;
-            case "Dramatic": v.contrast = 30; v.highlights = -24;
-                v.shadows = -12; v.saturation = -8; break;
-            case "B&W": v.contrast = 15; v.saturation = -100; break;
-        }
+        Edit v = edit.copy();
+        setLookSliders(v, name);
+        v.rotation = 0; v.straightenAngle = 0; v.perspectiveVertical = 0;
+        v.perspectiveHorizontal = 0; v.ratio = 0;
+        v.cropLeft = 0; v.cropTop = 0; v.cropRight = 1; v.cropBottom = 1;
+        v.luminanceNR = 0; v.colorNR = 0; v.sharpen = 0;
+        v.clarity = 0; v.texture = 0; v.dehaze = 0;
         return v;
     }
-
 
     // Preview-only sampling; never stretch the original photo into a forced 4:3 frame.
     private static Bitmap aspectSafeLookSample(Bitmap src) {
@@ -531,10 +598,10 @@ public final class MainActivity extends Activity {
         LinearLayout strip = new LinearLayout(this);
         strip.setGravity(Gravity.CENTER_VERTICAL);
         strip.setPadding(dp(4), dp(3), dp(4), dp(3));
-        action(strip, "Looks", () -> { mode = Mode.LOOKS; drawTabs(); drawControls(); }, false);
+        action(strip, "Looks", () -> selectMode(Mode.LOOKS), false);
         action(strip, "AUTO", this::autoTune, true);
-        action(strip, "Adjust", () -> { mode = Mode.ADJUST; drawTabs(); drawControls(); }, false);
-        action(strip, "Crop", () -> { mode = Mode.CROP; drawTabs(); drawControls(); }, false);
+        action(strip, "Adjust", () -> selectMode(Mode.ADJUST), false);
+        action(strip, "Crop", () -> selectMode(Mode.CROP), false);
         action(strip, "Q" + jpegQuality, this::chooseQuality, false);
         action(strip, "Export", () -> save(false), false);
         controls.addView(strip, new LinearLayout.LayoutParams(-1, dp(52)));
@@ -590,7 +657,7 @@ public final class MainActivity extends Activity {
                 dp(mode == Mode.ADJUST ? 224 : mode == Mode.CROP ? 260 : 189)));
         if (mode == Mode.LOOKS) {
             panelTitle("LOOKS", "Tap a style to apply");
-            addHorizontalChoices(new String[]{"Original", "Natural", "Warm", "Cool", "Dramatic", "B&W"},
+            addHorizontalChoices(new String[]{"None", "Natural", "Warm", "Cool", "Dramatic", "B&W"},
                     this::applyLook);
         } else if (mode == Mode.ADJUST) {
             panelTitle("ADJUSTMENTS", "64×64 intelligent detail controls");
@@ -600,7 +667,7 @@ public final class MainActivity extends Activity {
             LinearLayout options = new LinearLayout(this);
             String[] fields = adjustGroup == 1 ? DETAIL_FIELDS :
                     adjustGroup == 2 ? PRESENCE_FIELDS :
-                    ("Auto".equals(edit.look) ? 
+                    (edit.autoOn() ? 
                             new String[]{"Auto Strength","Exposure","Contrast","Highlights",
                                     "Shadows","Saturation","Warmth","Tint"} : TONE_FIELDS);
             for (String field : fields) {
@@ -634,7 +701,9 @@ public final class MainActivity extends Activity {
             strip.addView(option,lp);
             option.setOnClickListener(v->{
                 endGuide();
+                boolean wasCropping=cropEditing();
                 cropSection=section;
+                if(wasCropping!=cropEditing())render();
                 gridVisible=cropSection==2;
                 guideOverlay.invalidate();
                 drawControls();
@@ -646,16 +715,54 @@ public final class MainActivity extends Activity {
         else drawTransformControls();
     }
 
+    private boolean cropEditing() {
+        return mode==Mode.CROP && cropSection==0 && previewSource!=null && !guideMode;
+    }
+
+    /** Aspect of the rotated, straightened frame (straighten keeps the size). */
+    private float frameAspect() {
+        if(previewSource==null)return 1f;
+        int fw=PhotoPipeline.frameWidth(previewSource.getWidth(),previewSource.getHeight(),edit.rotation);
+        int fh=PhotoPipeline.frameHeight(previewSource.getWidth(),previewSource.getHeight(),edit.rotation);
+        return fw/(float)fh;
+    }
+
+    /** Largest rectangle of [ratio] (width/height in pixels) centred on the current crop. */
+    private void lockCropRatio(float ratio) {
+        edit.ratio=ratio;
+        if(ratio<=0)return;
+        float frame=frameAspect();
+        float wN=1f,hN=frame/ratio;
+        if(hN>1f){wN=ratio/frame;hN=1f;}
+        float cx=(edit.cropLeft+edit.cropRight)*.5f,cy=(edit.cropTop+edit.cropBottom)*.5f;
+        float l=clamp(cx-wN*.5f,0f,1f-wN),t=clamp(cy-hN*.5f,0f,1f-hN);
+        edit.cropLeft=l;edit.cropTop=t;edit.cropRight=l+wN;edit.cropBottom=t+hN;
+    }
+
+    /** Rotate 90° clockwise; the crop turns with the picture. */
+    private void rotateClockwise() {
+        float l=edit.cropLeft,t=edit.cropTop,r=edit.cropRight,b=edit.cropBottom;
+        edit.cropLeft=1f-b;edit.cropTop=l;edit.cropRight=1f-t;edit.cropBottom=r;
+        if(edit.ratio>0)edit.ratio=1f/edit.ratio;
+        edit.rotation=(edit.rotation+90)%360;
+    }
+
     private void drawCropRatios() {
         HorizontalScrollView scroll=new HorizontalScrollView(this);
         scroll.setHorizontalScrollBarEnabled(false);
         LinearLayout buttons=new LinearLayout(this);
         buttons.setPadding(dp(12),dp(8),dp(12),dp(8));
-        String[] ratios={"Original","1:1","4:5","16:9","Rotate 90°"};
+        String[] ratios={"Free","Original","1:1","4:5","16:9","Swap ⇄","Rotate 90°","Reset"};
+        float frame=frameAspect();
         for(String item:ratios) {
+            boolean active=("Free".equals(item)&&edit.ratio<=0)||
+                    ("Original".equals(item)&&edit.ratio>0&&Math.abs(edit.ratio-frame)<.002f)||
+                    ("1:1".equals(item)&&Math.abs(edit.ratio-1f)<.002f)||
+                    ("4:5".equals(item)&&Math.abs(edit.ratio-.8f)<.002f)||
+                    ("16:9".equals(item)&&Math.abs(edit.ratio-16f/9f)<.002f);
             TextView label=label(item,12,Color.WHITE);
             label.setPadding(dp(14),dp(9),dp(14),dp(9));
-            label.setBackground(background(Color.rgb(29,49,69),8));
+            label.setBackground(background(active?Color.rgb(30,76,121):Color.rgb(29,49,69),8));
             LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-2,dp(42));
             lp.setMargins(dp(3),0,dp(3),0);
             buttons.addView(label,lp);
@@ -663,21 +770,169 @@ public final class MainActivity extends Activity {
                 if(previewSource==null){openImage();return;}
                 checkpoint();
                 switch(item) {
-                    case "1:1":edit.ratio=1f;break;
-                    case "4:5":edit.ratio=.8f;break;
-                    case "16:9":edit.ratio=16f/9f;break;
-                    case "Rotate 90°":edit.rotation=(edit.rotation+90)%360;break;
-                    default:edit.ratio=0f;
+                    case "Free":edit.ratio=0f;break;
+                    case "Original":lockCropRatio(frameAspect());break;
+                    case "1:1":lockCropRatio(1f);break;
+                    case "4:5":lockCropRatio(.8f);break;
+                    case "16:9":lockCropRatio(16f/9f);break;
+                    case "Swap ⇄":
+                        if(edit.ratio>0)lockCropRatio(1f/edit.ratio);
+                        break;
+                    case "Rotate 90°":rotateClockwise();break;
+                    default:
+                        edit.ratio=0f;
+                        edit.cropLeft=0f;edit.cropTop=0f;edit.cropRight=1f;edit.cropBottom=1f;
                 }
-                render();drawControls();
+                render();drawControls();guideOverlay.invalidate();
             });
         }
         scroll.addView(buttons);
         controls.addView(scroll,new LinearLayout.LayoutParams(-1,dp(60)));
-        TextView hint=label("Rotation, straighten and perspective remain editable. "+
-                "Full-resolution exports use the same geometry.",12,Color.LTGRAY);
+        TextView hint=label("Drag the corners, edges or middle of the frame. "+
+                "A ratio locks the shape. Exports use the same crop.",12,Color.LTGRAY);
         hint.setPadding(dp(16),dp(12),dp(16),0);
         controls.addView(hint,new LinearLayout.LayoutParams(-1,dp(57)));
+    }
+
+    /** Crop rectangle in view coordinates {left, top, right, bottom}, or null. */
+    private float[] cropOnScreen() {
+        if(photo==null||photo.getDrawable()==null)return null;
+        int iw=photo.getDrawable().getIntrinsicWidth(),ih=photo.getDrawable().getIntrinsicHeight();
+        if(iw<=0||ih<=0)return null;
+        float[] p={edit.cropLeft*iw,edit.cropTop*ih,edit.cropRight*iw,edit.cropBottom*ih};
+        photo.getImageMatrix().mapPoints(p);
+        return p;
+    }
+
+    private void drawCropFrame(android.graphics.Canvas c) {
+        float[] r=cropOnScreen();
+        if(r==null)return;
+        android.graphics.Paint p=new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        p.setColor(Color.argb(150,0,0,0));
+        int vw=guideOverlay.getWidth(),vh=guideOverlay.getHeight();
+        c.drawRect(0,0,vw,r[1],p);
+        c.drawRect(0,r[3],vw,vh,p);
+        c.drawRect(0,r[1],r[0],r[3],p);
+        c.drawRect(r[2],r[1],vw,r[3],p);
+        p.setStyle(android.graphics.Paint.Style.STROKE);
+        p.setColor(Color.argb(120,255,255,255));
+        p.setStrokeWidth(dp(1));
+        for(int n=1;n<3;n++) {
+            float gx=r[0]+(r[2]-r[0])*n/3f,gy=r[1]+(r[3]-r[1])*n/3f;
+            c.drawLine(gx,r[1],gx,r[3],p);
+            c.drawLine(r[0],gy,r[2],gy,p);
+        }
+        p.setColor(Color.WHITE);
+        p.setStrokeWidth(dp(1.5f));
+        c.drawRect(r[0],r[1],r[2],r[3],p);
+        p.setStrokeWidth(dp(4));
+        float k=dp(18);
+        float[][] corners={{r[0],r[1],1,1},{r[2],r[1],-1,1},{r[0],r[3],1,-1},{r[2],r[3],-1,-1}};
+        for(float[] q:corners) {
+            c.drawLine(q[0],q[1],q[0]+k*q[2],q[1],p);
+            c.drawLine(q[0],q[1],q[0],q[1]+k*q[3],p);
+        }
+    }
+
+    private boolean cropTouch(MotionEvent event) {
+        if(!cropEditing())return false;
+        int action=event.getActionMasked();
+        if(action==MotionEvent.ACTION_DOWN) {
+            float[] r=cropOnScreen();
+            if(r==null)return false;
+            float x=event.getX(),y=event.getY(),grab=dp(30);
+            cropHandle=0;
+            boolean nearL=Math.abs(x-r[0])<grab,nearR=Math.abs(x-r[2])<grab;
+            boolean nearT=Math.abs(y-r[1])<grab,nearB=Math.abs(y-r[3])<grab;
+            boolean inX=x>r[0]-grab&&x<r[2]+grab,inY=y>r[1]-grab&&y<r[3]+grab;
+            if(nearL&&nearT)cropHandle=2;
+            else if(nearR&&nearT)cropHandle=3;
+            else if(nearL&&nearB)cropHandle=4;
+            else if(nearR&&nearB)cropHandle=5;
+            else if(edit.ratio<=0&&nearL&&inY)cropHandle=6;
+            else if(edit.ratio<=0&&nearT&&inX)cropHandle=7;
+            else if(edit.ratio<=0&&nearR&&inY)cropHandle=8;
+            else if(edit.ratio<=0&&nearB&&inX)cropHandle=9;
+            else if(x>r[0]&&x<r[2]&&y>r[1]&&y<r[3])cropHandle=1;
+            if(cropHandle==0)return false;
+            cropDownX=x;cropDownY=y;
+            cropAtDown=new float[]{edit.cropLeft,edit.cropTop,edit.cropRight,edit.cropBottom};
+            cropUndo=edit.copy();
+            return true;
+        }
+        if(cropHandle==0||cropAtDown==null)return false;
+        if(action==MotionEvent.ACTION_MOVE) {
+            float[] r0=cropOnScreen();
+            if(r0==null)return true;
+            // Screen pixels per normalised unit, from the live image matrix.
+            float[] unit={0f,0f,1f,1f};
+            int iw=photo.getDrawable().getIntrinsicWidth(),ih=photo.getDrawable().getIntrinsicHeight();
+            unit[2]=iw;unit[3]=ih;
+            photo.getImageMatrix().mapPoints(unit);
+            float sw=Math.max(1f,unit[2]-unit[0]),sh=Math.max(1f,unit[3]-unit[1]);
+            moveCrop((event.getX()-cropDownX)/sw,(event.getY()-cropDownY)/sh);
+            guideOverlay.invalidate();
+            return true;
+        }
+        if(action==MotionEvent.ACTION_UP||action==MotionEvent.ACTION_CANCEL) {
+            cropHandle=0;
+            if(cropUndo!=null&&(cropUndo.cropLeft!=edit.cropLeft||cropUndo.cropTop!=edit.cropTop||
+                    cropUndo.cropRight!=edit.cropRight||cropUndo.cropBottom!=edit.cropBottom)) {
+                undo.addLast(cropUndo);
+                if(undo.size()>35)undo.removeFirst();
+                redo.clear();
+                status.setText(cropStatus());
+            }
+            cropUndo=null;cropAtDown=null;
+            return true;
+        }
+        return true;
+    }
+
+    private String cropStatus() {
+        if(previewSource==null)return "";
+        int fw=PhotoPipeline.frameWidth(previewSource.getWidth(),previewSource.getHeight(),edit.rotation);
+        int fh=PhotoPipeline.frameHeight(previewSource.getWidth(),previewSource.getHeight(),edit.rotation);
+        float w=(edit.cropRight-edit.cropLeft)*fw,h=(edit.cropBottom-edit.cropTop)*fh;
+        return String.format(Locale.US,"Crop keeps %.0f%% of the frame · %.2f:1%s",
+                (edit.cropRight-edit.cropLeft)*(edit.cropBottom-edit.cropTop)*100f,
+                w/Math.max(1f,h),edit.ratio>0?" locked":"");
+    }
+
+    private void moveCrop(float dx,float dy) {
+        float l=cropAtDown[0],t=cropAtDown[1],r=cropAtDown[2],b=cropAtDown[3];
+        final float min=.06f;
+        float frame=frameAspect();
+        switch(cropHandle) {
+            case 1: {
+                float w=r-l,h=b-t;
+                l=clamp(l+dx,0f,1f-w);t=clamp(t+dy,0f,1f-h);r=l+w;b=t+h;
+                break;
+            }
+            case 6: l=clamp(l+dx,0f,r-min);break;
+            case 7: t=clamp(t+dy,0f,b-min);break;
+            case 8: r=clamp(r+dx,l+min,1f);break;
+            case 9: b=clamp(b+dy,t+min,1f);break;
+            default: {
+                boolean left=cropHandle==2||cropHandle==4,top=cropHandle==2||cropHandle==3;
+                // Opposite corner stays put.
+                float ax=left?r:l,ay=top?b:t;
+                float x=clamp((left?l:r)+dx,0f,1f),y=clamp((top?t:b)+dy,0f,1f);
+                float w=Math.max(min,Math.abs(ax-x)),h=Math.max(min,Math.abs(ay-y));
+                if(edit.ratio>0) {
+                    // Normalised height for the locked pixel aspect.
+                    float lockedH=w*frame/edit.ratio;
+                    float roomW=left?ax:1f-ax,roomH=top?ay:1f-ay;
+                    h=lockedH;
+                    if(h>roomH){h=roomH;w=h*edit.ratio/frame;}
+                    if(w>roomW){w=roomW;h=w*frame/edit.ratio;}
+                }
+                w=Math.min(w,left?ax:1f-ax);h=Math.min(h,top?ay:1f-ay);
+                if(left){l=ax-w;r=ax;}else{l=ax;r=ax+w;}
+                if(top){t=ay-h;b=ay;}else{t=ay;b=ay+h;}
+            }
+        }
+        edit.cropLeft=l;edit.cropTop=t;edit.cropRight=r;edit.cropBottom=b;
     }
 
     private void drawTransformControls() {
@@ -764,10 +1019,20 @@ public final class MainActivity extends Activity {
         previewWork.getQueue().clear();
         status.setText((balanced?"Balanced":"Full")+
                 " Auto Transform · analysing architectural lines…");
+        final int turnBy=edit.rotation;
         previewWork.execute(()->{
             try{
+                // Analyse the picture the way it is turned, so a 90° rotation does
+                // not swap vertical and horizontal perspective.
+                Bitmap turned=original;
+                if(turnBy%360!=0) {
+                    Matrix turn=new Matrix();turn.postRotate(turnBy);
+                    turned=Bitmap.createBitmap(original,0,0,original.getWidth(),
+                            original.getHeight(),turn,true);
+                }
                 TransformEngine.Suggestion decision=TransformEngine.analyse(
-                        original,balanced);
+                        turned,balanced);
+                if(turned!=original)turned.recycle();
                 ui.post(()->{
                     if(serial!=generation.get()||previewSource!=original)return;
                     if(!decision.hasAny()){
@@ -851,11 +1116,14 @@ public final class MainActivity extends Activity {
                 } else {
                     checkpoint();
                     switch(choice) {
-                        case "1:1":edit.ratio=1f;break;
-                        case "4:5":edit.ratio=.8f;break;
-                        case "16:9":edit.ratio=16f/9f;break;
-                        case "Rotate 90°":edit.rotation=(edit.rotation+90)%360;break;
-                        default:edit.ratio=0f;break;
+                        case "1:1":lockCropRatio(1f);break;
+                        case "4:5":lockCropRatio(.8f);break;
+                        case "16:9":lockCropRatio(16f/9f);break;
+                        case "Rotate 90°":rotateClockwise();break;
+                        default:
+                            edit.ratio=0f;
+                            edit.cropLeft=0f;edit.cropTop=0f;edit.cropRight=1f;edit.cropBottom=1f;
+                            break;
                     }
                 }
                 render();drawControls();
@@ -1161,7 +1429,7 @@ public final class MainActivity extends Activity {
         bar.addView(tab,new LinearLayout.LayoutParams(-2,dp(34)));
         tab.setOnClickListener(v->{
             adjustGroup=group;
-            activeAdjustment=group==0 ? ("Auto".equals(edit.look) ? "Auto Strength" :
+            activeAdjustment=group==0 ? (edit.autoOn() ? "Auto Strength" :
                     "Exposure") : group==1 ? "Luminance NR" : "Clarity";
             drawControls();
         });
@@ -1297,15 +1565,11 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void applyLook(String name) {
-        if (previewSource == null) { openImage(); return; }
-        checkpoint();
-        Edit v = new Edit();
-        v.rotation = edit.rotation; v.ratio = edit.ratio;
-        v.straightenAngle=edit.straightenAngle;
-        v.perspectiveVertical=edit.perspectiveVertical;
-        v.perspectiveHorizontal=edit.perspectiveHorizontal;
+    /** A Look sets only the seven tone sliders; Auto, WB, detail and crop stay. */
+    private static void setLookSliders(Edit v, String name) {
         v.look = name;
+        v.exposure = 0; v.contrast = 0; v.highlights = 0; v.shadows = 0;
+        v.saturation = 0; v.warmth = 0; v.tint = 0;
         switch (name) {
             case "Natural": v.contrast = 9; v.shadows = 10; v.saturation = 5; break;
             case "Warm": v.contrast = 7; v.warmth = 24; v.saturation = 9; break;
@@ -1314,7 +1578,15 @@ public final class MainActivity extends Activity {
                 v.saturation = -8; break;
             case "B&W": v.contrast = 15; v.saturation = -100; break;
         }
-        edit = v; render();
+    }
+
+    private void applyLook(String name) {
+        if (previewSource == null) { openImage(); return; }
+        checkpoint();
+        setLookSliders(edit, name);
+        render(); drawControls();
+        status.setText("None".equals(name) ? "Look removed · Auto, detail and crop kept" :
+                name + " look · Auto, detail and crop kept");
     }
 
     private void checkpoint() {
@@ -1349,10 +1621,16 @@ public final class MainActivity extends Activity {
                 ui.post(() -> {
                     if (serial != generation.get() || previewSource != original) return;
                     checkpoint();
-                    edit.exposure = scene.exposure;
-                    edit.contrast = scene.contrast;
-                    edit.highlights = scene.highlights;
-                    edit.shadows = scene.shadows;
+                    // Auto keeps its own values; the tone sliders start at zero
+                    // and adjust on top of Auto with their normal scale.
+                    edit.autoExposure = scene.exposure;
+                    edit.autoContrast = scene.contrast;
+                    edit.autoHighlights = scene.highlights;
+                    edit.autoShadows = scene.shadows;
+                    edit.exposure = 0f;
+                    edit.contrast = 0f;
+                    edit.highlights = 0f;
+                    edit.shadows = 0f;
                     edit.saturation = 0f;
                     edit.warmth = 0f;
                     edit.tint = 0f;
@@ -1368,7 +1646,7 @@ public final class MainActivity extends Activity {
                     edit.autoImportantRegion = scene.protectedImportantRegion;
                     edit.autoBlackProtected = scene.protectedNearBlack;
                     edit.autoStrength = 100f;
-                    edit.look = "Auto";
+                    edit.look = "None";
                     // Auto tone and both detail groups are all scene dependent.
                     applyRecommendations(details,0);
                     adjustGroup = 0;
@@ -1450,6 +1728,16 @@ public final class MainActivity extends Activity {
                 ? Manifest.permission.READ_MEDIA_IMAGES
                 : Manifest.permission.READ_EXTERNAL_STORAGE;
         if (checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
+            // Ask once for photo locations so exports keep them in the details.
+            if (checkSelfPermission(Manifest.permission.ACCESS_MEDIA_LOCATION)
+                    != PackageManager.PERMISSION_GRANTED) {
+                android.content.SharedPreferences prefs = getSharedPreferences("studio", MODE_PRIVATE);
+                if (!prefs.getBoolean("askedLocation", false)) {
+                    prefs.edit().putBoolean("askedLocation", true).apply();
+                    requestPermissions(new String[]{Manifest.permission.ACCESS_MEDIA_LOCATION},
+                            ALBUM_PERMISSION + 1);
+                }
+            }
             showAlbumBrowser();
             return;
         }
@@ -1471,12 +1759,14 @@ public final class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 34) {
             requestPermissions(new String[]{
                     Manifest.permission.READ_MEDIA_IMAGES,
-                    Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+                    Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED,
+                    Manifest.permission.ACCESS_MEDIA_LOCATION
             }, ALBUM_PERMISSION);
         } else {
             requestPermissions(new String[]{
                     Build.VERSION.SDK_INT >= 33 ? Manifest.permission.READ_MEDIA_IMAGES
-                            : Manifest.permission.READ_EXTERNAL_STORAGE
+                            : Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.ACCESS_MEDIA_LOCATION
             }, ALBUM_PERMISSION);
         }
     }
@@ -1571,7 +1861,7 @@ public final class MainActivity extends Activity {
                     Toast.LENGTH_SHORT).show();
             return;
         }
-        if(input!=null)editsByPhoto.put(input.toString(),edit.copy());
+        storeCurrentEdit();
         photoIndex=next;
         loadChosenPhoto(photoSelection.get(photoIndex));
     }
@@ -1598,7 +1888,8 @@ public final class MainActivity extends Activity {
         previewWork.getQueue().clear();
         openingWork.getQueue().clear();
         Bitmap old=previewSource,oldFast=fastPreviewSource,oldRender=renderedPreview;
-        input=null;previewSource=null;fastPreviewSource=null;renderedPreview=null;
+        storeCurrentEdit();
+        input=null;inputKey=null;previewSource=null;fastPreviewSource=null;renderedPreview=null;
         photo.resetZoom();
         photo.setImageDrawable(null);
         releaseOldBitmaps(old,oldFast,oldRender);
@@ -1609,6 +1900,9 @@ public final class MainActivity extends Activity {
         openingWork.execute(()->{
             Bitmap full=null,small=null;
             try {
+                String key=EditStore.key(getApplicationContext(),uri);
+                Edit stored=editsByPhoto.containsKey(uri.toString()) ? null :
+                        EditStore.load(getApplicationContext(),key);
                 full=decode(uri,1600,2_560_000);
                 if(serial!=generation.get()) {
                     full.recycle();return;
@@ -1621,19 +1915,21 @@ public final class MainActivity extends Activity {
                         decoded.recycle();return;
                     }
                     input=uri;
+                    inputKey=key;
                     previewSource=decoded;
                     fastPreviewSource=thumbnail;
                     Edit previous=editsByPhoto.get(uri.toString());
+                    if(previous==null)previous=stored;
                     edit=previous==null?new Edit():previous.copy();
                     undo.clear();redo.clear();
-                    if(adjustGroup==0 && !"Auto".equals(edit.look) &&
+                    if(adjustGroup==0 && !edit.autoOn() &&
                             "Auto Strength".equals(activeAdjustment))
                         activeAdjustment="Exposure";
                     photo.setImageBitmap(decoded);
                     photo.resetZoom();
                     openPlaceholder.setVisibility(View.GONE);
-                    status.setText("Photo ready · "+(photoIndex+1)+" / "+
-                            photoSelection.size());
+                    status.setText((previous!=null?"Saved edits restored · ":"Photo ready · ")+
+                            (photoIndex+1)+" / "+photoSelection.size());
                     updatePhotoCounter();
                     render();
                     drawControls();
@@ -1710,12 +2006,18 @@ public final class MainActivity extends Activity {
         if (original == null) return;
         Bitmap source = quick && fastPreviewSource != null ? fastPreviewSource : original;
         Edit snapshot = edit.copy();
+        if (cropEditing()) {
+            // While the crop is being set, show the whole frame under the rectangle.
+            snapshot.cropLeft = 0f; snapshot.cropTop = 0f;
+            snapshot.cropRight = 1f; snapshot.cropBottom = 1f;
+        }
         int serial = generation.incrementAndGet();
         previewWork.getQueue().clear();
         if (noEdits(snapshot)) {
             Bitmap previous=renderedPreview;
             renderedPreview=null;
             photo.setImageBitmap(original);
+            if(guideOverlay!=null)guideOverlay.invalidate();
             if(previous!=null && previous!=original && previous!=fastPreviewSource)
                 releaseOldBitmaps(null,null,previous);
             status.setText("Original · ready to edit");
@@ -1735,14 +2037,15 @@ public final class MainActivity extends Activity {
                     Bitmap previous = renderedPreview;
                     renderedPreview = output;
                     photo.setImageBitmap(output);
+                    if (guideOverlay != null) guideOverlay.invalidate();
                     if (previous != null && previous != previewSource &&
                             previous != fastPreviewSource && previous != output) {
                         previous.recycle();
                     }
-                    if ("Auto".equals(snapshot.look) && snapshot.autoZones != null) {
+                    if (snapshot.autoOn()) {
                         status.setText(String.format(Locale.US,
                                 "AUTO 4-LAYER+  •  %+.2f EV%s  •  WB %s",
-                                snapshot.exposure,
+                                snapshot.autoExposure,
                                 snapshot.autoImportantRegion ? " · Important region" :
                                         snapshot.autoBlackProtected ? " · Deep blacks protected" :
                                         snapshot.autoMacroProtected ? " · 4×4 atmosphere protected" :
@@ -1776,14 +2079,7 @@ public final class MainActivity extends Activity {
     }
 
     private static DetailEngine.Settings detailSettings(Edit e) {
-        DetailEngine.Settings d = new DetailEngine.Settings();
-        d.luminanceNoise=e.luminanceNR;
-        d.colorNoise=e.colorNR;
-        d.sharpening=e.sharpen;
-        d.clarity=e.clarity;
-        d.texture=e.texture;
-        d.dehaze=e.dehaze;
-        return d;
+        return PhotoPipeline.detailSettings(e);
     }
 
     private static Bitmap process(Bitmap src, Edit e) {
@@ -1791,172 +2087,18 @@ public final class MainActivity extends Activity {
     }
 
     private static Bitmap process(Bitmap src, Edit e, BooleanSupplier cancelled) {
-        return process(src,e,cancelled,false);
+        return PhotoPipeline.process(src,e,cancelled,false);
     }
     static Bitmap processForExport(Bitmap src,Edit edit) {
-        // The global colour/tone pass reads a complete source row before
-        // writing it. Reusing mutable decoded pixels is algorithmically
-        // identical but avoids allocating a second 50MP ARGB bitmap.
+        // The tone pass reads a complete source row before writing it, so the
+        // decoded pixels are reused; geometry then draws once at crop size.
         if(!src.isMutable())throw new IllegalArgumentException("Export bitmap must be mutable");
-        return process(src,edit,()->Thread.currentThread().isInterrupted(),true);
-    }
-    private static Bitmap process(Bitmap src,Edit e,BooleanSupplier cancelled,boolean reuse) {
-        int w = src.getWidth(), h = src.getHeight();
-        Bitmap output = reuse ? src : Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);
-        int[] pixels = new int[w];
-        float multiplier = (float)Math.pow(2, e.exposure);
-        float contrast = 1f + e.contrast / 100f * .85f;
-        float saturation = 1f + e.saturation / 100f;
-        float warmth = e.warmth / 100f * .11f;
-        float tint = e.tint / 100f * .07f;
-        float high = e.highlights / 100f * .30f;
-        float shadow = e.shadows / 100f * .30f;
-        boolean spatial = "Auto".equals(e.look) && e.autoZones != null &&
-                e.autoZones.length == SpatialAuto64.SIZE * SpatialAuto64.SIZE;
-        int[] zoneX = null;
-        float[] fractionX = null, rowZones = null;
-        float strength = clamp(e.autoStrength / 100f, 0f, 1f);
-        float autoGain = ((float)Math.pow(2, e.exposure) - 1f) * strength;
-        float autoShadow = e.shadows / 100f * .24f * strength;
-        float autoHighlights = e.highlights / 100f * .13f * strength;
-        float autoContrast = e.contrast / 100f * .22f * strength;
-        if (spatial) {
-            zoneX = SpatialAuto64.xIndices(w);
-            fractionX = SpatialAuto64.xFractions(w);
-            rowZones = new float[SpatialAuto64.SIZE];
-        }
-        for (int y=0; y<h; y++) {
-            if ((y & 7) == 0 && cancelled.getAsBoolean()) {
-                output.recycle();
-                throw new CancellationException();
-            }
-            if (spatial) SpatialAuto64.interpolateRow(e.autoZones, y, h, rowZones);
-            src.getPixels(pixels, 0, w, 0, y, w, 1);
-            for (int x=0; x<w; x++) {
-                int pixel = pixels[x];
-                if (spatial) {
-                    float r0 = Color.red(pixel) / 255f;
-                    float g0 = Color.green(pixel) / 255f;
-                    float b0 = Color.blue(pixel) / 255f;
-                    float lum = .2126f*r0 + .7152f*g0 + .0722f*b0;
-                    float maxChannel = Math.max(r0, Math.max(g0, b0));
-                    float xf = fractionX[x];
-                    int zi = zoneX[x];
-                    float zone = rowZones[zi]*(1f-xf) +
-                            rowZones[Math.min(SpatialAuto64.SIZE-1,zi+1)]*xf;
-                    float protection = 1f - SpatialAuto64.smoothstep(.64f,.94f,maxChannel);
-                    float darkness = 1f - SpatialAuto64.smoothstep(.12f,.68f,lum);
-                    float highlights = SpatialAuto64.smoothstep(.61f,.94f,lum);
-                    float requested = lum*(1f + autoGain*protection)
-                            + autoShadow*zone*darkness
-                            + autoHighlights*highlights
-                            + autoContrast*(lum-.5f)*(1f-highlights);
-                    requested = clamp(requested,0f,1f);
-                    float scale = lum > .012f ? requested/lum : 1f;
-                    // Leave pristine pixels untouched when strength=0.
-                    if (scale > 1f && maxChannel > 0f) {
-                        scale = Math.min(scale, .997f/maxChannel);
-                    }
-                    float baseR = r0*scale, baseG = g0*scale, baseB = b0*scale;
-                    if (e.wbConfidence > 0f || warmth != 0f || tint != 0f) {
-                        // Hue-neutral WB: preserve local luminance and retain headroom.
-                        // Saturated subject colours and nearly white pixels are
-                        // protected; manual Warmth/Tint remain independently usable.
-                        float chroma = (maxChannel-Math.min(r0,Math.min(g0,b0))) /
-                                Math.max(.01f,maxChannel);
-                        float colourGate=(1f-.35f*SpatialAuto64.smoothstep(
-                                .20f,.65f,chroma)) *
-                                (1f-.78f*SpatialAuto64.smoothstep(.84f,.99f,maxChannel));
-                        float wbStrength=e.wbPicked ? 1f : strength;
-                        float dr = baseR*(e.wbRed-1f)*wbStrength*colourGate +
-                                (warmth+tint)*colourGate;
-                        float dg = baseG*(e.wbGreen-1f)*wbStrength*colourGate -
-                                tint*colourGate;
-                        float db = baseB*(e.wbBlue-1f)*wbStrength*colourGate +
-                                (-warmth+tint)*colourGate;
-                        float deltaLum = .2126f*dr+.7152f*dg+.0722f*db;
-                        baseR += dr-deltaLum;
-                        baseG += dg-deltaLum;
-                        baseB += db-deltaLum;
-                        float upper=Math.max(baseR,Math.max(baseG,baseB));
-                        if (upper>.997f) {
-                            float keep=.997f/upper;
-                            baseR*=keep; baseG*=keep; baseB*=keep;
-                        }
-                    }
-                    pixels[x] = Color.argb(Color.alpha(pixel),
-                            quant(baseR),quant(baseG),quant(baseB));
-                    continue;
-                }
-                float r = Color.red(pixel)/255f * multiplier;
-                float g = Color.green(pixel)/255f * multiplier;
-                float b = Color.blue(pixel)/255f * multiplier;
-                float l = .2126f*r + .7152f*g + .0722f*b;
-                float s = clamp(l, 0f, 1f);
-                float correction = shadow*(1f-s)*(1f-s) + high*s*s;
-                r = (r-.5f)*contrast + .5f + correction + warmth + tint;
-                g = (g-.5f)*contrast + .5f + correction - tint;
-                b = (b-.5f)*contrast + .5f + correction - warmth + tint;
-                float gray = .2126f*r + .7152f*g + .0722f*b;
-                r = gray + (r-gray)*saturation;
-                g = gray + (g-gray)*saturation;
-                b = gray + (b-gray)*saturation;
-                pixels[x] = Color.argb(Color.alpha(pixel), quant(r), quant(g), quant(b));
-            }
-            output.setPixels(pixels, 0, w, 0, y, w, 1);
-        }
-        Bitmap rotated = output;
-        if (e.rotation != 0) {
-            Matrix m = new Matrix(); m.postRotate(e.rotation);
-            rotated = Bitmap.createBitmap(output, 0, 0, w, h, m, true);
-            if (rotated != output) output.recycle();
-        }
-        if(Math.abs(e.straightenAngle)>=.015f ||
-                Math.abs(e.perspectiveVertical)>=.015f ||
-                Math.abs(e.perspectiveHorizontal)>=.015f) {
-            if(cancelled.getAsBoolean()) {
-                rotated.recycle();
-                throw new CancellationException();
-            }
-            Bitmap transformed=TransformEngine.render(rotated,
-                    e.straightenAngle,e.perspectiveVertical,
-                    e.perspectiveHorizontal,cancelled);
-            if(transformed!=rotated)rotated.recycle();
-            rotated=transformed;
-        }
-        if (e.ratio <= 0) {
-            try {
-                DetailEngine.applyInPlace(rotated, detailSettings(e), cancelled);
-            } catch (CancellationException ex) {
-                rotated.recycle();
-                throw ex;
-            }
-            return rotated;
-        }
-        int width = rotated.getWidth(), height = rotated.getHeight();
-        int cw = width, ch = height;
-        if (width / (float)height > e.ratio) cw = Math.max(1, Math.round(height*e.ratio));
-        else ch = Math.max(1, Math.round(width/e.ratio));
-        Bitmap cropped = Bitmap.createBitmap(rotated, (width-cw)/2, (height-ch)/2, cw, ch);
-        if (cropped != rotated) rotated.recycle();
-        try {
-            DetailEngine.applyInPlace(cropped, detailSettings(e), cancelled);
-        } catch (CancellationException ex) {
-            cropped.recycle();
-            throw ex;
-        }
-        return cropped;
+        return PhotoPipeline.process(src,edit,()->Thread.currentThread().isInterrupted(),true);
     }
 
     static boolean hasNoEdits(Edit e) { return noEdits(e); }
     private static boolean noEdits(Edit e) {
-        return e.rotation == 0 && Math.abs(e.straightenAngle)<.015f &&
-                Math.abs(e.perspectiveVertical)<.015f &&
-                Math.abs(e.perspectiveHorizontal)<.015f &&
-                e.ratio == 0f && e.autoZones == null &&
-                e.exposure == 0f && e.contrast == 0f && e.highlights == 0f &&
-                e.shadows == 0f && e.saturation == 0f && e.warmth == 0f &&
-                e.tint == 0f && e.wbConfidence == 0f &&
+        return !PhotoPipeline.hasGeometry(e) && !PhotoPipeline.toneActive(e) &&
                 !detailSettings(e).enabled();
     }
 
@@ -1995,24 +2137,19 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Photo Studio · v0.6.20")
-                .setMessage("Offline native Android editing prototype.\n\n" +
-                        "Working: background JPEG exports and Edit/Share integration, neutral-point WB picker, pinch zoom, double-tap inspection and pan, whole-album browsing, modern Android photo picker, JPEG/HEIC, styled looks, " +
-                        "tone/colour adjustments, four-level Auto + structural region and deep-black safeguards, Auto WB, " +
-                        "luminance/chroma NR, sharpening, " +
-                        "clarity, texture, contrast dehaze, centre crop, rotate 90°, " +
-                        "conservative Auto Straighten, Guided Level using two tapped points, " +
-                        "manual +/-15° angle, full and balanced perspective auto, " +
-                        "vertical/horizontal skew and alignment grid, " +
-                        "corner-safe fill crop, " +
-                        "undo/redo, press-and-hold before view, export and share.\n\n" +
-                        "Auto WB uses cautious neutral samples, avoids colourful subjects and skips uncertain scenes. Auto analyses noise and detail from 64×64 local probes. Each detail group also has " +
-                        "its own Auto button and six manual sliders. Dehaze is a contrast-based " +
-                        "approximation, not a depth map. " +
-                        "Limitations: no healing, local masks, layers or RAW workflow yet. " +
-                        "PhotoCraft's Rust engine is NOT integrated in this version. " +
-                        "Export is selectable JPEG 85/90/95/100 (not lossless), capped at 8192px / 50MP and does not " +
-                        "preserve original metadata. Editing never overwrites the source.")
+        new AlertDialog.Builder(this).setTitle("Photo Studio · v0.6.21")
+                .setMessage("Offline native Android editing.\n\n" +
+                        "Auto: four-level 64×64 scene Auto with structural-region and deep-black safeguards and cautious Auto WB. " +
+                        "Your tone sliders and Looks adjust on top of Auto with the same scale every time; a Look never removes Auto, detail or crop. " +
+                        "Exposure and Warmth/Tint work in linear light, so blacks stay black. " +
+                        "The neutral WB picker works with or without Auto.\n\n" +
+                        "Detail: luminance/colour NR, sharpening, texture, wide-radius clarity and haze-aware dehaze, the same in preview and export.\n\n" +
+                        "Crop & transform: free crop with draggable corners and edges, ratio lock (Original, 1:1, 4:5, 16:9, swap), rotate 90°, Auto Straighten, Guided Level, perspective. " +
+                        "Rotation, straighten and crop are done in one pass.\n\n" +
+                        "Edits are saved per photo and come back when you reopen it. " +
+                        "Exports keep the date, camera, lens, exposure and (if allowed) location details, keep Ultra HDR on Android 14+, " +
+                        "and go up to 100 MP on 12 GB phones (50 MP otherwise). JPEG 85/90/95/100. Editing never overwrites the original.\n\n" +
+                        "Not included: layers, healing, cloning, selections, text, RAW.")
                 .setPositiveButton("Close", null).show();
     }
 
@@ -2025,6 +2162,7 @@ public final class MainActivity extends Activity {
         if (pendingSliderRender != null) ui.removeCallbacks(pendingSliderRender);
         if (albumBrowser != null) albumBrowser.close();
         previewWork.shutdownNow(); openingWork.shutdownNow();
+        storeWork.shutdown();
         super.onDestroy();
     }
 }

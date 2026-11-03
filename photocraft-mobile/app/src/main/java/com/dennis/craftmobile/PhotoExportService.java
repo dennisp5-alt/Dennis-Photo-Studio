@@ -142,7 +142,11 @@ public final class PhotoExportService extends Service {
         long decodedAt=0,processedAt=0,encodedAt=0;
         try {
             progress("Reading original photo…");
-            input=MainActivity.decodeForExport(this,source,8192,50_000_000);
+            // v0.6.21: phones with 12 GB+ keep up to 100 MP (S23 Ultra 200 MP
+            // shots come out at 100 MP instead of 50 MP); others stay at 50 MP.
+            long pixelLimit=exportPixelLimit();
+            input=MainActivity.decodeForExport(this,source,16384,pixelLimit);
+            Metadata metadata=Metadata.read(this,source);
             decodedAt=SystemClock.elapsedRealtime();
             if(Thread.currentThread().isInterrupted())
                 throw new InterruptedException("Export interrupted");
@@ -160,6 +164,8 @@ public final class PhotoExportService extends Service {
             values.put(MediaStore.Images.Media.MIME_TYPE,"image/jpeg");
             values.put(MediaStore.Images.Media.RELATIVE_PATH,"Pictures/Photo Studio");
             values.put(MediaStore.Images.Media.IS_PENDING,1);
+            if(metadata.takenMillis>0)
+                values.put(MediaStore.Images.Media.DATE_TAKEN,metadata.takenMillis);
             output=getContentResolver().insert(
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values);
             if(output==null)throw new IllegalStateException("Unable to create saved JPEG");
@@ -169,14 +175,17 @@ public final class PhotoExportService extends Service {
                         quality,stream))
                     throw new IllegalStateException("JPEG encoding failed");
             }
+            progress("Copying photo details…");
+            metadata.write(this,output,result.getWidth(),result.getHeight());
             values.clear();
             values.put(MediaStore.Images.Media.IS_PENDING,0);
             getContentResolver().update(output,values,null,null);
             pendingOutput=null;
             encodedAt=SystemClock.elapsedRealtime();
             Log.i("PhotoStudioExport",String.format(Locale.US,
-                    "Full-resolution export %dx%d (ms): decode=%d processing=%d jpeg=%d total=%d",
+                    "Full-resolution export %dx%d hdr=%b exif=%d (ms): decode=%d processing=%d jpeg=%d total=%d",
                     result.getWidth(),result.getHeight(),
+                    Build.VERSION.SDK_INT>=34 && result.hasGainmap(),metadata.tags.size(),
                     decodedAt-start,processedAt-decodedAt,encodedAt-processedAt,
                     encodedAt-start));
             notifyResult(source,output,null,share,(encodedAt-start)/1000L);
@@ -202,6 +211,103 @@ public final class PhotoExportService extends Service {
             BUSY.set(false);
             stopForeground(STOP_FOREGROUND_REMOVE);
             stopSelf(startId);
+        }
+    }
+
+    private long exportPixelLimit() {
+        try {
+            android.app.ActivityManager am=getSystemService(android.app.ActivityManager.class);
+            android.app.ActivityManager.MemoryInfo info=new android.app.ActivityManager.MemoryInfo();
+            am.getMemoryInfo(info);
+            if(info.totalMem>=10_500_000_000L && !am.isLowRamDevice())return 100_000_000L;
+        } catch(RuntimeException ignored) {}
+        return 50_000_000L;
+    }
+
+    /**
+     * Photo details carried from the original into the export: capture date and
+     * time, camera and lens, exposure settings and (when Android allows Photo
+     * Studio to see it) location. Orientation is reset because the pixels are
+     * already upright. Missing or unreadable details never stop an export.
+     */
+    static final class Metadata {
+        private static final String[] TAGS = {
+                "DateTime","DateTimeOriginal","DateTimeDigitized",
+                "OffsetTime","OffsetTimeOriginal","OffsetTimeDigitized",
+                "SubSecTime","SubSecTimeOriginal","SubSecTimeDigitized",
+                "Make","Model","LensMake","LensModel","LensSpecification",
+                "FNumber","ApertureValue","ExposureTime","ShutterSpeedValue",
+                "PhotographicSensitivity","FocalLength","FocalLengthIn35mmFilm",
+                "ExposureBiasValue","ExposureProgram","ExposureMode","MeteringMode",
+                "Flash","WhiteBalance","SceneCaptureType","DigitalZoomRatio",
+                "BrightnessValue","Artist","Copyright","ImageDescription","UserComment",
+                "GPSLatitude","GPSLatitudeRef","GPSLongitude","GPSLongitudeRef",
+                "GPSAltitude","GPSAltitudeRef","GPSTimeStamp","GPSDateStamp",
+                "GPSProcessingMethod","GPSImgDirection","GPSImgDirectionRef"};
+        final java.util.LinkedHashMap<String,String> tags=new java.util.LinkedHashMap<>();
+        long takenMillis;
+
+        static Metadata read(Context context,Uri source) {
+            Metadata m=new Metadata();
+            Uri readFrom=source;
+            try {
+                if("media".equals(source.getAuthority()) &&
+                        context.checkSelfPermission(android.Manifest.permission.ACCESS_MEDIA_LOCATION)
+                                ==android.content.pm.PackageManager.PERMISSION_GRANTED)
+                    readFrom=MediaStore.setRequireOriginal(source);
+            } catch(RuntimeException ignored) {}
+            java.io.InputStream in=null;
+            try {
+                try { in=context.getContentResolver().openInputStream(readFrom); }
+                catch(SecurityException | UnsupportedOperationException denied) {
+                    in=context.getContentResolver().openInputStream(source);
+                }
+                if(in==null)return m;
+                android.media.ExifInterface exif=new android.media.ExifInterface(in);
+                for(String tag:TAGS) {
+                    String v=exif.getAttribute(tag);
+                    if(v!=null && !v.trim().isEmpty())m.tags.put(tag,v);
+                }
+                m.takenMillis=parseTaken(m.tags.get("DateTimeOriginal"),
+                        m.tags.get("OffsetTimeOriginal"));
+                if(m.takenMillis<=0)m.takenMillis=parseTaken(m.tags.get("DateTime"),
+                        m.tags.get("OffsetTime"));
+            } catch(Exception | OutOfMemoryError e) {
+                Log.w("PhotoStudioExport","Original photo details not readable",e);
+            } finally {
+                if(in!=null)try{in.close();}catch(java.io.IOException ignored){}
+            }
+            return m;
+        }
+
+        private static long parseTaken(String when,String offset) {
+            if(when==null)return 0;
+            try {
+                SimpleDateFormat f=new SimpleDateFormat("yyyy:MM:dd HH:mm:ss",Locale.US);
+                if(offset!=null && offset.matches("[+-]\\d{2}:\\d{2}"))
+                    f.setTimeZone(java.util.TimeZone.getTimeZone("GMT"+offset));
+                Date d=f.parse(when.trim());
+                return d==null?0:d.getTime();
+            } catch(Exception e) {
+                return 0;
+            }
+        }
+
+        void write(Context context,Uri output,int width,int height) {
+            try(android.os.ParcelFileDescriptor fd=
+                        context.getContentResolver().openFileDescriptor(output,"rw")) {
+                if(fd==null)return;
+                android.media.ExifInterface exif=new android.media.ExifInterface(fd.getFileDescriptor());
+                for(java.util.Map.Entry<String,String> t:tags.entrySet())
+                    exif.setAttribute(t.getKey(),t.getValue());
+                exif.setAttribute("Orientation","1");
+                exif.setAttribute("Software","Photo Studio 0.6.21");
+                exif.setAttribute("PixelXDimension",String.valueOf(width));
+                exif.setAttribute("PixelYDimension",String.valueOf(height));
+                exif.saveAttributes();
+            } catch(Exception | OutOfMemoryError e) {
+                Log.w("PhotoStudioExport","Photo details not copied",e);
+            }
         }
     }
 

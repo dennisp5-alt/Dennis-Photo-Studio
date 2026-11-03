@@ -8,8 +8,8 @@ android {
         applicationId 'com.dennis.craftmobile'
         minSdk 29
         targetSdk 35
-        versionCode 26
-        versionName '0.6.20-final-reliability'
+        versionCode 27
+        versionName '0.6.21-reliability'
     }
     buildTypes {
         release { minifyEnabled false }

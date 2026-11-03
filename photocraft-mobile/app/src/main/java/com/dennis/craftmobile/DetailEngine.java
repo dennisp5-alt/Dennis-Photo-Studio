@@ -10,8 +10,14 @@ import java.util.concurrent.CancellationException;
  * Reads original rows into a rolling buffer, then writes results in place so that
  * even large S23 Ultra JPEGs need no second full-size detail bitmap.
  *
- * Denoising is a lightweight guided-neighbourhood filter; dehaze is explicitly
- * local-contrast enhancement, not an atmospheric depth estimation model.
+ * Denoising is a lightweight guided-neighbourhood filter.
+ *
+ * v0.6.21: clarity and dehaze work from small "planes" of the whole picture
+ * (480 px wide whatever the photo size), so the preview and a 50–100 MP export
+ * look the same. Clarity is real local contrast over a radius of about 1/120 of
+ * the width (it was 3 pixels). Dehaze estimates the haze veil from the darkest
+ * channel over a neighbourhood and removes it where it is — distant, misty parts
+ * lose the veil, nearby shadows are left alone (it was a global contrast curve).
  */
 final class DetailEngine {
     static final class Settings {
@@ -119,7 +125,7 @@ final class DetailEngine {
         int w=bitmap.getWidth(),h=bitmap.getHeight();
         if (w<3||h<3) return;
         final int rad=Math.max(1,Math.min(3,Math.round(w/2000f)));
-        final int bigRad=rad*3, count=bigRad*2+1;
+        final int bigRad=rad, count=bigRad*2+1;
         // Rolling original rows: writing back must never contaminate neighbour data.
         int[][] ring=new int[count][w];
         // Luminance is sampled up to 18 times per output pixel. Cache each
@@ -135,10 +141,12 @@ final class DetailEngine {
         float colorNR=clamp(e.colorNoise,0f,100f)/100f*.63f;
         float sharpen=clamp(e.sharpening,0f,100f)/100f*.55f;
         float texture=clamp(e.texture,0f,100f)/100f*.34f;
-        float clarity=clamp(e.clarity,0f,100f)/100f*.24f;
-        float dehaze=clamp(e.dehaze,0f,100f)/100f*.20f;
+        float clarity=clamp(e.clarity,0f,100f)/100f*.55f;
+        float dehaze=clamp(e.dehaze,0f,100f)/100f*.85f;
         boolean useSmall=lumNR>0 || colorNR>0 || sharpen>0 || texture>0;
         boolean useLarge=clarity>0;
+        Planes planes=(clarity>0||dehaze>0) ? Planes.build(bitmap,clarity>0,dehaze>0,cancelled) : null;
+        float sx=planes==null?0f:planes.pw/(float)w, sy=planes==null?0f:planes.ph/(float)h;
         int[] off={-1,0,1};
         for (int y=0;y<h;y++) {
             if ((y & 7) == 0 && cancelled.getAsBoolean()) {
@@ -196,23 +204,31 @@ final class DetailEngine {
                     }
                 }
                 if(useLarge) {
-                    float sum=0f;
-                    for(int dy:off)for(int dx:off) {
-                        sum+=sampleLuma(luminanceRows,count,y+dy*bigRad,h,x+dx*bigRad,w);
-                    }
-                    float largeBlur=sum/9f;
-                    float broad=originalLum-largeBlur;
-                    float softGate=1f-smooth(.13f,.33f,Math.abs(broad));
-                    baseLum+=clamp(broad,-.1f,.1f)*clarity*softGate*brightGate;
-                }
-                if(dehaze>0) {
-                    // Restrained contrast/dehaze curve. Does not claim depth recovery.
-                    float toneGate=1f-smooth(.77f,.98f,maxRgb);
-                    baseLum+=(originalLum-.47f)*dehaze*toneGate*.65f;
+                    float broad=originalLum-planes.blurAt((x+.5f)*sx-.5f,(y+.5f)*sy-.5f);
+                    // Strongest in the mid-tones; edges with a big step get less,
+                    // which keeps halos away from skylines and backlit hair.
+                    float midGate=clamp(4f*originalLum*(1f-originalLum)*1.15f,0f,1f);
+                    float haloGate=1f-smooth(.18f,.42f,Math.abs(broad));
+                    baseLum+=clamp(broad,-.15f,.15f)*clarity*midGate*haloGate*brightGate;
                 }
                 float correction=baseLum-originalLum;
                 // Luminance-only correction preserves original hue/saturation.
                 float rr=r+correction,gg=g+correction,bb=b+correction;
+                if(dehaze>0) {
+                    // Haze model I = J·t + A·(1−t): remove the veil where the dark
+                    // channel says it is. Grey airlight keeps colours honest.
+                    float t=1f-dehaze*planes.hazeAt((x+.5f)*sx-.5f,(y+.5f)*sy-.5f)/planes.airlight;
+                    t=Math.max(.55f,t);
+                    float A=planes.airlight;
+                    // Open sky is as bright as the haze itself: half strength
+                    // there, so skies do not turn heavy and over-blue.
+                    float gate=(1f-.6f*smooth(.86f,.99f,maxRgb))*
+                            (1f-.5f*smooth(A*.8f,A,originalLum));
+                    float inv=1f/t;
+                    rr+=((rr-A)*inv+A-rr)*gate;
+                    gg+=((gg-A)*inv+A-gg)*gate;
+                    bb+=((bb-A)*inv+A-bb)*gate;
+                }
                 // Maintain headroom rather than forcing any channel to clip.
                 float high=Math.max(rr,Math.max(gg,bb));
                 if(high>1f) {
@@ -224,5 +240,115 @@ final class DetailEngine {
             bitmap.setPixels(out,0,w,0,y,w,1);
         }
     }
+    /** Low-resolution views of the whole photo for clarity and dehaze. */
+    static final class Planes {
+        static final int WIDTH=480;
+        int pw,ph;
+        float[] blur, haze;
+        float airlight=1f;
+
+        static Planes build(Bitmap bitmap,boolean clarity,boolean dehaze,BooleanSupplier cancelled) {
+            int w=bitmap.getWidth(),h=bitmap.getHeight();
+            Planes p=new Planes();
+            p.pw=Math.max(2,Math.min(w,WIDTH));
+            p.ph=Math.max(2,Math.round(h*p.pw/(float)w));
+            int n=p.pw*p.ph;
+            float[] lum=new float[n], dark=dehaze?new float[n]:null;
+            int[] count=new int[n];
+            int[] row=new int[w];
+            int[] cellX=new int[w];
+            for(int x=0;x<w;x++)cellX[x]=Math.min(p.pw-1,(int)((long)x*p.pw/w));
+            for(int y=0;y<h;y++) {
+                if((y&31)==0 && cancelled.getAsBoolean())throw new CancellationException();
+                bitmap.getPixels(row,0,w,0,y,w,1);
+                int base=Math.min(p.ph-1,(int)((long)y*p.ph/h))*p.pw;
+                for(int x=0;x<w;x++) {
+                    int c=row[x], i=base+cellX[x];
+                    lum[i]+=luma(c);
+                    if(dark!=null)dark[i]+=Math.min(Color.red(c),Math.min(Color.green(c),Color.blue(c)))/255f;
+                    count[i]++;
+                }
+            }
+            for(int i=0;i<n;i++) {
+                int k=Math.max(1,count[i]);
+                lum[i]/=k;
+                if(dark!=null)dark[i]/=k;
+            }
+            if(clarity) {
+                int r=Math.max(1,Math.round(p.pw/120f));
+                float[] b=lum.clone();
+                for(int pass=0;pass<3;pass++)boxBlur(b,p.pw,p.ph,r);
+                p.blur=b;
+            }
+            if(dehaze) {
+                int r=Math.max(1,Math.round(p.pw/40f));
+                float[] d=minFilter(dark,p.pw,p.ph,r);
+                boxBlur(d,p.pw,p.ph,r);
+                boxBlur(d,p.pw,p.ph,r);
+                // Airlight: brightness of the haziest 0.5% of the picture.
+                float[] sorted=d.clone();
+                java.util.Arrays.sort(sorted);
+                float threshold=sorted[Math.max(0,(int)(n*.995f)-1)];
+                float sum=0f;int m=0;
+                for(int i=0;i<n;i++)if(d[i]>=threshold){sum+=lum[i];m++;}
+                p.airlight=clamp(m>0?sum/m:1f,.55f,.98f);
+                p.haze=d;
+            }
+            return p;
+        }
+        float blurAt(float x,float y){return bilinear(blur,x,y);}
+        float hazeAt(float x,float y){return bilinear(haze,x,y);}
+        private float bilinear(float[] a,float x,float y) {
+            x=clamp(x,0f,pw-1f);y=clamp(y,0f,ph-1f);
+            int x0=(int)x,y0=(int)y;
+            int x1=Math.min(pw-1,x0+1),y1=Math.min(ph-1,y0+1);
+            float fx=x-x0,fy=y-y0;
+            float top=a[y0*pw+x0]+(a[y0*pw+x1]-a[y0*pw+x0])*fx;
+            float bot=a[y1*pw+x0]+(a[y1*pw+x1]-a[y1*pw+x0])*fx;
+            return top+(bot-top)*fy;
+        }
+    }
+
+    /** Separable box blur with clamped edges, in place. */
+    static void boxBlur(float[] a,int w,int h,int r) {
+        float[] line=new float[Math.max(w,h)];
+        float norm=1f/(2*r+1);
+        for(int y=0;y<h;y++) {
+            int o=y*w;
+            float sum=0f;
+            for(int k=-r;k<=r;k++)sum+=a[o+Math.min(w-1,Math.max(0,k))];
+            for(int x=0;x<w;x++) {
+                line[x]=sum*norm;
+                sum+=a[o+Math.min(w-1,x+r+1)]-a[o+Math.max(0,x-r)];
+            }
+            System.arraycopy(line,0,a,o,w);
+        }
+        for(int x=0;x<w;x++) {
+            float sum=0f;
+            for(int k=-r;k<=r;k++)sum+=a[Math.min(h-1,Math.max(0,k))*w+x];
+            for(int y=0;y<h;y++) {
+                line[y]=sum*norm;
+                sum+=a[Math.min(h-1,y+r+1)*w+x]-a[Math.max(0,y-r)*w+x];
+            }
+            for(int y=0;y<h;y++)a[y*w+x]=line[y];
+        }
+    }
+
+    /** Separable minimum filter (dark channel neighbourhood). */
+    static float[] minFilter(float[] a,int w,int h,int r) {
+        float[] t=new float[a.length], o=new float[a.length];
+        for(int y=0;y<h;y++)for(int x=0;x<w;x++) {
+            float m=1f;
+            for(int k=Math.max(0,x-r);k<=Math.min(w-1,x+r);k++)m=Math.min(m,a[y*w+k]);
+            t[y*w+x]=m;
+        }
+        for(int y=0;y<h;y++)for(int x=0;x<w;x++) {
+            float m=1f;
+            for(int k=Math.max(0,y-r);k<=Math.min(h-1,y+r);k++)m=Math.min(m,t[k*w+x]);
+            o[y*w+x]=m;
+        }
+        return o;
+    }
+
     private DetailEngine() {}
 }

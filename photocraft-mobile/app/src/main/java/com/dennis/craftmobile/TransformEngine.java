@@ -39,9 +39,31 @@ final class TransformEngine {
     static Bitmap render(Bitmap source,float roll,float vertical,float horizontal,
                          BooleanSupplier cancelled) {
         if(source==null)throw new IllegalArgumentException("Photo required");
-        if(Math.abs(roll)<.015f && Math.abs(vertical)<.015f &&
-                Math.abs(horizontal)<.015f)return source;
         int w=source.getWidth(),h=source.getHeight();
+        Matrix resultMatrix=matrix(w,h,roll,vertical,horizontal,cancelled);
+        if(resultMatrix==null)return source;
+        Bitmap result=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);
+        try {
+            Canvas canvas=new Canvas(result);
+            Paint paint=new Paint(Paint.FILTER_BITMAP_FLAG|Paint.DITHER_FLAG);
+            canvas.drawBitmap(source,resultMatrix,paint);
+            return result;
+        } catch(RuntimeException | OutOfMemoryError error) {
+            result.recycle();
+            throw error;
+        }
+    }
+
+    /**
+     * v0.6.21: the straighten/perspective matrix (with its coverage zoom) for a
+     * w × h frame, or null when there is nothing to do. Proportional to the frame
+     * size, so the preview, the full-size export and an HDR gain map all get the
+     * same geometry. PhotoPipeline folds it into one pass with rotation and crop.
+     */
+    static Matrix matrix(int w,int h,float roll,float vertical,float horizontal,
+                         BooleanSupplier cancelled) {
+        if(Math.abs(roll)<.015f && Math.abs(vertical)<.015f &&
+                Math.abs(horizontal)<.015f)return null;
         float cx=w*.5f,cy=h*.5f;
         // Perspective controls change trapezoid geometry, not simple shearing.
         // Vertical: top and bottom widths oppose; horizontal: left and right
@@ -71,16 +93,7 @@ final class TransformEngine {
         resultMatrix.postScale(upper*1.001f,upper*1.001f,cx,cy);
         if(cancelled!=null && cancelled.getAsBoolean())
             throw new java.util.concurrent.CancellationException();
-        Bitmap result=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);
-        try {
-            Canvas canvas=new Canvas(result);
-            Paint paint=new Paint(Paint.FILTER_BITMAP_FLAG|Paint.DITHER_FLAG);
-            canvas.drawBitmap(source,resultMatrix,paint);
-            return result;
-        } catch(RuntimeException | OutOfMemoryError error) {
-            result.recycle();
-            throw error;
-        }
+        return resultMatrix;
     }
 
     private static boolean covered(Matrix geometry,float zoom,int w,int h,
