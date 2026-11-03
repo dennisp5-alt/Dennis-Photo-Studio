@@ -98,6 +98,12 @@ final class PhotoPipeline {
         float autoHighlights = e.autoHighlights / 100f * .13f * strength;
         float autoContrast = e.autoContrast / 100f * .22f * strength;
         float wbStrength = e.wbPicked || !spatial ? 1f : strength;
+        // v0.6.22: Auto Rescue first (only when Auto found the photo needs it).
+        AutoRescue.Params rescue = e.rescue();
+        boolean rescued = spatial && rescue.active();
+        float[][] rescueTable = rescued ? AutoRescue.tables(rescue, strength) : null;
+        float vibrance = rescue.vibrance * strength;
+        float[] v3 = new float[3];
         if (spatial) {
             zoneX = SpatialAuto64.xIndices(w);
             fractionX = SpatialAuto64.xFractions(w);
@@ -109,9 +115,18 @@ final class PhotoPipeline {
             src.getPixels(pixels, 0, w, 0, y, w, 1);
             for (int x = 0; x < w; x++) {
                 int pixel = pixels[x];
-                float r0 = Color.red(pixel) / 255f;
-                float g0 = Color.green(pixel) / 255f;
-                float b0 = Color.blue(pixel) / 255f;
+                float r0, g0, b0;
+                if (rescued) {
+                    v3[0] = rescueTable[0][Color.red(pixel)];
+                    v3[1] = rescueTable[1][Color.green(pixel)];
+                    v3[2] = rescueTable[2][Color.blue(pixel)];
+                    if (vibrance > 0f) AutoRescue.vibrance(v3, vibrance);
+                    r0 = v3[0]; g0 = v3[1]; b0 = v3[2];
+                } else {
+                    r0 = Color.red(pixel) / 255f;
+                    g0 = Color.green(pixel) / 255f;
+                    b0 = Color.blue(pixel) / 255f;
+                }
                 float maxChannel = Math.max(r0, Math.max(g0, b0));
                 float r = r0, g = g0, b = b0;
                 if (spatial) {

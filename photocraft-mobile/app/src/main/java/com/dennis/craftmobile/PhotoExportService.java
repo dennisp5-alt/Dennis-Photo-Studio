@@ -301,7 +301,7 @@ public final class PhotoExportService extends Service {
                 for(java.util.Map.Entry<String,String> t:tags.entrySet())
                     exif.setAttribute(t.getKey(),t.getValue());
                 exif.setAttribute("Orientation","1");
-                exif.setAttribute("Software","Photo Studio 0.6.21");
+                exif.setAttribute("Software","Photo Studio 0.6.22");
                 exif.setAttribute("PixelXDimension",String.valueOf(width));
                 exif.setAttribute("PixelYDimension",String.valueOf(height));
                 exif.saveAttributes();

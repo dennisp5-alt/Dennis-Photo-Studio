@@ -87,6 +87,19 @@ public final class MainActivity extends Activity {
         // Free crop, normalised to the rotated + straightened frame. ratio is
         // the aspect lock used while dragging (0 = free).
         float cropLeft = 0f, cropTop = 0f, cropRight = 1f, cropBottom = 1f;
+        // v0.6.22 Auto Rescue (identity on photos that do not need it).
+        float rescueEv, rescueGamma = 1f, rescueBlack, rescueWhite = 1f;
+        float rescueCastR = 1f, rescueCastG = 1f, rescueCastB = 1f, rescueVibrance;
+        AutoRescue.Params rescue() {
+            AutoRescue.Params p = new AutoRescue.Params();
+            p.ev = rescueEv; p.midGamma = rescueGamma; p.black = rescueBlack; p.white = rescueWhite;
+            p.castR = rescueCastR; p.castG = rescueCastG; p.castB = rescueCastB; p.vibrance = rescueVibrance;
+            return p;
+        }
+        void setRescue(AutoRescue.Params p) {
+            rescueEv = p.ev; rescueGamma = p.midGamma; rescueBlack = p.black; rescueWhite = p.white;
+            rescueCastR = p.castR; rescueCastG = p.castG; rescueCastB = p.castB; rescueVibrance = p.vibrance;
+        }
         boolean autoOn() {
             return autoZones != null &&
                     autoZones.length == SpatialAuto64.SIZE * SpatialAuto64.SIZE;
@@ -119,6 +132,7 @@ public final class MainActivity extends Activity {
             d.autoHighlights = autoHighlights; d.autoShadows = autoShadows;
             d.cropLeft = cropLeft; d.cropTop = cropTop;
             d.cropRight = cropRight; d.cropBottom = cropBottom;
+            d.setRescue(rescue());
             return d;
         }
     }
@@ -1615,9 +1629,14 @@ public final class MainActivity extends Activity {
         previewWork.getQueue().clear();
         previewWork.execute(() -> {
             try {
-                SpatialAuto64.Scene scene = SpatialAuto64.analyse(original);
-                DetailEngine.Recommended details = DetailEngine.analyse(original);
-                AutoWhiteBalance.Estimate whiteBalance = AutoWhiteBalance.analyse(original);
+                // v0.6.22: rescue clearly under/over-exposed, flat, colour-cast or
+                // dull photos first; the familiar Scene Auto then reads the result.
+                AutoRescue.Params rescue = AutoRescue.analyse(original);
+                Bitmap analysed = rescue.active() ? AutoRescue.apply(original, rescue) : original;
+                SpatialAuto64.Scene scene = SpatialAuto64.analyse(analysed);
+                DetailEngine.Recommended details = DetailEngine.analyse(analysed);
+                AutoWhiteBalance.Estimate whiteBalance = AutoWhiteBalance.analyse(analysed);
+                if (analysed != original) analysed.recycle();
                 ui.post(() -> {
                     if (serial != generation.get() || previewSource != original) return;
                     checkpoint();
@@ -1640,6 +1659,7 @@ public final class MainActivity extends Activity {
                     edit.wbConfidence = whiteBalance.confidence;
                     edit.wbPicked=false;
                     edit.autoZones = scene.zones;
+                    edit.setRescue(rescue);
                     edit.autoLowKey = scene.protectedLowKey;
                     edit.autoAtmosphere = scene.atmosphereDescription;
                     edit.autoMacroProtected = scene.protectedMacroAtmosphere;
@@ -1653,8 +1673,10 @@ public final class MainActivity extends Activity {
                     activeAdjustment = "Auto Strength";
                     render();
                     drawControls();
+                    String rescued = rescue.describe();
                     Toast.makeText(this, String.format(Locale.US,
-                            "Scene Intelligent Auto: %+.2f EV · %s · WB %s",
+                            "Scene Intelligent Auto: %s%+.2f EV · %s · WB %s",
+                            rescued.isEmpty() ? "" : rescued + " · ",
                             scene.exposure,
                             scene.protectedImportantRegion ? "important region protected" :
                                     scene.protectedNearBlack ? "deep blacks preserved" :
@@ -2045,7 +2067,7 @@ public final class MainActivity extends Activity {
                     if (snapshot.autoOn()) {
                         status.setText(String.format(Locale.US,
                                 "AUTO 4-LAYER+  •  %+.2f EV%s  •  WB %s",
-                                snapshot.autoExposure,
+                                snapshot.autoExposure + snapshot.rescueEv * snapshot.autoStrength / 100f,
                                 snapshot.autoImportantRegion ? " · Important region" :
                                         snapshot.autoBlackProtected ? " · Deep blacks protected" :
                                         snapshot.autoMacroProtected ? " · 4×4 atmosphere protected" :
@@ -2137,9 +2159,10 @@ public final class MainActivity extends Activity {
     }
 
     private void about() {
-        new AlertDialog.Builder(this).setTitle("Photo Studio · v0.6.21")
+        new AlertDialog.Builder(this).setTitle("Photo Studio · v0.6.22")
                 .setMessage("Offline native Android editing.\n\n" +
                         "Auto: four-level 64×64 scene Auto with structural-region and deep-black safeguards and cautious Auto WB. " +
+                        "Auto Rescue first fixes photos that clearly need it — under-exposure up to +1.6 EV (moody low-key shots with real highlights are left alone), washed-out brights, flat or foggy contrast, colour casts measured on neutral areas only, and dull colour. Good photos are left as they were. " +
                         "Your tone sliders and Looks adjust on top of Auto with the same scale every time; a Look never removes Auto, detail or crop. " +
                         "Exposure and Warmth/Tint work in linear light, so blacks stay black. " +
                         "The neutral WB picker works with or without Auto.\n\n" +

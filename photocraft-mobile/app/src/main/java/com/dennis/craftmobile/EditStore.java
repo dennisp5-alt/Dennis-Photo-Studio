@@ -125,6 +125,10 @@ final class EditStore {
         o.put("wbConfidence", e.wbConfidence); o.put("wbPicked", e.wbPicked);
         o.put("cropL", e.cropLeft); o.put("cropT", e.cropTop);
         o.put("cropR", e.cropRight); o.put("cropB", e.cropBottom);
+        o.put("rEv", e.rescueEv); o.put("rGamma", e.rescueGamma);
+        o.put("rBlack", e.rescueBlack); o.put("rWhite", e.rescueWhite);
+        o.put("rCastR", e.rescueCastR); o.put("rCastG", e.rescueCastG); o.put("rCastB", e.rescueCastB);
+        o.put("rVib", e.rescueVibrance);
         return o;
     }
 
@@ -158,6 +162,10 @@ final class EditStore {
         e.wbConfidence = f(o, "wbConfidence", 0); e.wbPicked = o.optBoolean("wbPicked");
         e.cropLeft = f(o, "cropL", 0); e.cropTop = f(o, "cropT", 0);
         e.cropRight = f(o, "cropR", 1); e.cropBottom = f(o, "cropB", 1);
+        e.rescueEv = f(o, "rEv", 0); e.rescueGamma = f(o, "rGamma", 1);
+        e.rescueBlack = f(o, "rBlack", 0); e.rescueWhite = f(o, "rWhite", 1);
+        e.rescueCastR = f(o, "rCastR", 1); e.rescueCastG = f(o, "rCastG", 1); e.rescueCastB = f(o, "rCastB", 1);
+        e.rescueVibrance = f(o, "rVib", 0);
         return e;
     }
 }
